@@ -38,7 +38,7 @@ func _process(dt: float) -> void:
 	var scr: GameScreen = main.screen
 	match step:
 		0:
-			Net.I.join("127.0.0.1", port)
+			Net.I.join(OS.get_environment("NT_HOST") if OS.get_environment("NT_HOST") != "" else "127.0.0.1", port)
 			main._start(GameScreen.Mode.CLIENT, null)
 			step = 1
 		1:
