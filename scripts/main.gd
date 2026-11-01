@@ -1,15 +1,12 @@
 extends Node
-## Точка входа игры (её запускает лаунчер после обновления или сервер с ключом --server).
-## Меню: «Играть» (сервер), «Офлайн-проверка» (всё на телефоне), имя, графика.
+## Точка входа игры: её запускает лаунчер (режим в Engine meta "start_mode") или сервер с ключом --server.
 
 var screen: GameScreen
-var menu: Control
 var shot := ""
 var shot_frames := 0
 var shot_list: Array = []      # несколько кадров подряд: --shots=40,44,48
 var demo_yaw := NAN
 var demo_zoom := NAN
-var addr_edit: LineEdit
 
 func _ready() -> void:
 	Profile.load_profile()
@@ -48,14 +45,12 @@ func _ready() -> void:
 			nt.main = self
 			add_child(nt)
 			return
-	if demo == "menu":
-		_show_menu()
-	elif demo != "":
+	if demo != "":
 		_start(GameScreen.Mode.SOLO, Demo.create(demo))
 		screen.demo = demo
 		screen.hud.open_demo_panel(demo)
 	else:
-		_show_menu()
+		_start_from_launcher()
 
 func _process(_dt: float) -> void:
 	if shot != "":
@@ -92,83 +87,16 @@ func _notification(what: int) -> void:
 		elif screen == null:
 			get_tree().quit()
 
-# ================== МЕНЮ ==================
-func _btn(text: String, color: Color, cb: Callable) -> Button:
-	var b := Button.new()
-	b.text = text
-	b.custom_minimum_size = Vector2(320, 48)
-	b.add_theme_font_size_override("font_size", 17)
-	for st in ["normal", "hover", "pressed", "focus"]:
-		var s := StyleBoxFlat.new()
-		s.bg_color = color.lightened(0.12) if st == "pressed" else color
-		s.set_corner_radius_all(12)
-		b.add_theme_stylebox_override(st, s)
-	b.pressed.connect(cb)
-	return b
-
-func _clear_menu() -> void:
-	if menu != null:
-		menu.queue_free()
-		menu = null
-
-func _menu_base() -> VBoxContainer:
-	_clear_menu()
-	menu = Control.new()
-	menu.set_anchors_preset(Control.PRESET_FULL_RECT)
-	add_child(menu)
-	var bg := ColorRect.new()
-	bg.color = Color(0.09, 0.07, 0.11)
-	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
-	menu.add_child(bg)
-	var scroll := ScrollContainer.new()
-	scroll.set_anchors_preset(Control.PRESET_FULL_RECT)
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	menu.add_child(scroll)
-	var center := CenterContainer.new()
-	center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	center.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.add_child(center)
-	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 10)
-	center.add_child(col)
-	return col
-
-func _label(text: String, size: int, color: Color) -> Label:
-	var l := Label.new()
-	l.text = text
-	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	l.add_theme_font_size_override("font_size", size)
-	l.add_theme_color_override("font_color", color)
-	return l
-
-func _show_menu() -> void:
-	if screen != null:
-		screen.queue_free()
-		screen = null
-	if Net.I != null:
-		Net.I.close()
-	var col := _menu_base()
-	col.add_child(_label("UMWELT RP", 36, Color(0.98, 0.45, 0.62)))
-	col.add_child(_label("Америка, девяностые", 16, Color(0.45, 0.85, 0.85)))
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 8)
-	var nl := Label.new()
-	nl.text = "Имя персонажа:"
-	nl.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
-	row.add_child(nl)
-	var nick_edit := LineEdit.new()
-	nick_edit.text = Profile.nick
-	nick_edit.max_length = 24
-	nick_edit.custom_minimum_size = Vector2(220, 40)
-	nick_edit.text_changed.connect(func(t):
-		if t.strip_edges() != "":
-			Profile.nick = t.strip_edges()
-			Profile.save_profile())
-	row.add_child(nick_edit)
-	col.add_child(row)
-	col.add_child(_btn("Играть", Color(0.18, 0.42, 0.23), _play))
-	col.add_child(_btn("Офлайн-проверка", Color(0.23, 0.29, 0.35), func(): _start(GameScreen.Mode.SOLO, _solo_world())))
-	col.add_child(_label("Сервер: %s:%d   ·   сборка %s" % [Boot.host(), Boot.port(), Version.BUILD], 12, Color(0.45, 0.45, 0.45)))
+# ================== ЗАПУСК ==================
+## Режим выбирает лаунчер (кнопки «Играть» / «Офлайн-тест»), меню в самой игре нет
+func _start_from_launcher() -> void:
+	var mode := str(Engine.get_meta("start_mode", "solo"))
+	Engine.remove_meta("start_mode")
+	if mode == "server":
+		Net.I.join(Boot.host(), Boot.port())
+		_start(GameScreen.Mode.CLIENT, null)
+	else:
+		_start(GameScreen.Mode.SOLO, _solo_world())
 
 func _solo_world() -> GameState:
 	var g := Saves.load_game()
@@ -176,16 +104,14 @@ func _solo_world() -> GameState:
 		g = GameState.new_game(1990)
 	return g
 
-func _play() -> void:
-	Net.I.join(Boot.host(), Boot.port())
-	_start(GameScreen.Mode.CLIENT, null)
-
 func _start(mode: int, g: GameState) -> void:
-	_clear_menu()
 	screen = GameScreen.new()
 	add_child(screen)
 	screen.start(mode, g)
 	screen.exited.connect(_on_exit)
 
+## Выход из игры — обратно в лаунчер
 func _on_exit(_delete_save: bool) -> void:
-	_show_menu.call_deferred()
+	if Net.I != null:
+		Net.I.close()
+	get_tree().change_scene_to_file.call_deferred("res://launcher/launcher.tscn")

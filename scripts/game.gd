@@ -530,11 +530,6 @@ func unstick(pos: Vector2, r: float) -> Vector2:
 	return pos
 func _timing(p: Player, a: Dictionary) -> Array:
 	match a["a"]:
-		"interact":
-			var c: int = a["c"]
-			var tt := world.t_at(c) if c >= 0 and c < world.tiles.size() else -1
-			if GameWorld.is_container(tt) and not world.containers.has(c):
-				return [0.9, "Обыск"]
 		"wear":
 			return [1.2 if Items.def(a["id"])["slot"] in ["torso", "legs", "back"] else 0.6, "Надеваю"]
 		"unwear":
@@ -559,8 +554,6 @@ static func valid_action(a) -> bool:
 			return a.get("id") is String and Items.DEFS.has(a["id"])
 		"unwear":
 			return a.get("slot") in Items.SLOTS
-		"take", "put":
-			return (a.get("c") is int or a.get("c") is float) and a.get("id") is String and Items.DEFS.has(a["id"])
 	return false
 
 func _do_action(p: Player, a: Dictionary) -> void:
@@ -592,43 +585,12 @@ func _perform(p: Player, a: Dictionary) -> void:
 		"wear": _wear(p, a["id"])
 		"unwear": _unwear(p, a["slot"])
 		"drop":
+			# РП: выброшенная вещь пропадает (кучек на земле и обыска больше нет)
 			var n := p.count(a["id"])
-			if n <= 0:
-				return
-			p.take(a["id"], n)
-			var cell := _cell_at(p.pos)
-			if not world.containers.has(cell):
-				world.containers[cell] = []
-			Items.add_to(world.containers[cell], a["id"], n)
-			world.dirty_cont[cell] = true
-			world.vis_dirty[cell] = true
-		"take":
-			var c: int = a["c"]
-			if not near_cell(p, c, 1.8) or not world.containers.has(c):
-				return
-			var list: Array = world.containers[c]
-			var n := Items.count(list, a["id"])
-			if n <= 0:
-				return
-			Items.take(list, a["id"], n)
-			Items.add_to(p.inv, a["id"], n)
-			world.dirty_cont[c] = true
-			world.vis_dirty[c] = true
-			if p.weight() > p.max_weight():
-				msg(p.id, "Слишком тяжело — ты замедлился")
-		"put":
-			var c2: int = a["c"]
-			if not near_cell(p, c2, 1.8):
-				return
-			var n2 := p.count(a["id"])
-			if n2 <= 0:
-				return
-			p.take(a["id"], n2)
-			if not world.containers.has(c2):
-				world.containers[c2] = []
-			Items.add_to(world.containers[c2], a["id"], n2)
-			world.dirty_cont[c2] = true
-			world.vis_dirty[c2] = true
+			if n > 0:
+				if p.eq == a["id"]:
+					p.eq = ""
+				p.take(a["id"], n)
 
 func near_cell(p: Player, cell: int, dist: float) -> bool:
 	if cell < 0 or cell >= world.tiles.size():
@@ -737,16 +699,6 @@ func _interact(p: Player, cell: int) -> void:
 			msg(p.id, "Что-то мешает закрыть")
 		else:
 			world.set_idx(cell, GameWorld.DOOR)
-	elif tt == GameWorld.WINDOW:
-		world.set_idx(cell, GameWorld.WINDOW_BROKEN)
-		world.tile_hp.erase(cell)
-		if p.eq == "" and not p.wear.has("hands") and rnd.randf() < 0.5:
-			p.hp -= 5.0
-			msg(p.id, "Разбил окно рукой и порезался")
-		else:
-			msg(p.id, "Ты разбил окно")
-	elif GameWorld.is_container(tt) or world.containers.has(cell):
-		world.open_container(cell, rnd)
 
 ## Надеть: вещь уходит из рук в слот, прежняя вещь этого слота — обратно в инвентарь
 func _wear(p: Player, id: String) -> void:
@@ -807,9 +759,8 @@ func find_interact(p: Player) -> int:
 				if i < 0:
 					continue
 				tt = world.t_at(i)
-			var useful := GameWorld.is_container(tt) or tt == GameWorld.DOOR or tt == GameWorld.DOOR_OPEN or tt == GameWorld.WINDOW
-			if not useful and world.containers.has(i) and not world.containers[i].is_empty():
-				useful = true
+			# сейчас взаимодействовать можно только с дверями (обыск и разбивание окон из Zomboid убраны)
+			var useful := tt == GameWorld.DOOR or tt == GameWorld.DOOR_OPEN
 			if not useful:
 				continue
 			var c := Vector2(x + 0.5, y + 0.5)

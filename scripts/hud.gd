@@ -2,7 +2,7 @@ class_name Hud
 extends Control
 ## Интерфейс поверх 3D: мудлы, кнопки, джойстик, панели (вещи, лут, тело, пауза).
 
-enum Pnl { NONE, INV, LOOT, PAUSE, GEAR }
+enum Pnl { NONE, INV, PAUSE, GEAR }
 
 var screen: GameScreen
 var font: Font
@@ -19,14 +19,13 @@ var cam_last := 0.0
 var run_toggle := false
 
 var panel := Pnl.NONE
-var loot_cell := -1
 var selected := ""
 var scroll := [0.0, 0.0]
 var panel_id := -1
 var panel_down := Vector2.ZERO
 var panel_last_y := 0.0
 var panel_drag := false
-var loot_wait := 0.0
+var update_note := ""     # постоянное напоминание: вышла новая версия
 var msgs: Array = []      # [текст, время]
 
 # кнопки: центр и радиус
@@ -96,23 +95,8 @@ func tick(dt: float) -> void:
 		if msgs[i][1] <= 0.0:
 			msgs.remove_at(i)
 		i -= 1
-	var me := screen.me()
-	var g := screen.game
-	if panel == Pnl.LOOT and me != null:
-		if not g.near_cell(me, loot_cell, 2.2) or me.dead:
-			panel = Pnl.NONE
-		elif not g.world.containers.has(loot_cell) and GameWorld.is_container(g.world.t_at(loot_cell)):
-			if me.ta_act == null:
-				loot_wait += dt
-				if loot_wait > (1.0 if screen.mode == GameScreen.Mode.CLIENT else 0.4):
-					panel = Pnl.NONE
-			else:
-				loot_wait = 0.0
-		else:
-			loot_wait = 0.0
 
 func open_demo_panel(kind: String) -> void:
-	var g := screen.game
 	match kind:
 		"inv":
 			panel = Pnl.INV
@@ -120,13 +104,6 @@ func open_demo_panel(kind: String) -> void:
 		"gear":
 			panel = Pnl.GEAR
 			gear_slot = "back"
-		"loot":
-			var me := screen.me()
-			var c := g.find_interact(me)
-			if c >= 0:
-				g.world.open_container(c, g.rnd)
-				loot_cell = c
-				panel = Pnl.LOOT
 
 # ================== РАСКЛАДКА ==================
 func _safe() -> Rect2:
@@ -210,21 +187,8 @@ func _touch(type: int, id: int, p: Vector2) -> void:
 				_release()
 			elif _hit(b_run, p):
 				run_toggle = not run_toggle
-			elif _hit(b_interact, p):
-				var c := g.find_interact(me)
-				if c >= 0:
-					screen.act({"a": "interact", "c": c})
-					var tt := g.world.t_at(c)
-					if GameWorld.is_container(tt) or (g.world.containers.has(c) and not g.world.containers[c].is_empty() and not GameWorld.is_door_like(tt) and not GameWorld.is_window_like(tt)):
-						loot_cell = c
-						panel = Pnl.LOOT
-						scroll = [0.0, 0.0]
-						_release()
-				else:
-					loot_cell = g.world.idx(floori(me.pos.x), floori(me.pos.y))
-					panel = Pnl.LOOT
-					scroll = [0.0, 0.0]
-					_release()
+			elif _hit(b_interact, p) and screen.view.target >= 0:
+				screen.act({"a": "interact", "c": screen.view.target})
 			elif _hit(b_attack, p):
 				attack_id = id
 				attack_repeat = 0.0
@@ -263,7 +227,7 @@ func _panel_touch(g: GameState, me: GameState.Player, type: int, id: int, p: Vec
 				if p.distance_to(panel_down) > 10.0:
 					panel_drag = true
 				if panel_drag:
-					var col := 1 if (panel == Pnl.LOOT and p.x > panel_rect.get_center().x) else 0
+					var col := 0
 					scroll[col] = maxf(0.0, scroll[col] - (p.y - panel_last_y))
 				panel_last_y = p.y
 		2:
@@ -297,18 +261,6 @@ func _panel_tap(g: GameState, me: GameState.Player, p: Vector2) -> void:
 				elif btn_b.has_point(p):
 					screen.act({"a": "drop", "id": selected})
 					selected = ""
-		Pnl.LOOT:
-			var left := _col_rect(0, 2)
-			var right := _col_rect(1, 2)
-			var cont: Array = g.world.containers.get(loot_cell, [])
-			if left.has_point(p):
-				var i := _row_at(left, scroll[0], p.y, cont.size())
-				if i >= 0:
-					screen.act({"a": "take", "c": loot_cell, "id": cont[i]["id"]})
-			elif right.has_point(p):
-				var j := _row_at(right, scroll[1], p.y, me.inv.size())
-				if j >= 0:
-					screen.act({"a": "put", "c": loot_cell, "id": me.inv[j]["id"]})
 		Pnl.GEAR:
 			for gr in gear_rects:
 				if gr[0].has_point(p):
@@ -371,7 +323,6 @@ func _draw() -> void:
 	_hud(g, me)
 	match panel:
 		Pnl.INV: _draw_inv(me)
-		Pnl.LOOT: _draw_loot(g, me)
 		Pnl.PAUSE: _draw_pause()
 		Pnl.GEAR: _draw_gear(me)
 	if me.dead:
@@ -466,8 +417,14 @@ func _hud(g: GameState, me: GameState.Player) -> void:
 	_rr(Rect2(W / 2 - tw / 2, 12, tw, 30), 15, Color(0.055, 0.07, 0.085, 0.6))
 	Icons.glyph(self, "moon" if night else "sun", Vector2(W / 2 - tw / 2 + 18, 27), 10, Color(0.72, 0.78, 0.94) if night else Color(0.94, 0.78, 0.31))
 	_text(Vector2(W / 2 + 10, 32), clock, 14, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER)
-	# сообщения
+	# напоминание об обновлении — под часами, пока не перезапустят игру
 	var ty := 66.0
+	if update_note != "":
+		var uw := _tw(update_note, 12) + 24
+		_rr(Rect2(W / 2 - uw / 2, 48, uw, 22), 11, Color(0.55, 0.38, 0.12, 0.85))
+		_text(Vector2(W / 2, 63), update_note, 12, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER)
+		ty = 92.0
+	# сообщения
 	for msg in msgs:
 		var a := minf(1.0, msg[1])
 		var mw := _tw(msg[0], 13) + 24
@@ -489,16 +446,9 @@ func _hud(g: GameState, me: GameState.Player) -> void:
 		str(me.count("ammo")) if w["kind"] == Items.Kind.GUN else "", "Толчок" if wid == "fists" else w["name"])
 	var target := screen.view.target
 	var tt := g.world.t_at(target) if target >= 0 else -1
-	var hint := "Обыскать"
-	if target < 0: hint = "Под ногами"
-	elif tt == GameWorld.DOOR: hint = "Открыть"
-	elif tt == GameWorld.DOOR_OPEN: hint = "Закрыть"
-	elif tt == GameWorld.WINDOW: hint = "Разбить окно"
-	elif GameWorld.is_car(tt): hint = "Багажник"
-	var ig := "hand"
-	if tt == GameWorld.DOOR or tt == GameWorld.DOOR_OPEN: ig = "door"
-	elif target >= 0 and tt != GameWorld.WINDOW: ig = "search"
-	_btn(b_interact, Color(0.16, 0.35, 0.53, 0.7), ig, "", "", hint)
+	# кнопка действия видна только рядом с дверью
+	if target >= 0 and (tt == GameWorld.DOOR or tt == GameWorld.DOOR_OPEN):
+		_btn(b_interact, Color(0.16, 0.35, 0.53, 0.7), "door", "", "", "Открыть" if tt == GameWorld.DOOR else "Закрыть")
 	_btn(b_run, Color(0.78, 0.6, 0.13, 0.82) if run_toggle else Color(0.19, 0.2, 0.22, 0.53), "run", "", "", "Бег" if run_toggle else "")
 	_btn(b_inv, Color(0.19, 0.2, 0.22, 0.6), "bag", "", "", "")
 	_btn(b_pause, Color(0.19, 0.2, 0.22, 0.6), "pause", "", "", "")
@@ -610,22 +560,6 @@ func _draw_inv(me: GameState.Player) -> void:
 	_rr(btn_b, 10, Color(0.42, 0.24, 0.24))
 	_text(btn_b.get_center() + Vector2(0, 5), "Выбросить", 15, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER)
 
-func _draw_loot(g: GameState, me: GameState.Player) -> void:
-	var tt := g.world.t_at(loot_cell)
-	var names := {GameWorld.FRIDGE: "Холодильник", GameWorld.COUNTER: "Кухонный шкаф", GameWorld.WARDROBE: "Гардероб", GameWorld.SHELF: "Полка",
-		GameWorld.MEDCAB: "Аптечка", GameWorld.LOCKER: "Оружейный шкаф", GameWorld.STORESHELF: "Стеллаж", GameWorld.CAR: "Багажник", GameWorld.CAR_V: "Багажник"}
-	_panel_bg("%s  ⇄  Инвентарь" % names.get(tt, "На земле"))
-	var left := _col_rect(0, 2)
-	var right := _col_rect(1, 2)
-	_text(left.position + Vector2(0, -6), "Нажми — взять", 11, Color(0.56, 0.56, 0.56))
-	_text(right.position + Vector2(0, -6), "Нажми — положить сюда", 11, Color(0.56, 0.56, 0.56))
-	var cont: Array = g.world.containers.get(loot_cell, [])
-	scroll[0] = minf(scroll[0], maxf(0.0, cont.size() * ROW_H - left.size.y))
-	scroll[1] = minf(scroll[1], maxf(0.0, me.inv.size() * ROW_H - right.size.y))
-	var empty := "Обыскиваю…" if (not g.world.containers.has(loot_cell) and GameWorld.is_container(tt)) else "Пусто"
-	_item_list(left, cont, 0, "", empty)
-	_item_list(right, me.inv, 1, "", "Пусто")
-
 func _draw_pause() -> void:
 	_panel_bg("Пауза" if screen.mode == GameScreen.Mode.SOLO else "Меню")
 	var bw := minf(panel_rect.size.x * 0.6, 360.0)
@@ -640,7 +574,7 @@ func _draw_pause() -> void:
 	btn_c = Rect2(cx - bw / 2, y + 132, bw, 50)
 	_rr(btn_c, 10, Color(0.26, 0.29, 0.34))
 	_text(btn_c.get_center() + Vector2(0, 6), "Графика: низкая" if Profile.low_gfx else "Графика: высокая", 16, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER)
-	_text(Vector2(cx, y + 132 + 80), "Игра сохраняется сама каждую минуту", 12, Color(0.56, 0.56, 0.56), HORIZONTAL_ALIGNMENT_CENTER)
+	_text(Vector2(cx, y + 132 + 80), "Umwelt RP · версия 0.%s" % Version.BUILD, 12, Color(0.56, 0.56, 0.56), HORIZONTAL_ALIGNMENT_CENTER)
 
 # ---------- экран «Тело» ----------
 

@@ -23,7 +23,6 @@ func _ready() -> void:
 	test_remote_climb_anywhere()
 	test_remote_actions()
 	test_saves()
-	test_dupe()
 	test_world_gen()
 	test_remote_door()
 	test_remote_climb_host_driven()
@@ -150,15 +149,26 @@ func test_remote_actions() -> void:
 	g.actions.append([f.id, {}])
 	g.update(0.016)
 	check("Сеть: действия с несуществующими предметами/клетками не ломают сервер и ничего не создают", f.inv.is_empty(), "инвентарь: %s" % str(f.inv))
-	var far := -1
+	# механики Zomboid убраны: шкаф не обыскивается, окно не разбивается, даже если попросить вплотную
+	var fr := -1
+	var win := -1
 	for i in g.world.tiles.size():
-		if g.world.t_at(i) == W.FRIDGE and Vector2(i % 100, i / 100).distance_to(f.pos) > 10.0:
-			far = i
-			break
-	g.world.containers[far] = [{"id": "canned", "n": 5}]
-	g.actions.append([f.id, {"a": "take", "c": far, "id": "canned"}])
-	g.update(0.016)
-	check("Сеть: нельзя взять предмет из холодильника на другом конце карты", f.count("canned") == 0, "взято %d" % f.count("canned"))
+		if fr < 0 and g.world.t_at(i) == W.FRIDGE:
+			fr = i
+		if win < 0 and g.world.t_at(i) == W.WINDOW:
+			win = i
+	for c in [fr, win]:
+		var cc := Vector2(c % 100 + 0.5, c / 100 + 0.5)
+		for k in 4:
+			var n := cc + Vector2(GameWorld.DX4[k], GameWorld.DY4[k])
+			if not g.world.circle_blocked(n.x, n.y, 0.3):
+				f.pos = n
+				break
+		g.actions.append([f.id, {"a": "interact", "c": c}])
+		for i in 100:
+			g.update(0.02)
+	check("РП: шкафы не обыскиваются, окна не разбиваются (механики Zomboid убраны)", not g.world.containers.has(fr) and g.world.t_at(win) == W.WINDOW and f.inv.is_empty(),
+		"шкаф открыт: %s, окно: %d" % [g.world.containers.has(fr), g.world.t_at(win)])
 
 func test_saves() -> void:
 	var g := _game()
@@ -198,29 +208,6 @@ func _try_load(g: GameState, d: Dictionary) -> bool:
 			return false
 	g.load_data(d)
 	return true
-
-func test_dupe() -> void:
-	var g := _game()
-	var p: GameState.Player = g.players[0]
-	var cell := -1
-	for i in g.world.tiles.size():
-		if g.world.t_at(i) == W.FRIDGE:
-			cell = i
-			break
-	var fc := Vector2(cell % 100 + 0.5, cell / 100 + 0.5)
-	for k in 4:
-		var n := fc + Vector2(GameWorld.DX4[k], GameWorld.DY4[k])
-		if not g.world.circle_blocked(n.x, n.y, 0.3):
-			p.pos = n
-			break
-	g.world.containers[cell] = [{"id": "ammo", "n": 10}]
-	p.inv = []
-	for k in 20:
-		g.actions.append([0, {"a": "take", "c": cell, "id": "ammo"}])
-		g.actions.append([0, {"a": "put", "c": cell, "id": "ammo"}])
-	g.update(0.016)
-	var total := p.count("ammo") + Items.count(g.world.containers[cell], "ammo")
-	check("Инвентарь: быстрое перекладывание не размножает предметы", total == 10, "стало %d вместо 10" % total)
 
 func test_world_gen() -> void:
 	var a := GameState.new_game(4242)

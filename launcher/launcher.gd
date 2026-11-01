@@ -1,6 +1,7 @@
 extends Control
-## Лаунчер: первая сцена APK. Берёт манифест последней сборки с GitHub Releases (HTTPS),
-## докачивает изменившиеся пакеты игры, проверяет их SHA-256, подключает и запускает игру.
+## Лаунчер — стартовый экран игры (первая сцена APK). На экране только название, версия и две кнопки.
+## В фоне: берёт манифест последней сборки с GitHub Releases (HTTPS), докачивает изменившиеся пакеты,
+## проверяет SHA-256, подключает их и запускает игру в выбранном режиме.
 ##
 ## ВАЖНО: этот файл обновляется только вместе с APK. Он НЕ должен использовать классы игры
 ## (Boot, Version, Net и т.д.) — они остались бы в памяти старыми после подключения пакета.
@@ -9,15 +10,14 @@ extends Control
 const APK_CODE := 1                       # подставляет CI; сравнивается с min_apk из манифеста
 const UPDATE_URL := "https://github.com/C0BecTb11/Umwelt-RP/releases/download/latest/"
 const PCK_DIR := "user://pck/"
-const STATE := "user://pck/state.json"    # что уже скачано и проверено: имя → sha256
+const STATE := "user://pck/state.json"    # что скачано и проверено: имя файла → sha256, "build" → номер
 
+var ver_label: Label
 var status: Label
-var detail: Label
 var bar: ProgressBar
 var play_btn: Button
-var retry_btn: Button
+var solo_btn: Button
 var apk_btn: Button
-var news: Label
 
 var manifest := {}
 var local := {}
@@ -26,14 +26,19 @@ var queue: Array = []
 var cur := {}
 var total_bytes := 0
 var done_bytes := 0
-var ready_to_play := false
-var offline := false
+var busy := true
 
 func _ready() -> void:
 	_build_ui()
 	DirAccess.make_dir_recursive_absolute(PCK_DIR)
 	var t = JSON.parse_string(FileAccess.get_file_as_string(STATE)) if FileAccess.file_exists(STATE) else null
 	local = t if t is Dictionary else {}
+	# новое приложение уже содержит игру новее скачанного пакета — старый пакет не подключаем
+	if int(str(local.get("build", "0"))) < APK_CODE:
+		for n in local.keys():
+			if str(n).ends_with(".pck"):
+				DirAccess.remove_absolute(PCK_DIR + str(n))
+		local = {}
 	http = HTTPRequest.new()
 	http.timeout = 30.0
 	http.max_redirects = 8          # файлы релизов GitHub отдаёт через перенаправление
@@ -43,6 +48,12 @@ func _ready() -> void:
 		if a in ["--no-update", "--server", "--audit"] or a.begins_with("--demo=") or a.begins_with("--nettest="):
 			get_tree().change_scene_to_file.call_deferred("res://scenes/main.tscn")
 			return
+	_show_version()
+	if Engine.has_meta("pack_build"):
+		# вернулись из игры: пакеты уже в памяти, новое обновление встанет только после перезапуска
+		_set_busy(false)
+		_check_only()
+		return
 	_check()
 
 # ---------- интерфейс ----------
@@ -56,31 +67,35 @@ func _build_ui() -> void:
 	center.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(center)
 	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 12)
-	col.custom_minimum_size = Vector2(420, 0)
+	col.add_theme_constant_override("separation", 14)
+	col.custom_minimum_size = Vector2(360, 0)
 	center.add_child(col)
-	col.add_child(_lbl("UMWELT RP", 40, Color(0.98, 0.45, 0.62)))
-	col.add_child(_lbl("Америка, девяностые", 16, Color(0.45, 0.85, 0.85)))
-	news = _lbl("", 13, Color(0.75, 0.75, 0.75))
-	news.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	col.add_child(news)
-	status = _lbl("Проверяю обновления…", 16, Color.WHITE)
-	col.add_child(status)
-	bar = ProgressBar.new()
-	bar.custom_minimum_size = Vector2(420, 18)
-	bar.show_percentage = false
-	col.add_child(bar)
-	detail = _lbl("", 12, Color(0.55, 0.55, 0.55))
-	col.add_child(detail)
-	play_btn = _btn("Играть", Color(0.18, 0.42, 0.23), _launch)
-	play_btn.disabled = true
+	col.add_child(_lbl("UMWELT RP", 44, Color(0.98, 0.45, 0.62)))
+	col.add_child(_gap(10))
+	play_btn = _btn("Играть", Color(0.18, 0.42, 0.23), _launch.bind("server"))
 	col.add_child(play_btn)
-	retry_btn = _btn("Повторить", Color(0.3, 0.3, 0.34), _check)
-	retry_btn.visible = false
-	col.add_child(retry_btn)
-	apk_btn = _btn("Скачать новую версию приложения", Color(0.55, 0.38, 0.12), func(): OS.shell_open(str(manifest.get("apk_url", UPDATE_URL + "umwelt.apk"))))
+	solo_btn = _btn("Офлайн-тест", Color(0.23, 0.29, 0.35), _launch.bind("solo"))
+	col.add_child(solo_btn)
+	apk_btn = _btn("Скачать новую версию", Color(0.55, 0.38, 0.12), func(): OS.shell_open(str(manifest.get("apk_url", UPDATE_URL + "umwelt.apk"))))
 	apk_btn.visible = false
 	col.add_child(apk_btn)
+	bar = ProgressBar.new()
+	bar.custom_minimum_size = Vector2(360, 8)
+	bar.show_percentage = false
+	bar.visible = false
+	col.add_child(bar)
+	status = _lbl("", 13, Color(0.95, 0.8, 0.45))
+	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	col.add_child(status)
+	# версия — в углу, мелко
+	ver_label = Label.new()
+	ver_label.add_theme_font_size_override("font_size", 12)
+	ver_label.add_theme_color_override("font_color", Color(0.45, 0.45, 0.5))
+	ver_label.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	ver_label.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	ver_label.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	ver_label.position -= Vector2(16, 12)
+	add_child(ver_label)
 
 func _lbl(t: String, size: int, c: Color) -> Label:
 	var l := Label.new()
@@ -90,27 +105,33 @@ func _lbl(t: String, size: int, c: Color) -> Label:
 	l.add_theme_color_override("font_color", c)
 	return l
 
+func _gap(h: int) -> Control:
+	var c := Control.new()
+	c.custom_minimum_size = Vector2(0, h)
+	return c
+
 func _btn(t: String, c: Color, cb: Callable) -> Button:
 	var b := Button.new()
 	b.text = t
-	b.custom_minimum_size = Vector2(320, 48)
-	b.add_theme_font_size_override("font_size", 17)
+	b.custom_minimum_size = Vector2(360, 52)
+	b.add_theme_font_size_override("font_size", 18)
 	for st in ["normal", "hover", "pressed", "focus", "disabled"]:
 		var s := StyleBoxFlat.new()
-		s.bg_color = c.darkened(0.5) if st == "disabled" else (c.lightened(0.12) if st == "pressed" else c)
+		s.bg_color = c.darkened(0.55) if st == "disabled" else (c.lightened(0.12) if st == "pressed" else c)
 		s.set_corner_radius_all(12)
 		b.add_theme_stylebox_override(st, s)
 	b.pressed.connect(cb)
 	return b
 
-func _fail(msg: String) -> void:
-	status.text = msg
-	retry_btn.visible = true
-	# уже скачанная и проверенная версия есть — можно играть с ней
-	if not local.is_empty():
-		offline = true
-		play_btn.disabled = false
-		detail.text = "Можно играть с уже скачанной версией"
+func _set_busy(v: bool) -> void:
+	busy = v
+	play_btn.disabled = v
+	solo_btn.disabled = v
+
+## Версия игры, которая запустится: скачанная сборка или встроенная в APK
+func _show_version() -> void:
+	var b := str(local.get("build", APK_CODE))
+	ver_label.text = "версия 0.%s" % b
 
 # ---------- проверка обновлений ----------
 func _fetch(url: String) -> PackedByteArray:
@@ -122,25 +143,29 @@ func _fetch(url: String) -> PackedByteArray:
 		return PackedByteArray()
 	return r[3]
 
-func _check() -> void:
-	retry_btn.visible = false
-	apk_btn.visible = false
-	status.text = "Проверяю обновления…"
-	bar.value = 0
+func _load_manifest() -> bool:
 	var body := await _fetch(UPDATE_URL + "manifest.json")
 	if body.is_empty():
-		_fail("Сервер обновлений недоступен")
-		return
+		return false
 	var m = JSON.parse_string(body.get_string_from_utf8())
 	if not (m is Dictionary) or not (m.get("files") is Array):
-		_fail("Неверный формат обновления")
-		return
+		return false
 	manifest = m
-	news.text = str(manifest.get("news", ""))
+	return true
+
+func _check() -> void:
+	_set_busy(true)
+	status.text = ""
+	if not await _load_manifest():
+		# нет интернета или GitHub недоступен — играем тем, что есть
+		status.text = "Не удалось проверить обновления"
+		_set_busy(false)
+		return
 	if APK_CODE < int(manifest.get("min_apk", 0)):
-		status.text = "Нужна новая версия приложения"
-		detail.text = "Скачай и установи её поверх этой — персонаж сохранится"
+		status.text = "Вышла новая версия приложения — установи её поверх этой, персонаж сохранится"
 		apk_btn.visible = true
+		play_btn.disabled = true          # со старым приложением сервер всё равно не пустит
+		solo_btn.disabled = false
 		return
 	queue.clear()
 	total_bytes = 0
@@ -153,34 +178,43 @@ func _check() -> void:
 			continue
 		queue.append(f)
 		total_bytes += int(f.get("size", 0))
+	if not queue.is_empty():
+		bar.visible = true
 	_next()
+
+## Вернулись из игры: только узнать, не вышло ли что-то новее запущенного
+func _check_only() -> void:
+	if not await _load_manifest():
+		return
+	if str(manifest.get("build", "")) != str(Engine.get_meta("pack_build", "")):
+		status.text = "Вышло обновление 0.%s — закрой и открой игру, чтобы установить" % str(manifest["build"])
 
 func _next() -> void:
 	if queue.is_empty():
+		bar.visible = false
+		local["build"] = str(manifest.get("build", local.get("build", "")))
 		_save_state()
-		status.text = "Готово — версия %s" % str(manifest.get("build", "?"))
-		bar.value = 100
-		detail.text = ""
-		play_btn.disabled = false
-		ready_to_play = true
+		_show_version()
+		status.text = ""
+		_set_busy(false)
 		return
 	cur = queue.pop_front()
 	var name := str(cur["name"])
-	status.text = "Загружаю обновление…"
+	status.text = "Загружаю обновление 0.%s…" % str(manifest.get("build", "?"))
 	http.download_file = PCK_DIR + name + ".part"
 	var err := http.request(UPDATE_URL + name)
 	if err != OK:
-		_fail("Не удалось начать загрузку")
+		_fail_download()
 		return
 	var r: Array = await http.request_completed
 	http.download_file = ""
 	if r[0] != HTTPRequest.RESULT_SUCCESS or r[1] != 200:
-		_fail("Загрузка прервалась — проверь интернет")
+		_fail_download()
 		return
 	var part := PCK_DIR + name + ".part"
 	if _sha256(part) != str(cur.get("sha256", "")):
 		DirAccess.remove_absolute(part)
-		_fail("Файл скачался с ошибкой — попробуй ещё раз")
+		_fail_download()
 		return
 	var dst := PCK_DIR + name
 	if FileAccess.file_exists(dst):
@@ -191,11 +225,17 @@ func _next() -> void:
 	done_bytes += int(cur.get("size", 0))
 	_next()
 
+func _fail_download() -> void:
+	bar.visible = false
+	status.text = "Обновление не скачалось — проверь интернет и перезапусти игру"
+	# с уже скачанной версией офлайн-тест работает; на сервер старая версия не пустит
+	_set_busy(false)
+
 func _process(_dt: float) -> void:
 	if http != null and http.download_file != "" and total_bytes > 0:
 		var got := done_bytes + http.get_downloaded_bytes()
 		bar.value = 100.0 * got / total_bytes
-		detail.text = "%.1f из %.1f МБ" % [got / 1048576.0, total_bytes / 1048576.0]
+		status.text = "Загружаю обновление 0.%s… %.1f из %.1f МБ" % [str(manifest.get("build", "?")), got / 1048576.0, total_bytes / 1048576.0]
 
 func _sha256(path: String) -> String:
 	var f := FileAccess.open(path, FileAccess.READ)
@@ -213,22 +253,30 @@ func _save_state() -> void:
 		f.store_string(JSON.stringify(local))
 
 # ---------- запуск ----------
-func _launch() -> void:
-	var files: Array = manifest.get("files", []) if not offline else []
-	if offline or files.is_empty():
-		for n in local:
-			files.append({"name": n})
-	for f in files:
-		var p := PCK_DIR + str(f["name"])
-		if FileAccess.file_exists(p) and local.has(str(f["name"])):
-			if not ProjectSettings.load_resource_pack(p, true):
-				status.text = "Пакет игры повреждён — удаляю, перезапусти"
-				local.erase(str(f["name"]))
+func _launch(mode: String) -> void:
+	if busy:
+		return
+	if not Engine.has_meta("pack_build"):
+		for name in local:
+			if not str(name).ends_with(".pck"):
+				continue
+			var p := PCK_DIR + str(name)
+			if FileAccess.file_exists(p) and not ProjectSettings.load_resource_pack(p, true):
+				status.text = "Пакет игры повреждён — перезапусти игру, он скачается заново"
+				local.erase(name)
 				_save_state()
 				return
+		Engine.set_meta("pack_build", str(local.get("build", APK_CODE)))
 	var srv: Dictionary = manifest.get("server", {}) if manifest.get("server") is Dictionary else {}
 	if srv.has("host"):
 		Engine.set_meta("server_host", str(srv["host"]))
 	if srv.has("port"):
 		Engine.set_meta("server_port", int(srv["port"]))
+	if manifest.has("build"):
+		Engine.set_meta("latest_build", str(manifest["build"]))
+	Engine.set_meta("start_mode", mode)
 	get_tree().change_scene_to_file("res://scenes/main.tscn")
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
+		get_tree().quit()

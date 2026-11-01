@@ -33,6 +33,41 @@ func start(m: int, g: GameState) -> void:
 	if game != null:
 		_make_view()
 
+# ---------- напоминание об обновлении ----------
+const MANIFEST_URL := "https://github.com/C0BecTb11/Umwelt-RP/releases/download/latest/manifest.json"
+var upd_http: HTTPRequest
+var upd_t := 5.0
+
+func _check_update(dt: float) -> void:
+	if demo != "":
+		return
+	if hud.update_note == "" and Engine.has_meta("latest_build") and str(Engine.get_meta("latest_build")) != Version.BUILD:
+		_note_update(str(Engine.get_meta("latest_build")))
+	upd_t -= dt
+	if upd_t > 0.0:
+		return
+	upd_t = 180.0          # раз в 3 минуты
+	if upd_http == null:
+		upd_http = HTTPRequest.new()
+		upd_http.timeout = 20.0
+		upd_http.max_redirects = 8
+		add_child(upd_http)
+		upd_http.request_completed.connect(func(res, code, _h, body):
+			if res != HTTPRequest.RESULT_SUCCESS or code != 200:
+				return
+			var m = JSON.parse_string(body.get_string_from_utf8())
+			if m is Dictionary and m.has("build") and str(m["build"]) != Version.BUILD:
+				_note_update(str(m["build"])))
+	if upd_http.get_http_client_status() == HTTPClient.STATUS_DISCONNECTED:
+		upd_http.request(MANIFEST_URL + "?t=%d" % Time.get_unix_time_from_system())
+
+func _note_update(b: String) -> void:
+	if b.is_valid_int() and Version.BUILD.is_valid_int() and int(b) <= int(Version.BUILD):
+		return
+	if hud.update_note == "":
+		hud.add_msg("Вышло обновление 0.%s" % b)
+	hud.update_note = "Доступно обновление 0.%s — закрой и открой игру, чтобы установить" % b
+
 func _make_view() -> void:
 	view = WorldView.new()
 	add_child(view)
@@ -74,6 +109,7 @@ var connect_t := 0.0
 
 func _process(dt: float) -> void:
 	dt = minf(dt, 0.1)
+	_check_update(dt)
 	_handle_net()
 	if game == null and mode == Mode.CLIENT and not lost:
 		connect_t += dt
