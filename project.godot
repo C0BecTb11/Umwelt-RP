@@ -9,6 +9,7 @@ config/features=PackedStringArray("4.4", "GL Compatibility")
 config/icon="res://icon.png"
 config/quit_on_go_back=false
 run/low_processor_mode=false
+run/flush_stdout_on_print=true
 
 [display]
 
