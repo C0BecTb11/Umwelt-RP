@@ -1,0 +1,171 @@
+name: Build
+
+# Каждый пуш в main: автотесты → пакет игры, сервер, (APK — только если менялся лаунчер/движок) → релиз «latest».
+# Лаунчер на телефонах берёт обновления из релиза, сервер на Hetzner — тоже (таймер umwelt-update).
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+  schedule:
+    - cron: "17 4 * * 1"   # раз в неделю: не даёт кэшу с ключом подписи APK протухнуть (7 дней без обращений)
+
+permissions:
+  contents: write
+
+env:
+  GODOT_VERSION: 4.4.1
+  REPO_URL: https://github.com/${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Cache Godot
+        id: godot-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/godot
+            ~/.local/share/godot/export_templates
+          key: godot-${{ env.GODOT_VERSION }}-linux
+
+      - name: Download Godot and export templates
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/godot ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+          cd ~/godot
+          wget -q https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip
+          unzip -q Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip && mv Godot_v${GODOT_VERSION}-stable_linux.x86_64 godot && rm *.zip
+          wget -q https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_export_templates.tpz
+          unzip -q Godot_v${GODOT_VERSION}-stable_export_templates.tpz
+          mv templates/* ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable/
+          rm -rf templates *.tpz
+
+      # Ключ подписи APK. Потеряется — новые APK нельзя будет поставить поверх старых (см. docs/РУКОВОДСТВО.md)
+      - name: Restore signing key
+        id: key-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/keystore
+          key: umwelt-android-keystore-v1
+
+      - name: Create signing key (first run only)
+        if: steps.key-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/keystore
+          PASS=$(openssl rand -base64 18 | tr -d '/+=')
+          echo -n "$PASS" > ~/keystore/pass
+          keytool -genkeypair -keystore ~/keystore/release.keystore -alias umwelt -keyalg RSA -keysize 2048 \
+            -validity 20000 -storepass "$PASS" -keypass "$PASS" -dname "CN=Umwelt RP, O=C0BecTb11, C=PL"
+
+      - name: Editor settings
+        run: |
+          mkdir -p ~/.config/godot
+          for f in editor_settings-4.4.tres editor_settings-4.tres; do
+            printf '[gd_resource type="EditorSettings" format=3]\n\n[resource]\nexport/android/android_sdk_path = "%s"\nexport/android/java_sdk_path = "%s"\n' "$ANDROID_SDK_ROOT" "$JAVA_HOME" > ~/.config/godot/$f
+          done
+
+      - name: Version and APK decision
+        id: ver
+        run: |
+          BUILD=${{ github.run_number }}
+          sed -i "s/^const BUILD := .*/const BUILD := \"$BUILD\"/" scripts/version.gd
+          # «Отпечаток» того, что живёт только в APK: лаунчер, настройки проекта, список class_name, версия Godot
+          HASH=$( (cat launcher/* project.godot export_presets.cfg; grep -h "^class_name" scripts/*.gd | sort; echo $GODOT_VERSION) | sha256sum | cut -c1-16)
+          curl -fsSL "$REPO_URL/releases/download/latest/manifest.json" -o prev.json || echo '{}' > prev.json
+          PREV_HASH=$(python3 -c 'import json; print(json.load(open("prev.json")).get("apk_hash",""))')
+          PREV_MIN=$(python3 -c 'import json; print(json.load(open("prev.json")).get("min_apk",0))')
+          if [ "$HASH" = "$PREV_HASH" ] && [ "$PREV_MIN" != "0" ]; then
+            echo "APK не менялся — оставляю прежний (min_apk=$PREV_MIN)"
+            echo "apk=false" >> $GITHUB_OUTPUT; MIN=$PREV_MIN
+          else
+            echo "APK нужно пересобрать (код $BUILD)"
+            echo "apk=true" >> $GITHUB_OUTPUT; MIN=$BUILD
+            sed -i "s/^const APK_CODE := .*/const APK_CODE := $BUILD/" launcher/launcher.gd
+            sed -i "s/^version\/code=.*/version\/code=$BUILD/; s/^version\/name=.*/version\/name=\"0.$BUILD\"/" export_presets.cfg
+          fi
+          echo "build=$BUILD" >> $GITHUB_OUTPUT
+          echo "min=$MIN" >> $GITHUB_OUTPUT
+          echo "hash=$HASH" >> $GITHUB_OUTPUT
+
+      - name: Import
+        run: ~/godot/godot --headless --path . --import 2>&1 | tail -3 || true
+
+      - name: Tests
+        run: |
+          set -o pipefail
+          timeout 300 ~/godot/godot --headless --path . -- --audit 2>&1 | grep -vE "JSON|json.cpp" | tee audit.log
+          grep -q "ИТОГО: .* 0 ошибок" audit.log
+
+      - name: Export game pack, server, APK
+        run: |
+          set -o pipefail
+          mkdir -p build/android build/server build/release
+          ~/godot/godot --headless --path . --export-pack "Android" build/release/game.pck 2>&1 | tail -5
+          ~/godot/godot --headless --path . --export-release "Linux Server" build/server/umwelt-server.x86_64 2>&1 | tail -5
+          (cd build/server && zip -q -r ../release/umwelt-server.zip .)
+          if [ "${{ steps.ver.outputs.apk }}" = "true" ]; then
+            export GODOT_ANDROID_KEYSTORE_RELEASE_PATH=~/keystore/release.keystore
+            export GODOT_ANDROID_KEYSTORE_RELEASE_USER=umwelt
+            export GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD=$(cat ~/keystore/pass)
+            ~/godot/godot --headless --path . --export-release "Android" build/release/umwelt.apk 2>&1 | tee build.log | tail -5
+            test -s build/release/umwelt.apk
+          fi
+          test -s build/release/game.pck
+          test -s build/release/umwelt-server.zip
+          ls -la build/release
+
+      - name: Manifest
+        run: |
+          python3 - <<PY
+          import json, hashlib, os
+          def info(p):
+              d = open(p, "rb").read()
+              return {"size": len(d), "sha256": hashlib.sha256(d).hexdigest()}
+          news = open("NEWS.md", encoding="utf-8").read().strip().split("\n")[0] if os.path.exists("NEWS.md") else ""
+          m = {
+            "build": "${{ steps.ver.outputs.build }}",
+            "min_apk": int("${{ steps.ver.outputs.min }}"),
+            "apk_hash": "${{ steps.ver.outputs.hash }}",
+            "apk_url": "$REPO_URL/releases/download/latest/umwelt.apk",
+            "server": {"host": "2.31.45.237", "port": 7777},
+            "files": [dict(name="game.pck", **info("build/release/game.pck"))],
+            "server_zip": info("build/release/umwelt-server.zip"),
+            "news": news,
+          }
+          json.dump(m, open("build/release/manifest.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+          print(json.dumps(m, ensure_ascii=False, indent=1))
+          PY
+
+      - name: Push build log on failure
+        if: failure()
+        run: |
+          mkdir logout && cp build.log audit.log logout/ 2>/dev/null || echo none > logout/none.log
+          cd logout && git init -q -b buildlog && git config user.name gha && git config user.email gha@users.noreply.github.com
+          git add -A && git commit -qm log && git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" buildlog
+
+      # Сначала пакеты, последним — манифест: телефоны и сервер видят новую сборку, когда файлы уже на месте
+      - name: Publish files
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Последняя сборка
+          body: |
+            Установи umwelt.apk (лаунчер) — он сам скачивает обновления игры.
+          make_latest: true
+          files: |
+            build/release/game.pck
+            build/release/umwelt-server.zip
+            build/release/umwelt.apk
+
+      - name: Publish manifest
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          files: build/release/manifest.json
