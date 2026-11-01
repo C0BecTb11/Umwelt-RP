@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Umwelt RP</title>
+<style>
+  :root { --bg:#17121d; --fg:#eee; --pink:#fb7299; --cyan:#5ae6e6; --muted:#9a93a6; --gold:#f2cc73; }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+         background:linear-gradient(180deg,#1c0e34 0%,#2a1440 55%,#12081f 100%); color:var(--fg);
+         font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; padding:24px 16px; }
+  .card { max-width:420px; width:100%; text-align:center; background:rgba(23,18,29,.82);
+          border:1px solid rgba(251,114,153,.35); border-radius:18px; padding:32px 22px; }
+  h1 { margin:0 0 6px; color:var(--pink); letter-spacing:2px; font-size:30px; }
+  .sub { color:var(--cyan); margin:0 0 26px; font-size:14px; }
+  .mark { font-size:54px; line-height:1; margin-bottom:12px; }
+  h2 { margin:0 0 10px; font-size:20px; }
+  p { color:var(--muted); line-height:1.5; margin:0; }
+  .err h2 { color:var(--gold); }
+</style>
+</head>
+<body>
+<div class="card" id="card">
+  <h1>UMWELT RP</h1>
+  <p class="sub">Америка, девяностые</p>
+  <div class="mark" id="mark">✓</div>
+  <h2 id="title">Почта подтверждена</h2>
+  <p id="text">Вернись в игру и нажми «Войти». Эту страницу можно закрыть.</p>
+</div>
+<script>
+  // Supabase возвращает результат в адресе после #; токены здесь не нужны и нигде не сохраняются
+  var h = new URLSearchParams((location.hash || "").slice(1));
+  var q = new URLSearchParams(location.search);
+  var err = h.get("error_description") || q.get("error_description");
+  if (err) {
+    document.getElementById("card").className = "card err";
+    document.getElementById("mark").textContent = "!";
+    var expired = /expired|invalid/i.test(err);
+    document.getElementById("title").textContent = expired ? "Ссылка устарела" : "Не получилось подтвердить";
+    document.getElementById("text").textContent = expired
+      ? "Попробуй войти в игре — если почта уже подтверждена, вход пройдёт. Если нет, зарегистрируйся заново, придёт новое письмо."
+      : "Попробуй войти в игре. Если не пускает — зарегистрируйся заново.";
+  }
+  if (location.hash) history.replaceState(null, "", location.pathname);
+</script>
+</body>
+</html>
