@@ -14,6 +14,7 @@ var by_peer := {}            # id подключения → Client
 var autosave_t := 60.0
 var stat_t := 10.0
 var started_ms := 0
+var noauth := false
 
 class Client:
 	var peer := 0
@@ -23,6 +24,7 @@ class Client:
 	var full_t := 0.0
 	var acts := 0
 	var hello_t := 0.0           # сколько ждём «привет» после подключения
+	var checking := false        # идёт проверка аккаунта в Supabase
 
 func _ready() -> void:
 	for a in OS.get_cmdline_user_args():
@@ -30,6 +32,8 @@ func _ready() -> void:
 			port = int(a.substr(7))
 		elif a.begins_with("--max="):
 			max_clients = clampi(int(a.substr(6)), 1, 4000)
+		elif a == "--noauth":
+			noauth = true          # только для локальных тестов: вход по uid телефона без аккаунта
 	started_ms = Time.get_ticks_msec()
 	game = _load_world()
 	if game == null:
@@ -105,7 +109,7 @@ func _handle_net(dt: float) -> void:
 	for c: Client in by_peer.values():
 		if c.pid < 0:
 			c.hello_t += dt
-			if c.hello_t > 10.0:
+			if c.hello_t > (25.0 if c.checking else 10.0):
 				Net.I.kick(c.peer)
 	while Net.I.inbox.size() > 0:
 		var o: Dictionary = Net.I.inbox.pop_front()
@@ -114,7 +118,7 @@ func _handle_net(dt: float) -> void:
 		var c: Client = by_peer.get(from)
 		match t:
 			"hello":
-				if c == null or c.pid >= 0:
+				if c == null or c.pid >= 0 or c.checking:
 					continue                      # второй «привет» с того же подключения не принимаем
 				var build := str(o.get("build", ""))
 				if build != Version.BUILD:
@@ -123,24 +127,15 @@ func _handle_net(dt: float) -> void:
 					var why := "Сервер обновляется до новой версии — зайди через пару минут" if newer else "Вышло обновление — перезапусти игру, лаунчер его скачает"
 					Net.I.send({"t": "bye", "why": why}, from)
 					continue
-				var uid := str(o.get("uid", "")).left(64)
-				if uid.length() < 8:
-					Net.I.kick(from)
-					continue
-				# тот же аккаунт уже в игре с другого подключения — старое закрываем
-				for other: Client in by_peer.values():
-					if other != c and other.pid >= 0 and game.uids.get(uid, -1) == other.pid:
-						Net.I.kick(other.peer)
-						other.pid = -1
-				var nick := str(o.get("nick", "Гражданин")).strip_edges().left(24)
-				var p := game.join_player(uid, nick if nick != "" else "Гражданин")
-				c.pid = p.id
-				c.full_t = 0.0
-				Net.I.send({"t": "init", "pid": p.id, "seed": game.seed, "world": game.to_data_for(p.id)}, from)
-				_log("вошёл %s (персонаж %d, подключение %d), онлайн %d" % [p.name, p.id, from, _online()])
-				for other: Client in by_peer.values():
-					if other.pid >= 0 and other.pid != p.id:
-						game.msg(other.pid, "%s в городе" % p.name)
+				if noauth:
+					var uid := str(o.get("uid", "")).left(64)
+					if uid.length() < 8:
+						Net.I.kick(from)
+						continue
+					_enter(c, uid, str(o.get("nick", "Гражданин")).strip_edges().left(24), "")
+				else:
+					c.checking = true
+					_verify(c, str(o.get("token", "")), str(o.get("legacy", "")).left(64))
 			"in":
 				if c == null or c.pid < 0:
 					continue
@@ -167,6 +162,71 @@ func _handle_net(dt: float) -> void:
 						_log("вышел %s, онлайн %d" % [p2.name if p2 != null else "?", _online() - 1])
 					by_peer.erase(from)
 					save_world()
+
+# ================== вход по аккаунту ==================
+## Проверка токена в Supabase: кто это и как зовут его персонажа. Секретные ключи серверу не нужны —
+## запросы идут с токеном самого игрока, а правила базы отдают ему только его персонажа.
+func _verify(c: Client, token: String, legacy: String) -> void:
+	if token.length() < 20:
+		_reject(c, "Войди в аккаунт заново")
+		return
+	var u: Array = await _sb("/auth/v1/user", token)
+	if not by_peer.has(c.peer):
+		return                                # ушёл, пока проверяли
+	if u[0] != 200 or not (u[1] is Dictionary) or str(u[1].get("id", "")) == "":
+		_reject(c, "Сессия устарела — войди в аккаунт заново" if u[0] == 401 or u[0] == 403 else "Сервер аккаунтов недоступен, попробуй позже")
+		return
+	var user_id := str(u[1]["id"])
+	var ch: Array = await _sb("/rest/v1/characters?select=name&user_id=eq." + user_id, token)
+	if not by_peer.has(c.peer):
+		return
+	if ch[0] != 200 or not (ch[1] is Array) or ch[1].is_empty():
+		_reject(c, "У аккаунта нет персонажа — создай его при входе")
+		return
+	_enter(c, "sb:" + user_id, str(ch[1][0]["name"]), legacy)
+
+func _reject(c: Client, why: String) -> void:
+	c.checking = false
+	Net.I.send({"t": "bye", "why": why}, c.peer)
+	_log("отказ во входе (подключение %d): %s" % [c.peer, why])
+
+func _sb(path: String, token: String) -> Array:
+	var h := HTTPRequest.new()
+	h.timeout = 15.0
+	add_child(h)
+	var err := h.request(Boot.SUPABASE_URL + path, PackedStringArray(["apikey: " + Boot.SUPABASE_KEY, "Authorization: Bearer " + token]))
+	if err != OK:
+		h.queue_free()
+		return [0, null]
+	var r: Array = await h.request_completed
+	h.queue_free()
+	if r[0] != HTTPRequest.RESULT_SUCCESS:
+		return [0, null]
+	return [int(r[1]), JSON.parse_string((r[3] as PackedByteArray).get_string_from_utf8())]
+
+## Впустить в мир. key — ключ аккаунта; legacy — старый uid телефона (персонаж до аккаунтов переходит к аккаунту)
+func _enter(c: Client, key: String, pname: String, legacy: String) -> void:
+	c.checking = false
+	if not by_peer.has(c.peer):
+		return
+	if legacy != "" and not game.uids.has(key) and game.uids.has(legacy):
+		game.uids[key] = game.uids[legacy]
+		game.uids.erase(legacy)
+		_log("персонаж телефона %s… привязан к аккаунту %s" % [legacy.left(6), pname])
+	# тот же аккаунт уже в игре с другого подключения — старое закрываем
+	for other: Client in by_peer.values():
+		if other != c and other.pid >= 0 and game.uids.get(key, -1) == other.pid:
+			Net.I.send({"t": "bye", "why": "В этот аккаунт вошли с другого устройства"}, other.peer)
+			Net.I.kick(other.peer)
+			other.pid = -1
+	var p := game.join_player(key, pname if pname != "" else "Гражданин")
+	c.pid = p.id
+	c.full_t = 0.0
+	Net.I.send({"t": "init", "pid": p.id, "seed": game.seed, "world": game.to_data_for(p.id)}, c.peer)
+	_log("вошёл %s (персонаж %d, подключение %d), онлайн %d" % [p.name, p.id, c.peer, _online()])
+	for other: Client in by_peer.values():
+		if other.pid >= 0 and other.pid != p.id:
+			game.msg(other.pid, "%s в городе" % p.name)
 
 # ================== сохранение мира ==================
 func save_world() -> void:

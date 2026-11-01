@@ -12,3 +12,8 @@ static func host() -> String:
 
 static func port() -> int:
 	return int(Engine.get_meta("server_port", DEFAULT_PORT))
+
+## Supabase (аккаунты). Адрес и publishable-ключ публичные — их и так видно в любом клиенте;
+## доступ к данным ограничивают правила RLS в базе.
+const SUPABASE_URL := "https://fhsjkenwbgncajzjvcxx.supabase.co"
+const SUPABASE_KEY := "sb_publishable_gaxWk8-dSkgYlDXmI70-iw_juZbkq2Z"

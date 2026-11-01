@@ -1,0 +1,39 @@
+name: Auth test
+
+# Вход по аккаунту целиком: Supabase (настоящий проект) → локальный игровой сервер.
+# Тестовый аккаунт-бот bot@umwelt-rp.test без прав, кроме своего персонажа Test_Bot.
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  GODOT_VERSION: 4.4.1
+
+jobs:
+  auth:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache Godot
+        id: godot-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/godot
+          key: godot-${{ env.GODOT_VERSION }}-editor-only
+      - name: Download Godot
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/godot && cd ~/godot
+          wget -q https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip
+          unzip -q Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip && mv Godot_v${GODOT_VERSION}-stable_linux.x86_64 godot && rm *.zip
+      - name: Server + client login
+        run: |
+          ~/godot/godot --headless --path . --import > /dev/null 2>&1 || true
+          XDG_DATA_HOME=$PWD/d1 timeout 60 ~/godot/godot --headless --path . -- --server --port=7795 > server.log 2>&1 &
+          sleep 4
+          set +e
+          XDG_DATA_HOME=$PWD/d2 timeout 50 ~/godot/godot --headless --path . -- --no-update --authtest=bot@umwelt-rp.test,gao0-HhcxoppSYBS,7795 2>&1 | tee client.log
+          set -e
+          echo "--- сервер"; grep -a "^\[" server.log || true
+          grep -q "ИТОГ: OK" client.log

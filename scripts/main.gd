@@ -39,6 +39,12 @@ func _ready() -> void:
 		add_child(load("res://scripts/audit_test.gd").new())
 		return
 	for a in args:
+		if a.begins_with("--authtest="):
+			var at = load("res://scripts/authtest.gd").new()
+			at.role = a.substr(11)
+			at.main = self
+			add_child(at)
+			return
 		if a.begins_with("--nettest="):
 			var nt = load("res://scripts/nettest.gd").new()
 			nt.role = a.substr(10)
@@ -93,8 +99,7 @@ func _start_from_launcher() -> void:
 	var mode := str(Engine.get_meta("start_mode", "solo"))
 	Engine.remove_meta("start_mode")
 	if mode == "server":
-		Net.I.join(Boot.host(), Boot.port())
-		_start(GameScreen.Mode.CLIENT, null)
+		_play_server()
 	else:
 		_start(GameScreen.Mode.SOLO, _solo_world())
 
@@ -115,3 +120,179 @@ func _on_exit(_delete_save: bool) -> void:
 	if Net.I != null:
 		Net.I.close()
 	get_tree().change_scene_to_file.call_deferred("res://launcher/launcher.tscn")
+
+# ================== АККАУНТ ==================
+const AccountApi := preload("res://scripts/account.gd")
+var acc: Node
+var form: Control
+var form_status: Label
+
+func _play_server() -> void:
+	if acc == null:
+		acc = AccountApi.new()
+		acc.name = "Account"
+		add_child(acc)
+	if acc.has_session():
+		_form_wait("Вход в аккаунт…")
+		if await acc.refresh():
+			await _after_login()
+			return
+		_show_login(acc.last_error if acc.last_error != "" else "")
+		return
+	_show_login("")
+
+func _after_login() -> void:
+	_form_wait("Загружаю персонажа…")
+	var n = await acc.load_character()
+	if n == null:
+		_show_login(acc.last_error)
+	elif n == "":
+		_show_create_character("")
+	else:
+		_connect_game()
+
+func _connect_game() -> void:
+	_clear_form()
+	Net.I.join(Boot.host(), Boot.port())
+	_start(GameScreen.Mode.CLIENT, null)
+	screen.auth_token = acc.access_token
+
+# ---------- формы ----------
+func _clear_form() -> void:
+	if form != null:
+		form.queue_free()
+		form = null
+
+## Основа формы: тёмный фон, колонка у верхнего края (снизу место для клавиатуры телефона)
+func _form_base(title: String) -> VBoxContainer:
+	_clear_form()
+	form = Control.new()
+	form.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(form)
+	var bg := ColorRect.new()
+	bg.color = Color(0.09, 0.07, 0.11)
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	form.add_child(bg)
+	var scroll := ScrollContainer.new()
+	scroll.set_anchors_preset(Control.PRESET_FULL_RECT)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	form.add_child(scroll)
+	var wrap := MarginContainer.new()
+	wrap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	wrap.add_theme_constant_override("margin_top", 14)
+	scroll.add_child(wrap)
+	var center := CenterContainer.new()
+	wrap.add_child(center)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 8)
+	col.custom_minimum_size = Vector2(360, 0)
+	center.add_child(col)
+	col.add_child(_flabel(title, 24, Color(0.98, 0.45, 0.62)))
+	form_status = _flabel("", 13, Color(0.95, 0.8, 0.45))
+	form_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	return col
+
+func _flabel(t: String, size: int, c: Color) -> Label:
+	var l := Label.new()
+	l.text = t
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_color", c)
+	return l
+
+func _field(hint: String, secret: bool, kb: int) -> LineEdit:
+	var e := LineEdit.new()
+	e.placeholder_text = hint
+	e.secret = secret
+	e.virtual_keyboard_type = kb
+	e.custom_minimum_size = Vector2(360, 42)
+	e.add_theme_font_size_override("font_size", 16)
+	return e
+
+func _fbtn(t: String, c: Color, cb: Callable) -> Button:
+	var b := Button.new()
+	b.text = t
+	b.custom_minimum_size = Vector2(360, 44)
+	b.add_theme_font_size_override("font_size", 16)
+	for st in ["normal", "hover", "pressed", "focus", "disabled"]:
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = c.darkened(0.5) if st == "disabled" else (c.lightened(0.12) if st == "pressed" else c)
+		sb.set_corner_radius_all(12)
+		b.add_theme_stylebox_override(st, sb)
+	b.pressed.connect(cb)
+	return b
+
+func _form_wait(text: String) -> void:
+	var col := _form_base("UMWELT RP")
+	col.add_child(_flabel(text, 16, Color(0.8, 0.8, 0.8)))
+
+func _back_to_launcher() -> void:
+	_clear_form()
+	get_tree().change_scene_to_file.call_deferred("res://launcher/launcher.tscn")
+
+func _show_login(err: String, register := false) -> void:
+	var col := _form_base("Регистрация" if register else "Вход в аккаунт")
+	var mail := _field("Почта", false, LineEdit.KEYBOARD_TYPE_EMAIL_ADDRESS)
+	mail.text = acc.email
+	col.add_child(mail)
+	var pw := _field("Пароль (минимум 6 символов)" if register else "Пароль", true, LineEdit.KEYBOARD_TYPE_PASSWORD)
+	col.add_child(pw)
+	var go := _fbtn("Создать аккаунт" if register else "Войти", Color(0.18, 0.42, 0.23), func(): pass)
+	col.add_child(go)
+	col.add_child(form_status)
+	form_status.text = err
+	col.add_child(_fbtn("Уже есть аккаунт — войти" if register else "Нет аккаунта — зарегистрироваться", Color(0.23, 0.29, 0.35), func(): _show_login("", not register)))
+	col.add_child(_fbtn("Назад", Color(0.2, 0.2, 0.24), _back_to_launcher))
+	go.pressed.connect(func():
+		var m := mail.text.strip_edges()
+		if m == "" or pw.text.length() < 6:
+			form_status.text = "Введи почту и пароль (минимум 6 символов)"
+			return
+		go.disabled = true
+		form_status.text = "Подожди…"
+		if register:
+			var res: String = await acc.sign_up(m, pw.text)
+			if res == "ok":
+				await _after_login()
+			elif res == "confirm":
+				_show_login("Готово! Мы отправили письмо на %s — открой его, нажми ссылку и потом войди здесь." % m)
+			else:
+				form_status.text = acc.last_error
+				go.disabled = false
+		else:
+			if await acc.sign_in(m, pw.text):
+				await _after_login()
+			else:
+				form_status.text = acc.last_error
+				go.disabled = false)
+
+func _show_create_character(err: String) -> void:
+	var col := _form_base("Создание персонажа")
+	col.add_child(_flabel("Имя и фамилия латиницей — как в Америке 90-х. Изменить потом нельзя.", 13, Color(0.7, 0.7, 0.7)))
+	var first := _field("Имя (например, John)", false, LineEdit.KEYBOARD_TYPE_DEFAULT)
+	col.add_child(first)
+	var last := _field("Фамилия (например, Miller)", false, LineEdit.KEYBOARD_TYPE_DEFAULT)
+	col.add_child(last)
+	var go := _fbtn("Создать персонажа", Color(0.18, 0.42, 0.23), func(): pass)
+	col.add_child(go)
+	col.add_child(form_status)
+	form_status.text = err
+	col.add_child(_fbtn("Назад", Color(0.2, 0.2, 0.24), _back_to_launcher))
+	go.pressed.connect(func():
+		var f := first.text.strip_edges()
+		var l := last.text.strip_edges()
+		if f.length() > 0:
+			f = f.left(1).to_upper() + f.substr(1).to_lower()
+		if l.length() > 0:
+			l = l.left(1).to_upper() + l.substr(1).to_lower()
+		var bad := AccountApi.valid_name(f, l)
+		if bad != "":
+			form_status.text = bad
+			return
+		go.disabled = true
+		form_status.text = "Подожди…"
+		if await acc.create_character(f + "_" + l):
+			_connect_game()
+		else:
+			form_status.text = acc.last_error
+			go.disabled = false)
