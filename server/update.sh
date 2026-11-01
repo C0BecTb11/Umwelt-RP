@@ -2,7 +2,7 @@
 # Обновление игрового сервера Umwelt RP с GitHub Releases.
 # Запускается таймером umwelt-update.timer раз в 2 минуты (см. setup.sh). Ничего не делает, если сборка та же.
 set -euo pipefail
-BASE="https://github.com/C0BecTb11/umwelt-rp/releases/download/latest"
+BASE="https://github.com/C0BecTb11/Umwelt-RP/releases/download/latest"
 DIR=/srv/umwelt
 cd "$DIR"
 

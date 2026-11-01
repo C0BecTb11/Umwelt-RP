@@ -7,7 +7,7 @@ extends Control
 ## Данные в игру — только через Engine.set_meta.
 
 const APK_CODE := 1                       # подставляет CI; сравнивается с min_apk из манифеста
-const UPDATE_URL := "https://github.com/C0BecTb11/umwelt-rp/releases/download/latest/"
+const UPDATE_URL := "https://github.com/C0BecTb11/Umwelt-RP/releases/download/latest/"
 const PCK_DIR := "user://pck/"
 const STATE := "user://pck/state.json"    # что уже скачано и проверено: имя → sha256
 

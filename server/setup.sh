@@ -1,10 +1,10 @@
 #!/bin/bash
 # Установка игрового сервера Umwelt RP на сервер (Debian/Ubuntu). Запускать от root ОДИН раз:
-#   bash <(curl -fsSL https://raw.githubusercontent.com/C0BecTb11/umwelt-rp/main/server/setup.sh)
+#   bash <(curl -fsSL https://raw.githubusercontent.com/C0BecTb11/Umwelt-RP/main/server/setup.sh)
 # Безопасно запускать повторно. Другие проекты на сервере не трогает:
 # отдельный пользователь umwelt, папка /srv/umwelt, лимит памяти 450 МБ, порт 7777/UDP.
 set -euo pipefail
-RAW="https://raw.githubusercontent.com/C0BecTb11/umwelt-rp/main/server"
+RAW="https://raw.githubusercontent.com/C0BecTb11/Umwelt-RP/main/server"
 PORT=7777
 
 echo "== Umwelt RP: установка сервера"
