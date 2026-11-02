@@ -3,7 +3,6 @@ extends Node3D
 ## 3D-представление игры: строит город, ставит камеру и свет, анимирует людей и эффекты.
 
 const W = preload("res://scripts/world.gd")
-const VIS_R := 26
 
 var world: GameWorld
 var wm: WorldMesh
@@ -25,18 +24,11 @@ var walk := {}                # id → [фаза, x, y, скорость]
 var cam: Camera3D
 var sun: DirectionalLight3D
 var env: Environment
-var flashlight: SpotLight3D
 var lamp_lights: Array = []
 var flash_light: OmniLight3D
 var target_node: MeshInstance3D
 var shot_nodes: Array = []
 
-var vis := PackedFloat32Array()
-var vis_target := PackedByteArray()
-var vis_bytes := PackedByteArray()
-var vis_img: Image
-var vis_tex: ImageTexture
-var vis_t := 0.0
 var inside_building := -1
 
 var particles: Array = []     # [pos, vel, life, max, color, size]
@@ -90,13 +82,6 @@ func setup(w: GameWorld) -> void:
 	cam.far = 140.0
 	add_child(cam)
 	cam.make_current()
-	flashlight = SpotLight3D.new()
-	flashlight.spot_range = 14.0
-	flashlight.spot_angle = 24.0
-	flashlight.spot_angle_attenuation = 0.6
-	flashlight.light_color = Color(1.0, 0.93, 0.78)
-	flashlight.shadow_enabled = false
-	add_child(flashlight)
 	for i in 6:
 		var o := OmniLight3D.new()
 		o.omni_range = 7.5
@@ -110,14 +95,6 @@ func setup(w: GameWorld) -> void:
 	flash_light.light_energy = 2.5
 	flash_light.visible = false
 	add_child(flash_light)
-	# видимость
-	vis.resize(w.w * w.h)
-	vis_target.resize(w.w * w.h)
-	vis_bytes.resize(w.w * w.h)
-	vis_img = Image.create_from_data(w.w, w.h, false, Image.FORMAT_L8, vis_bytes)
-	vis_tex = ImageTexture.create_from_image(vis_img)
-	mat_world.set_shader_parameter("vis_tex", vis_tex)
-	mat_world.set_shader_parameter("map_size", float(w.w))
 	# чанки
 	for i in wm.chunks_x * wm.chunks_y:
 		var n := MeshInstance3D.new()
@@ -285,22 +262,8 @@ func update(dt: float, g: GameState, me: GameState.Player, local_pid: int) -> vo
 		if flashes[j][2] <= 0.0:
 			flashes.remove_at(j)
 		j -= 1
-	# видимость
-	vis_t -= dt
-	if vis_t <= 0.0:
-		vis_t = 0.12
-		_compute_vis(g, me)
-	var kk := minf(1.0, dt * 7.0)
 	var px := floori(me.rpos.x)
 	var py := floori(me.rpos.y)
-	for y in range(maxi(0, py - VIS_R), mini(world.h, py + VIS_R + 1)):
-		for x in range(maxi(0, px - VIS_R), mini(world.w, px + VIS_R + 1)):
-			var vi := y * world.w + x
-			var nv: float = vis[vi] + (vis_target[vi] - vis[vi]) * kk
-			vis[vi] = nv
-			vis_bytes[vi] = int(nv * 255.0)
-	vis_img.set_data(world.w, world.h, false, Image.FORMAT_L8, vis_bytes)
-	vis_tex.update(vis_img)
 	var cpx := clampi(px, 0, world.w - 1)
 	var cpy := clampi(py, 0, world.h - 1)
 	var b: int = world.building_of[world.idx(cpx, cpy)]
@@ -336,39 +299,6 @@ func _walk_update(id: int, pos: Vector2, dt: float) -> void:
 	# сила шага плавно, без щелчка «идёт/стоит»
 	var tgt := clampf((st[2] - 0.12) / 0.5, 0.0, 1.0)
 	st[3] = move_toward(st[3], tgt, dt * 7.0)
-
-## Видимость лучами из глаз игрока
-func _compute_vis(g: GameState, me: GameState.Player) -> void:
-	vis_target.fill(0)
-	var o := me.rpos
-	var px := floori(o.x)
-	var py := floori(o.y)
-	if me.dead:
-		for y in range(maxi(0, py - 20), mini(world.h, py + 21)):
-			for x in range(maxi(0, px - 20), mini(world.w, px + 21)):
-				vis_target[y * world.w + x] = 1
-		return
-	var R := 24.0 - 8.0 * g.darkness()
-	for y in range(py - 1, py + 2):
-		for x in range(px - 1, px + 2):
-			if world.inside(x, y):
-				vis_target[world.idx(x, y)] = 1
-	var rays := 240
-	for a in rays:
-		var ang := TAU * a / rays
-		var dir := Vector2(cos(ang), sin(ang))
-		var maxr := R if dir.dot(me.face) > -0.3 else 2.2
-		var r := 0.4
-		while r < maxr:
-			var c := o + dir * r
-			var cx := floori(c.x)
-			var cy := floori(c.y)
-			if not world.inside(cx, cy):
-				break
-			vis_target[cy * world.w + cx] = 1
-			if world.opaque(cx, cy):
-				break
-			r += 0.45
 
 func _on_tile_event(i: int, from: int, to: int) -> void:
 	var c := Vector3(i % world.w + 0.5, 0, i / world.w + 0.5)
@@ -434,11 +364,6 @@ func _on_fx(f: Array, local_pid: int, me: GameState.Player) -> void:
 				vibrate = 25
 
 # ================== РАССТАНОВКА ==================
-func _vis_at(p: Vector2) -> float:
-	var ix := floori(p.x)
-	var iz := floori(p.y)
-	return vis[world.idx(ix, iz)] if world.inside(ix, iz) else 0.0
-
 func _place_scene(g: GameState, me: GameState.Player, dt: float) -> void:
 	var dark := g.darkness()
 	var hh := g.hour_f()
@@ -464,7 +389,7 @@ func _place_scene(g: GameState, me: GameState.Player, dt: float) -> void:
 	var night_c := Color(0.42, 0.52, 0.85)
 	var day_a := Color(0.56, 0.59, 0.66)
 	var dusk_a := Color(0.34, 0.28, 0.33)
-	var night_a := Color(0.11, 0.13, 0.21)
+	var night_a := Color(0.2, 0.23, 0.33)
 	var warm := 0.0
 	if hh >= 5.0 and hh <= 21.5:
 		var el2 := maxf(0.0, sin(PI * (hh - 5.0) / 16.5))
@@ -477,13 +402,13 @@ func _place_scene(g: GameState, me: GameState.Player, dt: float) -> void:
 		ac = day_a.lerp(dusk_a, dark * 2.0)
 	else:
 		var k2 := (dark - 0.5) * 2.0
-		sc = (dusk_c * 0.75).lerp(night_c * 0.32, k2)
+		sc = (dusk_c * 0.75).lerp(night_c * 0.45, k2)
 		ac = dusk_a.lerp(night_a, k2)
 	sun.light_color = Color(sc.r, sc.g, sc.b)
 	sun.light_energy = 1.25 * (1.0 - dark * 0.5)
 	env.ambient_light_color = Color(ac.r, ac.g, ac.b)
 	env.ambient_light_energy = 1.0
-	var fog := Color(0.6, 0.64, 0.66).lerp(Color(0.015, 0.02, 0.035), dark)
+	var fog := Color(0.6, 0.64, 0.66).lerp(Color(0.05, 0.065, 0.1), dark)
 	env.background_color = fog
 	env.fog_light_color = fog
 	env.fog_density = 0.004 + dark * 0.008
@@ -492,13 +417,6 @@ func _place_scene(g: GameState, me: GameState.Player, dt: float) -> void:
 	mat_world.set_shader_parameter("cam_back", Vector2(sin(yaw), cos(yaw)))
 	mat_world.set_shader_parameter("cut", 0.0 if me.dead else 1.0)
 	mat_world.set_shader_parameter("night", dark)
-	# ---------- фонарик ----------
-	var fl := smoothstep(0.2, 0.6, dark) if not me.dead else 0.0
-	flashlight.visible = fl > 0.01
-	if flashlight.visible:
-		flashlight.light_energy = 7.0 * fl
-		var fp := Vector3(me.rpos.x + me.face.x * 0.25, 1.35, me.rpos.y + me.face.y * 0.25)
-		flashlight.look_at_from_position(fp, fp + Vector3(me.face.x, -0.3, me.face.y), Vector3.UP)
 	# ---------- фонари ----------
 	var lk := smoothstep(0.15, 0.5, dark)
 	var near_l: Array = []

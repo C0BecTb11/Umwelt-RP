@@ -1,13 +1,10 @@
 shader_type spatial;
 render_mode cull_back, diffuse_lambert, specular_disabled;
 
-// Видимость (туман войны) — текстура 100×100 по карте
-uniform sampler2D vis_tex : filter_linear, repeat_disable;
 uniform vec3 player_pos = vec3(50.0, 0.0, 50.0);
 uniform vec2 cam_back = vec2(0.0, 1.0);
 uniform float cut = 1.0;
 uniform float night = 0.0;
-uniform float map_size = 100.0;
 
 varying vec3 wpos;
 varying float kind;
@@ -33,9 +30,6 @@ void fragment() {
 		if (along > 0.2 && along < 7.0 && side < 2.2 + along * 0.25) discard;
 	}
 	vec3 c = to_linear(COLOR.rgb);
-	float v = texture(vis_tex, wpos.xz / map_size).r;
-	if (wpos.y > 2.35) v = max(v, 0.8);
-	c *= mix(0.42 - 0.2 * night, 1.0, v);
 	ALBEDO = c;
 	ROUGHNESS = 0.95;
 	if (kind > 0.4 && kind < 0.6) {
