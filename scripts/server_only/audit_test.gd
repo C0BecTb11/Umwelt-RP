@@ -35,6 +35,7 @@ func _ready() -> void:
 	test_house_layout()
 	test_wear()
 	test_rp_rules()
+	test_player_card()
 	print("\nИТОГО: %d прошло, %d ошибок" % [passes, fails])
 	get_tree().quit(1 if fails > 0 else 0)
 
@@ -546,3 +547,35 @@ func test_rp_rules() -> void:
 	for k in int(GameState.RESPAWN_TIME / 0.1) + 5:
 		g.update(0.1)
 	check("Нокаут: через время игрок очнулся у больницы с вещами", not b.dead and b.hp > 0.0 and b.pos.distance_to(g.spawn) < 3.0, "без сознания %s, позиция %s" % [b.dead, b.pos])
+
+## Карточка игрока: постоянный ID из базы, деньги и вещи остаются за ним
+func test_player_card() -> void:
+	var g := _game()
+	var p := g.join_player("legacy-uid", "Epson_Drowe")
+	check("ID: игрок без аккаунта получает номер от миллиона", p.id >= 1000000, str(p.id))
+	p.money = 777
+	p.bank = 1234
+	p.inv.append({"id": "medkit", "n": 1})
+	var inv_n := p.inv.size()
+	# тот же человек вошёл через аккаунт: старая карточка переезжает на ID из базы
+	g.uids["sb:u2"] = g.uids["legacy-uid"]
+	g.uids.erase("legacy-uid")
+	var a := g.join_player("sb:u2", "Epson_Drowe", 2)
+	check("ID: аккаунт получает ID из базы", a.id == 2 and g.player(2) == a, str(a.id))
+	check("ID: деньги, счёт и вещи переехали вместе с карточкой", a.money == 777 and a.bank == 1234 and a.inv.size() == inv_n)
+	check("ID: тег — «Имя (ID)»", GameState.tag(a) == "Epson_Drowe (2)", GameState.tag(a))
+	# ID 5 занят кем-то без аккаунта — владелец номера из базы его забирает
+	var guest := g.join_player("guest", "Guest_One")
+	var gid := guest.id
+	g._move_id(guest, 5)
+	var b := g.join_player("sb:u5", "John_Miller", 5)
+	check("ID: чужой номер освобождается для владельца", b.id == 5 and guest.id != 5 and g.player(guest.id) == guest and g.uids["guest"] == guest.id, "%d %d" % [b.id, gid])
+	# повторный вход — та же карточка
+	b.bank = 50
+	var b2 := g.join_player("sb:u5", "John_Miller", 5)
+	check("ID: повторный вход — та же карточка", b2 == b and b2.bank == 50)
+	# счёт сохраняется в файл мира
+	var g2 := GameState.new(0)
+	g2.load_data(JSON.parse_string(JSON.stringify(g.to_data())))
+	var a2 := g2.player(2)
+	check("ID: счёт и наличные сохраняются в мире", a2 != null and a2.bank == 1234 and a2.money == 777 and int(g2.uids.get("sb:u2", -1)) == 2)

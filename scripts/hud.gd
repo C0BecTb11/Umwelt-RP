@@ -344,7 +344,7 @@ func _overlays(g: GameState, me: GameState.Player, vr: Rect2) -> void:
 	for p in g.players:
 		if p.dead or not p.connected or p.id == me.id:
 			continue
-		var nm: String = p.name if p.name != "" else "Игрок"
+		var nm: String = GameState.tag(p)
 		var sp: Vector2 = screen.view.project(Vector3(p.rpos.x, 2.05, p.rpos.y))
 		_text(sp, nm, 12, Color(0.75, 0.9, 1.0), HORIZONTAL_ALIGNMENT_CENTER, true)
 	draw_texture_rect(vignette, vr, false)
@@ -394,10 +394,12 @@ func _hud(g: GameState, me: GameState.Player) -> void:
 	_rr(Rect2(bx, y + 12, bw * clampf(me.hp / 100.0, 0, 1), 10), 5, Color(0.88, 0.19, 0.19) if me.hp < 30.0 else Color(0.85, 0.35, 0.29))
 	_rr(Rect2(bx, y + 29, bw, 4), 2, Color(1, 1, 1, 0.25))
 	_rr(Rect2(bx, y + 29, bw * clampf(me.stamina / 100.0, 0, 1), 4), 2, Color(0.91, 0.78, 0.31))
-	# наличные
+	# наличные и своё имя с ID
 	var money := "$%d" % me.money
 	_rr(Rect2(x + cw + 8, y + 7, _tw(money, 16) + 22, 30), 12, Color(0.055, 0.07, 0.085, 0.6))
 	_text(Vector2(x + cw + 19, y + 28), money, 16, Color(0.55, 0.9, 0.5))
+	if screen.mode == GameScreen.Mode.CLIENT:
+		_text(Vector2(x + cw + 8 + _tw(money, 16) + 32, y + 27), GameState.tag(me), 14, Color(0.85, 0.85, 0.9), HORIZONTAL_ALIGNMENT_LEFT, true)
 	# мудлы
 	var mx := x + 4
 	var my := y + 70

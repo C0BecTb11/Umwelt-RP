@@ -10,6 +10,7 @@ var refresh_token := ""
 var access_token := ""
 var user_id := ""
 var char_name := ""
+var char_id := -1
 var last_error := ""
 
 func _ready() -> void:
@@ -128,9 +129,10 @@ func refresh() -> bool:
 # ---------- персонаж ----------
 ## Имя персонажа этого аккаунта ("" — ещё не создан). null — ошибка связи
 func load_character():
-	var r: Array = await _req(HTTPClient.METHOD_GET, "/rest/v1/characters?select=name&user_id=eq." + user_id, null, access_token)
+	var r: Array = await _req(HTTPClient.METHOD_GET, "/rest/v1/characters?select=id,name&user_id=eq." + user_id, null, access_token)
 	if r[0] == 200 and r[1] is Array:
 		char_name = str(r[1][0]["name"]) if r[1].size() > 0 else ""
+		char_id = int(r[1][0].get("id", -1)) if r[1].size() > 0 else -1
 		return char_name
 	last_error = explain(r[0], r[1])
 	return null

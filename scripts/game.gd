@@ -8,8 +8,11 @@ const VIEW_R := 40.0            # радиус, в котором видны д�
 const START_MONEY := 500        # стартовые наличные нового персонажа, $
 const RESPAWN_TIME := 20.0      # секунд без сознания
 
+## Карточка игрока. ВСЁ, что принадлежит игроку (деньги, счёт, вещи, одежда, позиция, а дальше — права,
+## фракция, работа, ключи от домов и машин), — поля этой карточки и сохраняются в player_data().
+## Отдельных словарей «игрок → что-то» вне карточки не заводим. Мир (дома, машины) ссылается на игрока по id.
 class Player:
-	var id := 0
+	var id := 0                # постоянный ID игрока (= characters.id в Supabase), виден в скобках у ника
 	var pos := Vector2.ZERO
 	var face := Vector2(1, 0)
 	var hp := 100.0
@@ -42,7 +45,8 @@ class Player:
 	var atk_seq := 0           # номер удара: по нему второй телефон запускает анимацию ровно один раз
 	var atk_kind := 0          # 0 — оружие/кулак, 1 — добивание ногой
 	var respawn_t := 0.0       # без сознания: через сколько секунд очнётся в больнице
-	var money := 0             # наличные (РП-экономика)
+	var money := 0             # наличные, $
+	var bank := 0              # банковский счёт, $
 	var wear := {}             # слот → id надетой вещи (в inv её нет)
 	var snaps: Array = []      # снимки [время, x, y, fx, fy, climb] для плавной отрисовки чужого игрока
 	var rface := Vector2(1, 0)
@@ -157,15 +161,23 @@ func add_fx(tp: int, x: float, y: float, a: float) -> void:
 	if fx_net.size() > 60:
 		fx_net.pop_front()
 
-## Игрок подключился: тот же телефон (uid) получает своего прежнего персонажа — это и есть «аккаунт»
-func join_player(uid: String, pname: String) -> Player:
+## Игрок подключился: ключ аккаунта (uid) получает своего прежнего персонажа.
+## static_id — постоянный ID из базы; если задан, карточка игрока живёт под этим номером
+func join_player(uid: String, pname: String, static_id: int = -1) -> Player:
 	var pid := -1
-	if uids.has(uid):
+	if static_id > 0:
+		if uids.has(uid) and int(uids[uid]) != static_id:
+			_rekey(int(uids[uid]), static_id)      # карточка, заведённая до постоянных ID, переезжает на свой номер
+		else:
+			var blocker := player(static_id)
+			if blocker != null and _owner_of(static_id) != uid:
+				_move_id(blocker, _free_id())       # номер занят чужой старой карточкой — отодвигаем её
+		uids[uid] = static_id
+		pid = static_id
+	elif uids.has(uid):
 		pid = int(uids[uid])
 	else:
-		pid = 1
-		for p in players:
-			pid = maxi(pid, p.id + 1)
+		pid = _free_id()       # без аккаунта (офлайн, тесты): номера от миллиона, чтобы не пересекаться с ID из базы
 		uids[uid] = pid
 	var p := player(pid)
 	if p == null:
@@ -177,6 +189,46 @@ func join_player(uid: String, pname: String) -> Player:
 	p.force_seq += 1
 	p.snaps.clear()
 	return p
+
+## Как игрок подписан везде в игре: John_Miller (5)
+static func tag(p: Player) -> String:
+	if p == null:
+		return "?"
+	return "%s (%d)" % [p.name if p.name != "" else "Игрок", p.id]
+
+func _free_id() -> int:
+	var free := 999999
+	for q in players:
+		free = maxi(free, q.id)
+	return free + 1
+
+func _owner_of(pid: int) -> String:
+	for k in uids:
+		if int(uids[k]) == pid:
+			return str(k)
+	return ""
+
+## Перенести карточку игрока на другой номер. Если номер занят чужой старой карточкой — её отодвигаем на свободный
+func _rekey(old_pid: int, new_pid: int) -> void:
+	var blocker := player(new_pid)
+	if blocker != null:
+		_move_id(blocker, _free_id())
+	var p := player(old_pid)
+	if p != null:
+		_move_id(p, new_pid)
+
+func _move_id(p: Player, to: int) -> void:
+	var from := p.id
+	p.id = to
+	for k in uids.keys():
+		if int(uids[k]) == from:
+			uids[k] = to
+	if messages.has(from):
+		messages[to] = messages[from]
+		messages.erase(from)
+	for k in world.climb_occ.keys():
+		if world.climb_occ[k] == -1 - from:
+			world.climb_occ[k] = -1 - to
 
 func _spawn_player(pid: int) -> Player:
 	var p := Player.new(pid)
@@ -668,10 +720,10 @@ func hit_player(from: Player, q: Player, dmg: float) -> void:
 	q.hp -= dmg
 	q.ta_act = null
 	add_fx(3, q.pos.x, q.pos.y, q.id)
-	msg(q.id, "Тебя ударил %s" % (from.name if from.name != "" else "кто-то"))
+	msg(q.id, "Тебя ударил %s" % tag(from))
 	if q.hp <= 0.0:
 		knock_out(q)
-		msg(from.id, "%s без сознания" % (q.name if q.name != "" else "Игрок"))
+		msg(from.id, "%s без сознания" % tag(q))
 
 func _interact(p: Player, cell: int) -> void:
 	if not near_cell(p, cell, 1.8):
@@ -775,7 +827,7 @@ func find_interact(p: Player) -> int:
 func player_data(p: Player) -> Dictionary:
 	return {"id": p.id, "x": snappedf(p.pos.x, 0.01), "y": snappedf(p.pos.y, 0.01), "fx": snappedf(p.face.x, 0.01), "fy": snappedf(p.face.y, 0.01),
 		"hp": snappedf(p.hp, 0.01), "hu": snappedf(p.hunger, 0.01), "th": snappedf(p.thirst, 0.01), "st": snappedf(p.stamina, 0.01),
-		"dead": p.dead, "rt": snappedf(p.respawn_t, 0.1), "k": p.kills, "eq": p.eq, "mo": p.money,
+		"dead": p.dead, "rt": snappedf(p.respawn_t, 0.1), "k": p.kills, "eq": p.eq, "mo": p.money, "bk": p.bank,
 		"inv": Items.copy(p.inv), "aa": snappedf(p.attack_anim, 0.01), "con": p.connected, "sn": p.sneaking,
 		"cl": snappedf(p.climb, 0.01), "tn": p.ta_name if p.ta_act != null else "", "tp": snappedf(p.ta_progress(), 0.01),
 		"nm": p.name, "fs": p.force_seq, "wr": p.wear.duplicate(),
@@ -809,6 +861,7 @@ func player_from(o: Dictionary, p: Player) -> void:
 	p.dead = bool(o.get("dead", false))
 	p.respawn_t = float(o.get("rt", 0.0))
 	p.money = int(o.get("mo", START_MONEY))
+	p.bank = int(o.get("bk", 0))
 	p.kills = int(o.get("k", 0))
 	p.eq = o.get("eq", "")
 	p.inv.clear()
