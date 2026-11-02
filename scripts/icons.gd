@@ -34,7 +34,10 @@ static func _stroke(ci: CanvasItem, a: Vector2, b: Vector2, w: float, col: Color
 static func item(ci: CanvasItem, id: String, c: Vector2, size: float) -> void:
 	var k := size / 96.0
 	ci.draw_set_transform(c - Vector2(48, 48) * k, 0.0, Vector2(k, k))
-	match id:
+	var key := id
+	if Items.def(id).has("tint_color"):
+		key = id.get_slice("_", 0)          # цветной вариант рисуется как основная вещь своим цветом
+	match key:
 		"canned":
 			_rr(ci, Rect2(26, 22, 44, 58), 6, Color8(0xB8, 0xC0, 0xC8))
 			_rr(ci, Rect2(26, 38, 44, 26), 2, Color8(0xD0, 0x48, 0x38))
@@ -107,14 +110,18 @@ static func item(ci: CanvasItem, id: String, c: Vector2, size: float) -> void:
 			ci.draw_set_transform(c - Vector2(48, 48) * k, 0.0, Vector2(k, k))
 			_poly(ci, [Vector2(10, 44), Vector2(82, 18), Vector2(86, 32), Vector2(14, 58)], Color8(0xB0, 0x7A, 0x44))
 			_poly(ci, [Vector2(14, 66), Vector2(86, 40), Vector2(90, 54), Vector2(18, 80)], Color8(0xC0, 0x8A, 0x54))
-		"tshirt", "hoodie", "shirt", "suit_jacket", "biker_vest", "work_vest":
+		"tshirt", "hoodie", "shirt", "suit_jacket", "biker_vest", "work_vest", "tactical":
 			var jc: Color = Items.def(id)["color"]
-			var sleeve := id in ["tshirt", "biker_vest", "work_vest"]
+			var sleeve := key in ["tshirt", "biker_vest", "work_vest"]
 			if sleeve:
 				_poly(ci, [Vector2(30, 18), Vector2(66, 18), Vector2(86, 32), Vector2(78, 46), Vector2(70, 40), Vector2(70, 84), Vector2(26, 84), Vector2(26, 40), Vector2(18, 46), Vector2(10, 32)], jc)
 			else:
 				_poly(ci, [Vector2(30, 18), Vector2(66, 18), Vector2(88, 40), Vector2(80, 50), Vector2(70, 42), Vector2(70, 84), Vector2(26, 84), Vector2(26, 42), Vector2(16, 50), Vector2(8, 40)], jc)
-			match id:
+			match key:
+				"tactical":
+					_rr(ci, Rect2(30, 34, 36, 30), 3, jc.lightened(0.15), false)
+					for i in 3:
+						_rr(ci, Rect2(32 + i * 11, 52, 9, 10), 1, jc.darkened(0.3), false)
 				"hoodie":
 					_poly(ci, [Vector2(34, 18), Vector2(48, 32), Vector2(62, 18), Vector2(56, 10), Vector2(40, 10)], jc.darkened(0.25))
 					_rr(ci, Rect2(34, 60, 28, 14), 3, jc.darkened(0.25), false)
@@ -129,23 +136,45 @@ static func item(ci: CanvasItem, id: String, c: Vector2, size: float) -> void:
 					_rr(ci, Rect2(26, 70, 44, 6), 1, Color8(0xE8, 0xE8, 0xE0), false)
 				"tshirt":
 					ci.draw_arc(Vector2(48, 18), 9, 0.0, PI, 10, jc.darkened(0.3), 3.0)
+		"overalls":
+			var oc: Color = Items.def(id)["color"]
+			_poly(ci, [Vector2(30, 14), Vector2(66, 14), Vector2(66, 40), Vector2(72, 40), Vector2(76, 88), Vector2(54, 88), Vector2(48, 58), Vector2(42, 88), Vector2(20, 88), Vector2(24, 40), Vector2(30, 40)], oc)
+			ci.draw_line(Vector2(30, 14), Vector2(22, 4), oc.darkened(0.2), 4.0)
+			ci.draw_line(Vector2(66, 14), Vector2(74, 4), oc.darkened(0.2), 4.0)
+			_rr(ci, Rect2(38, 20, 20, 14), 2, oc.darkened(0.3), false)
+		"hard_hat", "swat_helmet", "farmer_hat":
+			var hc: Color = Items.def(id)["color"]
+			if key == "farmer_hat":
+				_rr(ci, Rect2(8, 56, 80, 12), 6, hc.darkened(0.15))
+				_poly(ci, [Vector2(28, 58), Vector2(32, 30), Vector2(64, 30), Vector2(68, 58)], hc)
+				_rr(ci, Rect2(30, 48, 36, 8), 2, Color8(0xA0, 0x24, 0x24), false)
+			else:
+				_poly(ci, [Vector2(16, 64), Vector2(20, 40), Vector2(34, 22), Vector2(62, 22), Vector2(76, 40), Vector2(80, 64)], hc)
+				_rr(ci, Rect2(10, 60, 76, 10), 4, hc.darkened(0.25))
+				if key == "swat_helmet":
+					_rr(ci, Rect2(24, 42, 48, 14), 4, Color8(0x10, 0x10, 0x12), false)
+				else:
+					_rr(ci, Rect2(44, 20, 8, 42), 2, hc.lightened(0.2), false)
 		"dress":
 			var dc: Color = Items.def(id)["color"]
 			_poly(ci, [Vector2(36, 12), Vector2(60, 12), Vector2(64, 40), Vector2(82, 86), Vector2(14, 86), Vector2(32, 40)], dc)
 			_rr(ci, Rect2(32, 38, 32, 5), 2, Color8(0xD8, 0xB0, 0x40), false)
-		"jeans", "pants", "shorts", "work_pants":
+		"jeans", "pants", "shorts", "work_pants", "ripped_jeans", "cargo", "tactical_pants":
 			var pc: Color = Items.def(id)["color"]
 			if id == "shorts":
 				_poly(ci, [Vector2(24, 22), Vector2(72, 22), Vector2(78, 66), Vector2(54, 66), Vector2(48, 44), Vector2(42, 66), Vector2(18, 66)], pc)
 			else:
 				_poly(ci, [Vector2(26, 12), Vector2(70, 12), Vector2(76, 86), Vector2(54, 86), Vector2(48, 40), Vector2(42, 86), Vector2(20, 86)], pc)
 			ci.draw_line(Vector2(26, 20 if id != "shorts" else 28), Vector2(70, 20 if id != "shorts" else 28), pc.darkened(0.4), 3.0)
-			if id == "work_pants":
+			if id in ["work_pants", "cargo", "tactical_pants"]:
 				_rr(ci, Rect2(14, 44, 12, 16), 2, pc.darkened(0.3), false)
 				_rr(ci, Rect2(70, 44, 12, 16), 2, pc.darkened(0.3), false)
-		"boots", "sneakers", "shoes":
+			if id == "ripped_jeans":
+				for r in [Rect2(28, 50, 12, 4), Rect2(58, 62, 12, 4), Rect2(26, 70, 10, 3)]:
+					_rr(ci, r, 1, Color8(0xE8, 0xD8, 0xC0), false)
+		"boots", "sneakers", "shoes", "combat_boots", "high_boots", "hiking_boots", "rubber_boots":
 			var tc: Color = Items.def(id)["color"]
-			if id == "boots":
+			if id not in ["sneakers", "shoes"]:
 				_poly(ci, [Vector2(30, 14), Vector2(54, 14), Vector2(56, 58), Vector2(84, 64), Vector2(86, 80), Vector2(28, 80)], tc)
 				for i in 3:
 					ci.draw_line(Vector2(36, 26 + i * 10), Vector2(50, 26 + i * 10), tc.lightened(0.35), 2.5)
@@ -155,7 +184,8 @@ static func item(ci: CanvasItem, id: String, c: Vector2, size: float) -> void:
 					_rr(ci, Rect2(20, 70, 66, 8), 2, Color8(0xF0, 0xF0, 0xEA), false)
 					for i in 3:
 						ci.draw_line(Vector2(44 + i * 7, 46), Vector2(48 + i * 7, 56), Color8(0xF0, 0xF0, 0xEA), 2.0)
-			_rr(ci, Rect2(20 if id != "boots" else 26, 78, 66 if id != "boots" else 62, 8), 2, Color8(0x1A, 0x16, 0x12), false)
+			var boot := id not in ["sneakers", "shoes"]
+			_rr(ci, Rect2(26 if boot else 20, 78, 62 if boot else 66, 8), 2, Color8(0x1A, 0x16, 0x12), false)
 		_:
 			_circ(ci, Vector2(48, 48), 26, Items.def(id)["color"])
 	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)

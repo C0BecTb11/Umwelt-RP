@@ -588,7 +588,7 @@ func _draw_dead(g: GameState, me: GameState.Player, vr: Rect2) -> void:
 
 # ---------- экран «Снаряжение» ----------
 const GEAR_LAYOUT := {
-	"torso": Vector2(0.0, 0.22), "legs": Vector2(0.0, 0.62), "feet": Vector2(0.5, 1.0), "hand": Vector2(1.0, 0.22)}
+	"head": Vector2(0.0, 0.0), "torso": Vector2(0.0, 0.34), "legs": Vector2(0.0, 0.68), "feet": Vector2(0.5, 1.0), "hand": Vector2(1.0, 0.34)}
 
 static func _wear_info(id: String) -> String:
 	var d := Items.def(id)

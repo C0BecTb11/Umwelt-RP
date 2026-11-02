@@ -526,6 +526,11 @@ func test_wear() -> void:
 			if not ResourceLoader.exists("res://assets/chars/%s/%s.scn" % [gg, Items.BARE[gg][sl]]):
 				missing.append(Items.BARE[gg][sl])
 	check("Персонажи: у всех вещей и причёсок есть модели", missing.is_empty() and ResourceLoader.exists("res://assets/chars/m_base.scn") and ResourceLoader.exists("res://assets/chars/f_base.scn"), str(missing))
+	# головной убор заменяет причёску; цветной вариант перекрашивает свой материал (платье — и низ)
+	check("Персонажи: каска вместо причёски, цветные варианты перекрашивают нужный материал",
+		Items.part_for({"head": "hard_hat"}, "m", "head") == "Worker_Head" and Items.part_for({}, "m", "head") == ""
+		and Items.tint_for({"torso": "hoodie_red"}, "m", "torso")[0] == "Purple" and Items.tint_for({"torso": "hoodie"}, "m", "torso").is_empty()
+		and Items.tint_for({"torso": "dress_black"}, "f", "legs").size() == 2 and Items.DEFS.has("tshirt_navy") and Items.fits("swat_helmet", "m") and not Items.fits("swat_helmet", "f"))
 	# платье закрывает и низ; без одежды — «база»
 	check("Персонажи: платье показывает и низ, пустой слот — без одежды",
 		Items.part_for({"torso": "dress", "legs": "jeans"}, "f", "legs") == "Formal_Legs" and Items.part_for({}, "m", "torso") == "Beach_Body"

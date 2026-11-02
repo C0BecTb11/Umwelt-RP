@@ -18,7 +18,8 @@ var ap: AnimationPlayer
 var gender := "m"
 var tone := 0
 var look_key := ""
-var parts := {}               # слот → [имя части, MeshInstance3D]
+var parts := {}               # слот → [ключ части, MeshInstance3D]
+var hair := ""                # причёска из внешности (видна, когда на голове ничего нет)
 var weapon_mi: MeshInstance3D
 var cur_weapon := ""
 var fall := -1.0              # 0..1 — без сознания (0 стоит, 1 лежит); -1 — брать из lying
@@ -49,12 +50,13 @@ func setup(look: Dictionary) -> void:
 		if ap.has_animation(a):
 			ap.get_animation(a).loop_mode = Animation.LOOP_LINEAR
 	var head := str(look.get("h", ""))
-	_set_part("head", head if head in Items.HEADS[gender] else Items.HEADS[gender][0])
+	hair = head if head in Items.HEADS[gender] else Items.HEADS[gender][0]
 	set_wear({})
 	_play("Idle", 0.0)
 
-func _set_part(slot: String, pname: String) -> void:
-	if parts.has(slot) and parts[slot][0] == pname:
+func _set_part(slot: String, pname: String, tint: Array = []) -> void:
+	var key := pname + (("|%s|%s" % [tint[0], (tint[1] as Color).to_html()]) if tint.size() == 2 else "")
+	if parts.has(slot) and parts[slot][0] == key:
 		return
 	if parts.has(slot):
 		parts[slot][1].queue_free()
@@ -68,7 +70,21 @@ func _set_part(slot: String, pname: String) -> void:
 	skel.add_child(mi)
 	mi.skeleton = NodePath("..")
 	_apply_tone(mi)
-	parts[slot] = [pname, mi]
+	if tint.size() == 2:
+		_apply_tint(mi, tint[0], tint[1])
+	parts[slot] = [key, mi]
+
+## Цветной вариант вещи: перекрашиваем главный материал части
+func _apply_tint(mi: MeshInstance3D, mat_name: String, col: Color) -> void:
+	for s in mi.mesh.get_surface_count():
+		var m := mi.mesh.surface_get_material(s)
+		if m is StandardMaterial3D and String(m.resource_name) == mat_name:
+			var key := "t|%s|%s|%s" % [mat_name, col.to_html(), (m as StandardMaterial3D).albedo_color.to_html()]
+			if not _tone_mats.has(key):
+				var nm: StandardMaterial3D = m.duplicate()
+				nm.albedo_color = col
+				_tone_mats[key] = nm
+			mi.set_surface_override_material(s, _tone_mats[key])
 
 ## Тон кожи: заменяем только материалы кожи, одежда остаётся своего цвета
 func _apply_tone(mi: MeshInstance3D) -> void:
@@ -91,7 +107,10 @@ func set_wear(wear: Dictionary) -> void:
 	if skel == null:
 		return
 	for sl in Items.SLOTS:
-		_set_part(sl, Items.part_for(wear, gender, sl))
+		var pn := Items.part_for(wear, gender, sl)
+		if sl == "head" and pn == "":
+			pn = hair
+		_set_part(sl, pn, Items.tint_for(wear, gender, sl))
 
 static func _materials() -> void:
 	if _mat != null:
