@@ -137,6 +137,15 @@ static func new_game(s: int) -> GameState:
 static func msk_time() -> float:
 	return (Time.get_unix_time_from_system() + MSK_OFFSET) / 60.0
 
+const MONTHS := ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"]
+
+## Дата в игре («2 ноября») — по московскому календарю; у демо-снимков (своё время) даты нет
+func date_str() -> String:
+	if time < 1440.0 * 365.0:
+		return ""
+	var d := Time.get_datetime_dict_from_unix_time(int(time * 60.0))
+	return "%d %s" % [d["day"], MONTHS[int(d["month"]) - 1]]
+
 func day() -> int: return int(time / 1440.0) + 1
 func hour_f() -> float: return fmod(time, 1440.0) / 60.0
 func clock() -> String:

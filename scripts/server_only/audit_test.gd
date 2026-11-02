@@ -635,6 +635,8 @@ func test_clock() -> void:
 	var want := fmod(utc["hour"] + 3 + utc["minute"] / 60.0, 24.0)
 	var diff := absf(g.hour_f() - want)
 	check("Время: в игре московское", minf(diff, 24.0 - diff) < 0.05, "%.2f, ждали %.2f" % [g.hour_f(), want])
+	var msk := Time.get_datetime_dict_from_unix_time(int(Time.get_unix_time_from_system()) + GameState.MSK_OFFSET)
+	check("Время: дата по Москве", g.date_str() == "%d %s" % [msk["day"], GameState.MONTHS[msk["month"] - 1]], g.date_str())
 	var dk := []
 	for h in [3.0, 7.0, 13.0, 20.5, 23.0]:
 		g.time = h * 60.0
