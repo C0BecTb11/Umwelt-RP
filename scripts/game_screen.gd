@@ -1,7 +1,7 @@
 class_name GameScreen
 extends Node
 ## Игровой экран на телефоне: подключение к серверу (CLIENT) или офлайн-проверка (SOLO).
-## Логика в SOLO считается тут же, в CLIENT — на сервере (scripts/server.gd). 3D — WorldView, интерфейс — Hud.
+## Логика в SOLO считается тут же, в CLIENT — на сервере (scripts/server_only/server.gd). 3D — WorldView, интерфейс — Hud.
 
 enum Mode { SOLO, CLIENT }
 

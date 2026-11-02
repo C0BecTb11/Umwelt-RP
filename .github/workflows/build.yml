@@ -119,6 +119,13 @@ jobs:
           fi
           test -s build/release/game.pck
           test -s build/release/umwelt-server.zip
+          # серверный код не должен попасть к игрокам (scripts/server_only/ исключена из экспорта Android)
+          for f in build/release/game.pck build/release/umwelt.apk; do
+            [ -f "$f" ] || continue
+            if unzip -p "$f" 2>/dev/null | grep -a -q "SAVE_BAK" || grep -a -q "SAVE_BAK" "$f"; then
+              echo "ОШИБКА: серверный код попал в $f"; exit 1
+            fi
+          done
           ls -la build/release
 
       - name: Manifest

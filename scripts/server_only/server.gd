@@ -1,5 +1,5 @@
-class_name GameServer
 extends Node
+## НЕ попадает в APK (папка scripts/server_only/ исключена из экспорта Android). Загружается в main.gd через load().
 ## Выделенный сервер (запуск: godot --headless -- --server [--port=7777] [--max=64]).
 ## Вся игровая логика считается здесь; телефоны только присылают ввод и действия.
 

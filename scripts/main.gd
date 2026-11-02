@@ -17,7 +17,7 @@ func _ready() -> void:
 		await get_tree().process_frame
 	var args := OS.get_cmdline_user_args()
 	if "--server" in args:
-		var s := GameServer.new()
+		var s: Node = load("res://scripts/server_only/server.gd").new()     # серверный код — только в сборке сервера
 		s.name = "GameServer"
 		add_child(s)
 		return
@@ -36,17 +36,17 @@ func _ready() -> void:
 				shot_list.append(int(f))
 	get_tree().set_auto_accept_quit(false)
 	if "--audit" in args:
-		add_child(load("res://scripts/audit_test.gd").new())
+		add_child(load("res://scripts/server_only/audit_test.gd").new())
 		return
 	for a in args:
 		if a.begins_with("--authtest="):
-			var at = load("res://scripts/authtest.gd").new()
+			var at = load("res://scripts/server_only/authtest.gd").new()
 			at.role = a.substr(11)
 			at.main = self
 			add_child(at)
 			return
 		if a.begins_with("--nettest="):
-			var nt = load("res://scripts/nettest.gd").new()
+			var nt = load("res://scripts/server_only/nettest.gd").new()
 			nt.role = a.substr(10)
 			nt.main = self
 			add_child(nt)
