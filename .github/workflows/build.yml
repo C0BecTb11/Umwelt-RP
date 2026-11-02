@@ -11,7 +11,6 @@ on:
 
 permissions:
   contents: write
-  actions: read
 
 env:
   GODOT_VERSION: 4.4.1
@@ -180,22 +179,3 @@ jobs:
         with:
           tag_name: latest
           files: build/release/manifest.json
-
-      # Метка версии на коммите: видно, из какого кода собрана 0.N, и к ней можно откатиться
-      # (и метки для прежних успешных сборок, если их ещё нет)
-      - name: Version tags
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-        run: |
-          tag() {
-            gh api -X POST "repos/$REPO/git/refs" -f ref="refs/tags/$1" -f sha="$2" >/dev/null 2>&1 \
-              || gh api -X PATCH "repos/$REPO/git/refs/tags/$1" -f sha="$2" -F force=true >/dev/null
-          }
-          existing=$(gh api "repos/$REPO/git/matching-refs/tags/v0." --jq '.[].ref' || true)
-          gh run list -R "$REPO" --workflow build.yml --status success -L 200 --json number,headSha --jq '.[]|"\(.number) \(.headSha)"' |
-          while read n sha; do
-            echo "$existing" | grep -qx "refs/tags/v0.$n" || tag "v0.$n" "$sha"
-          done
-          tag "v0.${{ github.run_number }}" "${{ github.sha }}"
-          echo "Метка v0.${{ github.run_number }} → ${{ github.sha }}"
