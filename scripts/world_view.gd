@@ -453,8 +453,8 @@ func _place_scene(g: GameState, me: GameState.Player, dt: float) -> void:
 	cam.look_at(t, Vector3.UP)
 	# ---------- солнце, небо ----------
 	var sd := Vector3(0.35, -0.85, -0.4)
-	if hh >= 5.5 and hh <= 20.5:
-		var az := PI * (hh - 6.0) / 14.0
+	if hh >= 5.0 and hh <= 21.5:
+		var az := PI * (hh - 5.0) / 16.5
 		var el := maxf(0.0, sin(az))
 		sd = Vector3(-cos(az) * 0.85, -(0.3 + 0.7 * el), -0.45)
 	sd = sd.normalized()
@@ -466,15 +466,15 @@ func _place_scene(g: GameState, me: GameState.Player, dt: float) -> void:
 	var dusk_a := Color(0.34, 0.28, 0.33)
 	var night_a := Color(0.11, 0.13, 0.21)
 	var warm := 0.0
-	if hh >= 5.5 and hh <= 20.5:
-		var el2 := maxf(0.0, sin(PI * (hh - 6.0) / 14.0))
-		warm = clampf(pow(1.0 - el2, 3.0), 0.0, 1.0) * 0.6
+	if hh >= 5.0 and hh <= 21.5:
+		var el2 := maxf(0.0, sin(PI * (hh - 5.0) / 16.5))
+		warm = clampf(pow(1.0 - el2, 3.0), 0.0, 1.0) * 0.4
 	var sc: Color
 	var ac: Color
 	if dark < 0.5:
-		var k := maxf(dark * 2.0, warm)
-		sc = day_c.lerp(dusk_c * 0.75, k)
-		ac = day_a.lerp(dusk_a, k)
+		# закатный оттенок только у солнца, общий свет темнеет лишь с сумерками
+		sc = day_c.lerp(dusk_c * 0.75, maxf(dark * 2.0, warm))
+		ac = day_a.lerp(dusk_a, dark * 2.0)
 	else:
 		var k2 := (dark - 0.5) * 2.0
 		sc = (dusk_c * 0.75).lerp(night_c * 0.32, k2)

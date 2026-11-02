@@ -6,6 +6,7 @@ static func create(kind: String) -> GameState:
 	var g := GameState.new_game(1990)
 	var p: GameState.Player = g.players[0]
 	p.name = "Тест"
+	g.real_clock = false          # у снимков своё время суток
 	g.time = 11 * 60.0
 	match kind:
 		"inside", "loot", "inv":

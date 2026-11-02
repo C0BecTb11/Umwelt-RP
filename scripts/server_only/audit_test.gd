@@ -35,6 +35,7 @@ func _ready() -> void:
 	test_house_layout()
 	test_wear()
 	test_look()
+	test_clock()
 	test_rp_rules()
 	test_player_card()
 	print("\nИТОГО: %d прошло, %d ошибок" % [passes, fails])
@@ -625,3 +626,17 @@ func test_player_card() -> void:
 	g2.load_data(JSON.parse_string(JSON.stringify(g.to_data())))
 	var a2 := g2.player(2)
 	check("ID: счёт и наличные сохраняются в мире", a2 != null and a2.bank == 1234 and a2.money == 777 and int(g2.uids.get("sb:u2", -1)) == 2)
+
+## Время — московское, темно только ночью
+func test_clock() -> void:
+	var g := _game()
+	g.update(0.016)
+	var utc := Time.get_datetime_dict_from_system(true)
+	var want := fmod(utc["hour"] + 3 + utc["minute"] / 60.0, 24.0)
+	var diff := absf(g.hour_f() - want)
+	check("Время: в игре московское", minf(diff, 24.0 - diff) < 0.05, "%.2f, ждали %.2f" % [g.hour_f(), want])
+	var dk := []
+	for h in [3.0, 7.0, 13.0, 20.5, 23.0]:
+		g.time = h * 60.0
+		dk.append(g.darkness())
+	check("Время: темно только ночью (07–21 светло, 23 и 3 — ночь)", dk[0] == 1.0 and dk[1] == 0.0 and dk[2] == 0.0 and dk[3] == 0.0 and dk[4] == 1.0, str(dk))

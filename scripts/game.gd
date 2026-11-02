@@ -3,7 +3,8 @@ extends RefCounted
 
 const PLAYER_R := 0.3
 const MAX_WEIGHT := 15.0
-const MINUTES_PER_SEC := 1.0
+const MINUTES_PER_SEC := 1.0   # скорость времени, если часы не реальные (демо-снимки)
+const MSK_OFFSET := 3 * 3600   # время в игре — московское (UTC+3, без перехода на летнее)
 const VIEW_R := 40.0            # радиус, в котором видны другие игроки (клеток)
 const START_MONEY := 500        # стартовые наличные нового персонажа, $
 const RESPAWN_TIME := 20.0      # секунд без сознания
@@ -111,6 +112,7 @@ var shots: Array = []          # [x1, y1, x2, y2, жизнь]
 var fx: Array = []             # [тип, x, y, параметр] — 1 кровь, 2 смерть зомби, 3 ранен игрок, 4 выстрел
 var fx_net: Array = []
 var uids := {}                 # постоянный ID телефона друга → номер персонажа
+var real_clock := true         # время = реальное московское; false — идёт само (демо-снимки)
 
 func _init(s: int = 0) -> void:
 	seed = s
@@ -131,6 +133,10 @@ static func new_game(s: int) -> GameState:
 	g.world.compute_buildings()
 	return g
 
+## Московское время в минутах от 1970 года: остаток от деления на 1440 — минуты текущих суток по МСК
+static func msk_time() -> float:
+	return (Time.get_unix_time_from_system() + MSK_OFFSET) / 60.0
+
 func day() -> int: return int(time / 1440.0) + 1
 func hour_f() -> float: return fmod(time, 1440.0) / 60.0
 func clock() -> String:
@@ -140,10 +146,11 @@ func clock() -> String:
 ## 0 — светло, 1 — ночь
 func darkness() -> float:
 	var hh := hour_f()
-	if hh < 5.0: return 1.0
-	if hh < 7.0: return 1.0 - (hh - 5.0) / 2.0
-	if hh < 19.0: return 0.0
-	if hh < 21.5: return (hh - 19.0) / 2.5
+	# темно только ночью: светло 06:00–21:00, сумерки до 22:30, ночь до 04:30, рассвет до 06:00
+	if hh < 4.5: return 1.0
+	if hh < 6.0: return 1.0 - (hh - 4.5) / 1.5
+	if hh < 21.0: return 0.0
+	if hh < 22.5: return (hh - 21.0) / 1.5
 	return 1.0
 
 func player(pid: int) -> Player:
@@ -296,7 +303,7 @@ func update(dt: float) -> void:
 		var p := player(a[0])
 		if p != null and not p.dead:
 			_do_action(p, a[1])
-	time += dt * MINUTES_PER_SEC
+	time = msk_time() if real_clock else time + dt * MINUTES_PER_SEC
 	for p: Player in players:
 		_update_player(p, dt)
 	_age_shots(dt)

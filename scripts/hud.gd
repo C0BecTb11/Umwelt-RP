@@ -414,7 +414,7 @@ func _hud(g: GameState, me: GameState.Player) -> void:
 	var W := get_viewport_rect().size.x
 	var H := get_viewport_rect().size.y
 	var night := g.darkness() > 0.5
-	var clock := "День %d  ·  %s" % [g.day(), g.clock()]
+	var clock := "%s МСК" % g.clock()
 	var tw := _tw(clock, 14) + 44
 	_rr(Rect2(W / 2 - tw / 2, 12, tw, 30), 15, Color(0.055, 0.07, 0.085, 0.6))
 	Icons.glyph(self, "moon" if night else "sun", Vector2(W / 2 - tw / 2 + 18, 27), 10, Color(0.72, 0.78, 0.94) if night else Color(0.94, 0.78, 0.31))
