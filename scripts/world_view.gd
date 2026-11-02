@@ -434,20 +434,6 @@ func _on_fx(f: Array, local_pid: int, me: GameState.Player) -> void:
 				vibrate = 25
 
 # ================== РАССТАНОВКА ==================
-const SHIRTS := [0x6A5A48, 0xB0B0A6, 0x4A7A4A, 0x2A2A2E, 0x5A6A3A, 0x2E4A7A]
-const PANTS := [0x3A3A44, 0x5A5040, 0x2E3A2E, 0x1E1E22, 0x4A5230, 0x1E2A44]
-const ZSKIN := [0x8E9E7A, 0x9AA088, 0x86967A, 0xA0A68E]
-const HAIRS := [0x3A2A1A, 0x8A8A84, 0x1A1A1A, 0x6A4A2A]
-
-static func _zcols(id: int, dark: float = 1.0) -> Array:
-	var k := id % 6
-	return [WorldMesh.c(SHIRTS[k]).darkened(1.0 - dark), WorldMesh.c(PANTS[k]).darkened(1.0 - dark), WorldMesh.c(ZSKIN[id % 4]).darkened(1.0 - dark), WorldMesh.c(HAIRS[id % 4])]
-
-static func _pcols(id: int) -> Array:
-	if id == 0:
-		return [WorldMesh.c(0x3A6EA5), WorldMesh.c(0x2E3440), WorldMesh.c(0xE0B090), WorldMesh.c(0x4A3020)]
-	return [WorldMesh.c(0x4A9A5A), WorldMesh.c(0x3A3A44), WorldMesh.c(0xD8A47E), WorldMesh.c(0x2A2018)]
-
 func _vis_at(p: Vector2) -> float:
 	var ix := floori(p.x)
 	var iz := floori(p.y)
@@ -545,9 +531,12 @@ func _place_scene(g: GameState, me: GameState.Player, dt: float) -> void:
 		if not p.connected:
 			continue
 		alive[p.id] = true
+		if players.has(p.id) and players[p.id].look_key != str(p.look):
+			players[p.id].queue_free()          # сменилась внешность (пол, причёска) — модель заново
+			players.erase(p.id)
 		if not players.has(p.id):
 			var m := CharModel.new()
-			m.setup(_pcols(p.id), false, false, p.id == 1)
+			m.setup(p.look)
 			add_child(m)
 			players[p.id] = m
 		var cm: CharModel = players[p.id]
@@ -562,6 +551,7 @@ func _place_scene(g: GameState, me: GameState.Player, dt: float) -> void:
 		fb = move_toward(fb, down_t, dt / (0.55 if down_t > fb else 0.8))
 		pfall[p.id] = fb
 		cm.fall = fb
+		cm.speed = st[2]
 		cm.pose(st[0], (st[3] if st.size() > 3 else 0.0) * (1.0 - fb), p.attack_anim, p.weapon_id(), fb >= 0.999, p.sneaking, false, p.rclimb)
 	for id in players.keys():
 		if not alive.has(id):

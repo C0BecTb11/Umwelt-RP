@@ -14,25 +14,31 @@ static func create(kind: String) -> GameState:
 			g.time = 23 * 60.0
 		"evening":
 			g.time = 19 * 60.0 + 50.0
-		"gear", "outfit", "crowd", "knocked":
+		"gear", "outfit", "crowd", "knocked", "armed":
 			_open_street(g, p)
-			p.wear = {"head": "cap", "torso": "leather", "hands": "gloves", "legs": "cargo", "feet": "boots", "back": "bp_hiking"}
+			p.wear = {"torso": "suit_jacket", "legs": "pants", "feet": "shoes"}
 			p.face = Vector2(0, 1)
-			for id in ["hoodie", "jeans", "bp_school", "beanie", "medkit"]:
+			for id in ["hoodie", "jeans", "work_vest", "boots", "medkit"]:
 				Items.add_to(p.inv, id, 1)
-	if kind == "crowd" or kind == "knocked":
-		var outfits := [{"torso": "hoodie", "legs": "jeans"}, {"torso": "mil_jacket", "legs": "cargo", "feet": "boots", "back": "bp_military"},
-			{"head": "beanie", "torso": "leather", "legs": "jeans", "back": "bp_school"}, {"head": "helmet", "legs": "cargo"}]
+	if kind == "crowd" or kind == "knocked" or kind == "armed":
+		var outfits := [{"torso": "hoodie", "legs": "shorts", "feet": "sneakers"}, {"torso": "work_vest", "legs": "work_pants", "feet": "boots"},
+			{"torso": "dress", "feet": "shoes"}, {"torso": "biker_vest", "legs": "jeans", "feet": "boots"}]
+		var genders := ["m", "m", "f", "f"]
 		for k in 4:
 			var q := GameState.Player.new(k + 1)
 			q.pos = g.unstick(p.pos + Vector2.from_angle(k * 1.4 + 0.5) * 1.6, GameState.PLAYER_R)
 			q.rpos = q.pos
 			q.face = (p.pos - q.pos).normalized()
 			q.wear = outfits[k]
+			q.look = GameState.default_look(k + 1, genders[k])
 			q.name = ["Джек", "Майк", "Сара", "Тони"][k]
 			g.players.append(q)
 		if kind == "knocked":
 			g.knock_out(g.players[1])
+		if kind == "armed":
+			var arms := ["bat", "pistol", "knife", "crowbar", "hammer"]
+			for k in 5:
+				g.players[k].eq = arms[k]
 	if kind == "inv":
 		for id in ["canned", "water", "pistol", "ammo", "apple", "chips", "medkit"]:
 			Items.add_to(p.inv, id, 12 if id == "ammo" else 2)

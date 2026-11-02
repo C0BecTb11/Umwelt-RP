@@ -273,6 +273,30 @@ func _show_create_character(err: String) -> void:
 	col.add_child(first)
 	var last := _field("Фамилия (например, Miller)", false, LineEdit.KEYBOARD_TYPE_DEFAULT)
 	col.add_child(last)
+	# пол: две кнопки, выбранная подсвечена
+	var gender := ["m"]
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	col.add_child(row)
+	var bm := _fbtn("Мужчина", Color(0.23, 0.29, 0.35), func(): pass)
+	var bf := _fbtn("Женщина", Color(0.23, 0.29, 0.35), func(): pass)
+	for b in [bm, bf]:
+		b.custom_minimum_size = Vector2(176, 44)
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.toggle_mode = true
+		var on := StyleBoxFlat.new()
+		on.bg_color = Color(0.62, 0.24, 0.4)
+		on.set_corner_radius_all(12)
+		b.add_theme_stylebox_override("pressed", on)
+		b.add_theme_stylebox_override("hover_pressed", on)
+		row.add_child(b)
+	bm.button_pressed = true
+	var pick := func(g: String):
+		gender[0] = g
+		bm.set_pressed_no_signal(g == "m")
+		bf.set_pressed_no_signal(g == "f")
+	bm.pressed.connect(pick.bind("m"))
+	bf.pressed.connect(pick.bind("f"))
 	var go := _fbtn("Создать персонажа", Color(0.18, 0.42, 0.23), func(): pass)
 	col.add_child(go)
 	col.add_child(form_status)
@@ -291,7 +315,7 @@ func _show_create_character(err: String) -> void:
 			return
 		go.disabled = true
 		form_status.text = "Подожди…"
-		if await acc.create_character(f + "_" + l):
+		if await acc.create_character(f + "_" + l, gender[0]):
 			_connect_game()
 		else:
 			form_status.text = acc.last_error

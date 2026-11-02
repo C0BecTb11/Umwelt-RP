@@ -48,6 +48,7 @@ class Player:
 	var money := 0             # наличные, $
 	var bank := 0              # банковский счёт, $
 	var wear := {}             # слот → id надетой вещи (в inv её нет)
+	var look := {}             # внешность: g — пол "m"/"f", h — причёска (часть модели), sk — тон кожи 0..3
 	var snaps: Array = []      # снимки [время, x, y, fx, fy, climb] для плавной отрисовки чужого игрока
 	var rface := Vector2(1, 0)
 	var rclimb := -1.0
@@ -61,9 +62,10 @@ class Player:
 		for sl in wear:
 			w += Items.def(wear[sl])["w"] * 0.3
 		return w
-	## Сколько можно нести без замедления: рюкзак добавляет
+	## Сколько можно нести без замедления
 	func max_weight() -> float:
-		return MAX_WEIGHT + (Items.def(wear["back"])["cap"] if wear.has("back") else 0.0)
+		return MAX_WEIGHT
+	func gender() -> String: return str(look.get("g", "m"))
 	func count(item: String) -> int: return Items.count(inv, item)
 	func take(item: String, n: int = 1) -> bool:
 		var ok := Items.take(inv, item, n)
@@ -121,7 +123,8 @@ static func new_game(s: int) -> GameState:
 	p.pos = start
 	p.rpos = start
 	p.inv = [{"id": "water", "n": 1}, {"id": "chips", "n": 1}]
-	p.wear = {"legs": "jeans"}
+	p.wear = Items.START_WEAR.duplicate()
+	p.look = default_look(0, "m")
 	p.money = START_MONEY
 	g.spawn = start
 	g.players.append(p)
@@ -163,7 +166,36 @@ func add_fx(tp: int, x: float, y: float, a: float) -> void:
 
 ## Игрок подключился: ключ аккаунта (uid) получает своего прежнего персонажа.
 ## static_id — постоянный ID из базы; если задан, карточка игрока живёт под этим номером
-func join_player(uid: String, pname: String, static_id: int = -1) -> Player:
+## Внешность по умолчанию: причёска и тон кожи зависят от ID (у всех разные, у одного игрока — всегда одинаковые)
+static func default_look(pid: int, gender: String) -> Dictionary:
+	var g := gender if Items.HEADS.has(gender) else "m"
+	var h := absi(pid * 7 + 3)
+	return {"g": g, "h": Items.HEADS[g][h % 4], "sk": absi(pid) % 4}
+
+## Внешность из сохранения/сети с проверкой: мусор не ломает модель
+static func look_from(o, pid: int) -> Dictionary:
+	if not (o is Dictionary):
+		return default_look(pid, "m")
+	var g := str(o.get("g", "m"))
+	if not Items.HEADS.has(g):
+		g = "m"
+	var lk := default_look(pid, g)
+	if str(o.get("h", "")) in Items.HEADS[g]:
+		lk["h"] = str(o["h"])
+	lk["sk"] = clampi(int(o.get("sk", lk["sk"])), 0, 3)
+	return lk
+
+## Сменить пол персонажа (из базы): новая причёска, неподходящая одежда — в инвентарь
+func set_gender(p: Player, gender: String) -> void:
+	if not Items.HEADS.has(gender) or p.gender() == gender and not p.look.is_empty():
+		return
+	p.look = default_look(p.id, gender)
+	for sl in p.wear.keys():
+		if not Items.fits(p.wear[sl], gender):
+			Items.add_to(p.inv, p.wear[sl], 1)
+			p.wear.erase(sl)
+
+func join_player(uid: String, pname: String, static_id: int = -1, gender: String = "") -> Player:
 	var pid := -1
 	if static_id > 0:
 		if uids.has(uid) and int(uids[uid]) != static_id:
@@ -185,6 +217,8 @@ func join_player(uid: String, pname: String, static_id: int = -1) -> Player:
 	p.connected = true
 	p.remote = true
 	p.name = pname
+	if gender != "":
+		set_gender(p, gender)
 	p.move = Vector2.ZERO
 	p.force_seq += 1
 	p.snaps.clear()
@@ -235,7 +269,8 @@ func _spawn_player(pid: int) -> Player:
 	p.pos = unstick(spawn + Vector2(randf_range(-1.5, 1.5), randf_range(-1.5, 1.5)), PLAYER_R)
 	p.rpos = p.pos
 	p.inv = [{"id": "water", "n": 1}]
-	p.wear = {"legs": "jeans"}
+	p.wear = Items.START_WEAR.duplicate()
+	p.look = default_look(pid, "m")
 	p.money = START_MONEY
 	players.append(p)
 	return p
@@ -757,6 +792,9 @@ func _wear(p: Player, id: String) -> void:
 	var d := Items.def(id)
 	if d["kind"] != Items.Kind.WEAR or p.count(id) <= 0:
 		return
+	if not Items.fits(id, p.gender()):
+		msg(p.id, "Это тебе не подойдёт")
+		return
 	var sl: String = d["slot"]
 	if not p.take(id):
 		return
@@ -771,8 +809,6 @@ func _unwear(p: Player, sl: String) -> void:
 	var id: String = p.wear[sl]
 	p.wear.erase(sl)
 	Items.add_to(p.inv, id, 1)
-	if sl == "back" and p.weight() > p.max_weight():
-		msg(p.id, "Без рюкзака тяжело — ты замедлился")
 
 func _use(p: Player, id: String) -> void:
 	var d := Items.def(id)
@@ -830,26 +866,21 @@ func player_data(p: Player) -> Dictionary:
 		"dead": p.dead, "rt": snappedf(p.respawn_t, 0.1), "k": p.kills, "eq": p.eq, "mo": p.money, "bk": p.bank,
 		"inv": Items.copy(p.inv), "aa": snappedf(p.attack_anim, 0.01), "con": p.connected, "sn": p.sneaking,
 		"cl": snappedf(p.climb, 0.01), "tn": p.ta_name if p.ta_act != null else "", "tp": snappedf(p.ta_progress(), 0.01),
-		"nm": p.name, "fs": p.force_seq, "wr": p.wear.duplicate(),
+		"nm": p.name, "fs": p.force_seq, "wr": p.wear.duplicate(), "lk": p.look.duplicate(),
 		"cfx": snappedf(p.cl_from.x, 0.01), "cfy": snappedf(p.cl_from.y, 0.01), "ctx": snappedf(p.cl_to.x, 0.01), "cty": snappedf(p.cl_to.y, 0.01)}
 
 ## Что видят другие игроки: без инвентаря, денег и здоровья (это личное)
 func player_public(p: Player) -> Dictionary:
 	return {"id": p.id, "x": snappedf(p.pos.x, 0.01), "y": snappedf(p.pos.y, 0.01), "pub": true,
-		"dead": p.dead, "eq": p.eq, "nm": p.name, "wr": p.wear.duplicate(), "cl": snappedf(p.climb, 0.01), "fs": p.force_seq}
+		"dead": p.dead, "eq": p.eq, "nm": p.name, "wr": p.wear.duplicate(), "lk": p.look.duplicate(), "cl": snappedf(p.climb, 0.01), "fs": p.force_seq}
 
 ## Применить публичные данные чужого игрока, не трогая остальное
 func player_from_public(o: Dictionary, p: Player) -> void:
 	p.dead = bool(o.get("dead", false))
 	p.eq = str(o.get("eq", ""))
 	p.name = str(o.get("nm", ""))
-	p.wear = {}
-	var wr = o.get("wr", {})
-	if wr is Dictionary:
-		for sl in wr:
-			var wid := str(wr[sl])
-			if sl in Items.SLOTS and Items.DEFS.has(wid) and Items.def(wid)["slot"] == sl:
-				p.wear[sl] = wid
+	p.look = look_from(o.get("lk"), p.id)
+	p.wear = wear_from(o.get("wr", {}))
 
 func player_from(o: Dictionary, p: Player) -> void:
 	p.pos = Vector2(float(o.get("x", p.pos.x)), float(o.get("y", p.pos.y)))
@@ -874,13 +905,8 @@ func player_from(o: Dictionary, p: Player) -> void:
 	p.cl_from = Vector2(float(o.get("cfx", p.pos.x)), float(o.get("cfy", p.pos.y)))
 	p.cl_to = Vector2(float(o.get("ctx", p.pos.x)), float(o.get("cty", p.pos.y)))
 	p.name = o.get("nm", "")
-	p.wear = {}
-	var wr = o.get("wr", {})
-	if wr is Dictionary:
-		for sl in wr:
-			var wid := str(wr[sl])
-			if sl in Items.SLOTS and Items.DEFS.has(wid) and Items.def(wid)["slot"] == sl:
-				p.wear[sl] = wid
+	p.look = look_from(o.get("lk"), p.id)
+	p.wear = wear_from(o.get("wr", {}))
 	p.force_seq = int(o.get("fs", 0))
 	var tn: String = o.get("tn", "")
 	if tn != "":
@@ -891,6 +917,15 @@ func player_from(o: Dictionary, p: Player) -> void:
 			p.ta_act = {"a": "remote"}
 	else:
 		p.ta_act = null
+
+static func wear_from(wr) -> Dictionary:
+	var out := {}
+	if wr is Dictionary:
+		for sl in wr:
+			var wid := str(wr[sl])
+			if sl in Items.SLOTS and Items.DEFS.has(wid) and Items.def(wid)["slot"] == sl:
+				out[sl] = wid
+	return out
 
 func _cont_data(d: Dictionary) -> Dictionary:
 	var o := {}
@@ -927,7 +962,7 @@ func to_data_for(pid: int) -> Dictionary:
 	return {"v": SAVE_VERSION, "seed": seed, "time": time, "tiles": Marshalls.raw_to_base64(world.tiles),
 		"thp": thp, "cont": _cont_data(world.containers), "p": ps, "spawn": [spawn.x, spawn.y]}
 
-const SAVE_VERSION := 1
+const SAVE_VERSION := 2
 
 ## Проверка формата: без карты мира загружать нечего
 static func valid_save(o) -> bool:
@@ -939,6 +974,22 @@ static func valid_save(o) -> bool:
 static func migrate(o: Dictionary) -> Dictionary:
 	if not o.has("uids"):
 		o["uids"] = {}
+	if int(o.get("v", 1)) < 2 and o.get("p") is Array:
+		# v2: одежда стала моделями Quaternius — старые вещи (кепки, рюкзаки, куртки) убраны.
+		# Кто ходил в одних джинсах, получает футболку и кеды; неизвестные вещи из инвентаря исчезают.
+		for pd in o["p"]:
+			if not (pd is Dictionary) or pd.get("pub", false):
+				continue
+			var wr := wear_from(pd.get("wr", {}))
+			for sl in Items.START_WEAR:
+				if not wr.has(sl):
+					wr[sl] = Items.START_WEAR[sl]
+			pd["wr"] = wr
+			var inv := []
+			for st in pd.get("inv", []):
+				if st is Dictionary and Items.DEFS.has(str(st.get("id", ""))):
+					inv.append(st)
+			pd["inv"] = inv
 	o["v"] = SAVE_VERSION
 	return o
 

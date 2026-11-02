@@ -34,6 +34,7 @@ func _ready() -> void:
 	test_attack_sync()
 	test_house_layout()
 	test_wear()
+	test_look()
 	test_rp_rules()
 	test_player_card()
 	print("\nИТОГО: %d прошло, %d ошибок" % [passes, fails])
@@ -481,37 +482,77 @@ func test_house_layout() -> void:
 func test_wear() -> void:
 	var g := _game()
 	var p: GameState.Player = g.players[0]
-	p.inv = [{"id": "bp_hiking", "n": 1}, {"id": "bp_school", "n": 1}, {"id": "leather", "n": 1}]
-	p.wear = {}
-	var base := p.max_weight()
-	g.actions.append([0, {"a": "wear", "id": "bp_hiking"}])
+	p.inv = [{"id": "hoodie", "n": 1}, {"id": "suit_jacket", "n": 1}, {"id": "dress", "n": 1}]
+	p.wear = {"legs": "jeans"}
+	g.actions.append([0, {"a": "wear", "id": "hoodie"}])
 	for i in 120:
 		g.update(0.016)
-	var cap1 := p.max_weight() - base
-	g.actions.append([0, {"a": "wear", "id": "bp_school"}])
+	g.actions.append([0, {"a": "wear", "id": "suit_jacket"}])
 	for i in 120:
 		g.update(0.016)
-	var swapped: bool = p.wear.get("back", "") == "bp_school" and p.count("bp_hiking") == 1 and p.count("bp_school") == 0
+	var swapped: bool = p.wear.get("torso", "") == "suit_jacket" and p.count("hoodie") == 1 and p.count("suit_jacket") == 0
 	g.actions.append([0, {"a": "wear", "id": "pistol"}])      # не одежда
-	g.actions.append([0, {"a": "wear", "id": "helmet"}])      # нет в инвентаре
+	g.actions.append([0, {"a": "wear", "id": "boots"}])       # нет в инвентаре
+	g.actions.append([0, {"a": "wear", "id": "dress"}])       # мужчине платье не подходит
 	g.actions.append([0, {"a": "unwear", "slot": "nonsense"}])
 	for i in 120:
 		g.update(0.016)
-	check("Одежда: рюкзак надевается, +вес, смена рюкзака возвращает прежний", cap1 >= 12.0 and swapped and not p.wear.has("head") and not p.wear.has("hand"),
-		"+%.0f кг, слоты %s, инв %s" % [cap1, p.wear, p.inv])
-	g.actions.append([0, {"a": "wear", "id": "leather"}])
-	for i in 120:
-		g.update(0.016)
+	check("Одежда: надевается, смена вещи возвращает прежнюю, чужое и неподходящее не надевается",
+		swapped and p.wear.get("torso", "") == "suit_jacket" and p.count("dress") == 1 and not p.wear.has("feet") and not p.wear.has("hand"),
+		"слоты %s, инв %s" % [p.wear, p.inv])
 	var d = JSON.parse_string(JSON.stringify(g.to_data()))
 	var g2 := GameState.new(g.seed)
 	g2.load_data(d)
-	check("Одежда сохраняется и загружается", g2.players[0].wear == p.wear, "%s → %s" % [p.wear, g2.players[0].wear])
-	g.actions.append([0, {"a": "unwear", "slot": "back"}])
+	check("Одежда и внешность сохраняются и загружаются", g2.players[0].wear == p.wear and g2.players[0].look == p.look, "%s → %s" % [p.wear, g2.players[0].wear])
+	g.actions.append([0, {"a": "unwear", "slot": "torso"}])
 	for i in 120:
 		g.update(0.016)
-	var total := p.count("bp_hiking") + p.count("bp_school") + (1 if p.wear.has("back") else 0)
-	check("Одежда: снять — вещь возвращается в инвентарь, ничего не теряется и не множится", not p.wear.has("back") and total == 2, "рюкзаков %d" % total)
+	var total := p.count("hoodie") + p.count("suit_jacket") + (1 if p.wear.has("torso") else 0)
+	check("Одежда: снять — вещь возвращается в инвентарь, ничего не теряется и не множится", not p.wear.has("torso") and total == 2, "вещей %d" % total)
+	# каждая вещь и каждая причёска — существующая часть модели
+	var missing := []
+	for id in Items.DEFS:
+		var dd: Dictionary = Items.DEFS[id]
+		if dd["kind"] != Items.Kind.WEAR:
+			continue
+		for gg in dd.get("parts", {}):
+			if not ResourceLoader.exists("res://assets/chars/%s/%s.scn" % [gg, dd["parts"][gg]]):
+				missing.append("%s/%s" % [gg, id])
+	for gg in Items.HEADS:
+		for h in Items.HEADS[gg]:
+			if not ResourceLoader.exists("res://assets/chars/%s/%s.scn" % [gg, h]):
+				missing.append(h)
+		for sl in Items.BARE[gg]:
+			if not ResourceLoader.exists("res://assets/chars/%s/%s.scn" % [gg, Items.BARE[gg][sl]]):
+				missing.append(Items.BARE[gg][sl])
+	check("Персонажи: у всех вещей и причёсок есть модели", missing.is_empty() and ResourceLoader.exists("res://assets/chars/m_base.scn") and ResourceLoader.exists("res://assets/chars/f_base.scn"), str(missing))
+	# платье закрывает и низ; без одежды — «база»
+	check("Персонажи: платье показывает и низ, пустой слот — без одежды",
+		Items.part_for({"torso": "dress", "legs": "jeans"}, "f", "legs") == "Formal_Legs" and Items.part_for({}, "m", "torso") == "Beach_Body"
+		and Items.part_for({"legs": "jeans"}, "m", "legs") == "Casual2_Legs")
 
+## Пол из базы: внешность меняется, неподходящая одежда уходит в инвентарь; старые сохранения переходят на новую одежду
+func test_look() -> void:
+	var g := _game()
+	var p := g.join_player("sb:girl", "Kate_Morris", 12, "f")
+	check("Внешность: пол из базы, причёска женская", p.look.get("g") == "f" and str(p.look.get("h")) in Items.HEADS["f"], str(p.look))
+	p.wear["torso"] = "hoodie"
+	g.set_gender(p, "f")
+	var p2 := g.join_player("sb:girl", "Kate_Morris", 12, "f")
+	check("Внешность: повторный вход не меняет причёску", p2.look == p.look)
+	var q := g.join_player("sb:guy", "Frank_Russo", 3, "m")
+	q.wear = {"torso": "dress", "legs": "jeans"}
+	g.set_gender(q, "f")
+	g.set_gender(q, "m")
+	check("Внешность: неподходящая вещь снимается в инвентарь", not q.wear.has("torso") and q.count("dress") == 1, "%s %s" % [q.wear, q.inv])
+	var old := {"v": 1, "time": 100, "tiles": g.to_data()["tiles"], "uids": {}, "p": [
+		{"id": 5, "x": 50, "y": 50, "wr": {"legs": "jeans", "back": "bp_hiking", "head": "cap"}, "inv": [{"id": "leather", "n": 1}, {"id": "water", "n": 2}]}]}
+	var g3 := GameState.new(0)
+	g3.load_data(JSON.parse_string(JSON.stringify(old)))
+	var o: GameState.Player = g3.player(5)
+	check("Сохранение v1: старая одежда убрана, выдана футболка и кеды, вода на месте",
+		o != null and o.wear == {"legs": "jeans", "torso": "tshirt", "feet": "sneakers"} and o.count("water") == 2 and o.count("leather") == 0 and o.look.get("g") == "m",
+		"%s %s" % [o.wear if o else "", o.inv if o else ""])
 
 ## РП-правила: аккаунт по uid, приватность, драка между игроками, потеря сознания и возвращение
 func test_rp_rules() -> void:

@@ -177,13 +177,13 @@ func _verify(c: Client, token: String, legacy: String) -> void:
 		_reject(c, "Сессия устарела — войди в аккаунт заново" if u[0] == 401 or u[0] == 403 else "Сервер аккаунтов недоступен, попробуй позже")
 		return
 	var user_id := str(u[1]["id"])
-	var ch: Array = await _sb("/rest/v1/characters?select=id,name&user_id=eq." + user_id, token)
+	var ch: Array = await _sb("/rest/v1/characters?select=id,name,gender&user_id=eq." + user_id, token)
 	if not by_peer.has(c.peer):
 		return
 	if ch[0] != 200 or not (ch[1] is Array) or ch[1].is_empty():
 		_reject(c, "У аккаунта нет персонажа — создай его при входе")
 		return
-	_enter(c, "sb:" + user_id, str(ch[1][0]["name"]), legacy, int(ch[1][0].get("id", -1)))
+	_enter(c, "sb:" + user_id, str(ch[1][0]["name"]), legacy, int(ch[1][0].get("id", -1)), str(ch[1][0].get("gender", "m")))
 
 func _reject(c: Client, why: String) -> void:
 	c.checking = false
@@ -205,7 +205,7 @@ func _sb(path: String, token: String) -> Array:
 	return [int(r[1]), JSON.parse_string((r[3] as PackedByteArray).get_string_from_utf8())]
 
 ## Впустить в мир. key — ключ аккаунта; legacy — старый uid телефона (персонаж до аккаунтов переходит к аккаунту)
-func _enter(c: Client, key: String, pname: String, legacy: String, static_id: int = -1) -> void:
+func _enter(c: Client, key: String, pname: String, legacy: String, static_id: int = -1, gender: String = "") -> void:
 	c.checking = false
 	if not by_peer.has(c.peer):
 		return
@@ -219,7 +219,7 @@ func _enter(c: Client, key: String, pname: String, legacy: String, static_id: in
 			Net.I.send({"t": "bye", "why": "В этот аккаунт вошли с другого устройства"}, other.peer)
 			Net.I.kick(other.peer)
 			other.pid = -1
-	var p := game.join_player(key, pname if pname != "" else "Гражданин", static_id)
+	var p := game.join_player(key, pname if pname != "" else "Гражданин", static_id, gender)
 	c.pid = p.id
 	c.full_t = 0.0
 	Net.I.send({"t": "init", "pid": p.id, "seed": game.seed, "world": game.to_data_for(p.id)}, c.peer)

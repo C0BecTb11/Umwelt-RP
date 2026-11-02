@@ -144,8 +144,8 @@ static func valid_name(first: String, last: String) -> String:
 		return "Имя и фамилия — латиницей, с заглавной буквы, без пробелов и цифр (например, John и Miller)"
 	return ""
 
-func create_character(n: String) -> bool:
-	var r: Array = await _req(HTTPClient.METHOD_POST, "/rest/v1/characters", {"user_id": user_id, "name": n}, access_token, PackedStringArray(["Prefer: return=minimal"]))
+func create_character(n: String, gender: String = "m") -> bool:
+	var r: Array = await _req(HTTPClient.METHOD_POST, "/rest/v1/characters", {"user_id": user_id, "name": n, "gender": gender}, access_token, PackedStringArray(["Prefer: return=minimal"]))
 	if r[0] >= 200 and r[0] < 300:
 		char_name = n
 		return true

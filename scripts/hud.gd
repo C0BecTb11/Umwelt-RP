@@ -103,7 +103,7 @@ func open_demo_panel(kind: String) -> void:
 			selected = "medkit"
 		"gear":
 			panel = Pnl.GEAR
-			gear_slot = "back"
+			gear_slot = "torso"
 
 # ================== РАСКЛАДКА ==================
 func _safe() -> Rect2:
@@ -588,19 +588,14 @@ func _draw_dead(g: GameState, me: GameState.Player, vr: Rect2) -> void:
 
 # ---------- экран «Снаряжение» ----------
 const GEAR_LAYOUT := {
-	"head": Vector2(0.5, 0.0), "torso": Vector2(0.0, 0.2), "hands": Vector2(0.0, 0.62),
-	"back": Vector2(1.0, 0.36), "legs": Vector2(1.0, 0.72), "feet": Vector2(0.5, 1.0), "hand": Vector2(1.0, 0.0)}
+	"torso": Vector2(0.0, 0.22), "legs": Vector2(0.0, 0.62), "feet": Vector2(0.5, 1.0), "hand": Vector2(1.0, 0.22)}
 
 static func _wear_info(id: String) -> String:
 	var d := Items.def(id)
-	var t: String = Items.SLOT_NAMES.get(d["slot"], "")
-	if d["cap"] > 0.0:
-		return "%s · +%d кг к переносимому весу" % [t, int(d["cap"])]
-	return t
+	return Items.SLOT_NAMES.get(d["slot"], "")
 
 func _draw_gear(me: GameState.Player) -> void:
-	var cap: float = me.max_weight() - GameState.MAX_WEIGHT
-	_panel_bg("Снаряжение  —  вес %.1f / %d%s" % [me.weight(), int(me.max_weight()), ("  (рюкзак +%d)" % int(cap)) if cap > 0.0 else ""])
+	_panel_bg("Одежда  —  вес %.1f / %d" % [me.weight(), int(me.max_weight())])
 	var top := panel_rect.position.y + 56
 	var bottom := panel_rect.end.y - 14
 	var dollw := minf(panel_rect.size.x * 0.5, 360.0)
@@ -653,9 +648,9 @@ func _draw_gear(me: GameState.Player) -> void:
 	var can := []
 	for st in me.inv:
 		var d := Items.def(st["id"])
-		if d["kind"] == Items.Kind.WEAR and (gear_slot == "" or gear_slot == d["slot"]):
+		if d["kind"] == Items.Kind.WEAR and (gear_slot == "" or gear_slot == d["slot"]) and Items.fits(st["id"], me.gender()):
 			can.append(st["id"])
-	_text(Vector2(rx, ry + 10), "Можно надеть (нажми):" if can.size() > 0 else "Нечего надеть — ищи в шкафах и машинах", 12, Color(0.75, 0.75, 0.75))
+	_text(Vector2(rx, ry + 10), "Можно надеть (нажми):" if can.size() > 0 else "Нечего надеть", 12, Color(0.75, 0.75, 0.75))
 	ry += 22
 	for id in can:
 		if ry + ROW_H > bottom:
