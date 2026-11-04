@@ -44,6 +44,7 @@ func _ready() -> void:
 	test_old_world()
 	test_rp_rules()
 	test_events_all()
+	test_visibility()
 	test_stamina_net()
 	test_server_guards()
 	test_dtls()
@@ -851,6 +852,74 @@ func test_events_all() -> void:
 	var far_sh := g.state_for(far.id).has("sh")
 	check("Сеть: эффекты и выстрелы получают те, кто рядом, и только они", near_fx and near_sh and not far_fx and not far_sh,
 		"рядом: эффект %s, выстрел %s; далеко (%.0f клеток): эффект %s, выстрел %s" % [near_fx, near_sh, far.pos.distance_to(a.pos), far_fx, far_sh])
+
+## Первая клетка (центр), подходящая под условие; (-1, -1) — нет такой
+func _cell_where(g: GameState, ok: Callable) -> Vector2:
+	for y in range(2, g.world.h - 2):
+		for x in range(2, g.world.w - 2):
+			var c := Vector2(x + 0.5, y + 0.5)
+			if ok.call(c):
+				return c
+	return Vector2(-1, -1)
+
+## Сколько игроков с этим id в пакетах для зрителя: быстрый снимок, полный снимок, первый пакет при входе
+func _seen_in(g: GameState, viewer: int, target: int) -> Array:
+	var r := [0, 0, 0]
+	var ps: PackedFloat32Array = g.state_for(viewer)["p"]
+	var i := 0
+	while i + 9 < ps.size():
+		if int(ps[i]) == target:
+			r[0] += 1
+		i += 10
+	for e in g.events_for(viewer, true).get("p", []):
+		if int(e["id"]) == target:
+			r[1] += 1
+	for e in g.to_data_for(viewer)["p"]:
+		if int(e["id"]) == target:
+			r[2] += 1
+	return r
+
+## Другие игроки уходят телефону только в пределах экрана (с запасом) и не из-под чужой крыши (аудит, В3)
+func test_visibility() -> void:
+	var g := GameState.new_game(1)
+	g.players.clear()
+	var w := g.world
+	var free := func(c: Vector2) -> bool: return not w.circle_blocked(c.x, c.y, GameState.PLAYER_R)
+	var indoor := _cell_where(g, func(c: Vector2) -> bool: return free.call(c) and g.building_at(c) >= 0)
+	var bi := g.building_at(indoor)
+	var a := g.join_player("uid-vis-aaaa", "A")
+	var near := g.join_player("uid-vis-near", "N")
+	var mid := g.join_player("uid-vis-mid0", "M")
+	var inn := g.join_player("uid-vis-in00", "I")
+	# A на улице в 3–10 клетках от здания, N — на улице рядом с A, M — на улице в 25–35 клетках (раньше был виден)
+	a.pos = _cell_where(g, func(c: Vector2) -> bool: return free.call(c) and g.building_at(c) < 0 and c.distance_to(indoor) >= 3.0 and c.distance_to(indoor) <= 10.0)
+	near.pos = _cell_where(g, func(c: Vector2) -> bool: return free.call(c) and g.building_at(c) < 0 and c.distance_to(a.pos) >= 4.0 and c.distance_to(a.pos) <= 10.0)
+	mid.pos = _cell_where(g, func(c: Vector2) -> bool: return free.call(c) and g.building_at(c) < 0 and c.distance_to(a.pos) >= 25.0 and c.distance_to(a.pos) <= 35.0)
+	inn.pos = indoor
+	var placed := bi >= 0 and a.pos.x > 0 and near.pos.x > 0 and mid.pos.x > 0
+	check("Видимость: свой игрок всегда в пакетах", placed and _seen_in(g, a.id, a.id) == [1, 1, 1], "%s" % [_seen_in(g, a.id, a.id)])
+	check("Видимость: игрок рядом на улице виден (быстрый, полный и первый пакет)", placed and _seen_in(g, a.id, near.id) == [1, 1, 1],
+		"%s, расстояние %.1f" % [_seen_in(g, a.id, near.id), near.pos.distance_to(a.pos)])
+	check("Видимость: игрок за пределами экрана (25+ клеток) не приходит", placed and _seen_in(g, a.id, mid.id) == [0, 0, 0],
+		"%s, расстояние %.1f" % [_seen_in(g, a.id, mid.id), mid.pos.distance_to(a.pos)])
+	check("Видимость: игрок под крышей чужого здания с улицы не виден", placed and _seen_in(g, a.id, inn.id) == [0, 0, 0],
+		"%s, расстояние %.1f" % [_seen_in(g, a.id, inn.id), inn.pos.distance_to(a.pos)])
+	check("Видимость: из здания видно улицу рядом", placed and _seen_in(g, inn.id, a.id) == [1, 1, 1], "%s" % [_seen_in(g, inn.id, a.id)])
+	# A заходит в то же здание — видит того, кто внутри
+	a.pos = _cell_where(g, func(c: Vector2) -> bool: return free.call(c) and g.building_at(c) == bi and c != indoor)
+	check("Видимость: в том же здании игроки видят друг друга", a.pos.x > 0 and _seen_in(g, a.id, inn.id) == [1, 1, 1], "%s" % [_seen_in(g, a.id, inn.id)])
+	# выстрелы и эффекты — как раньше, в радиусе VIEW_R
+	check("Видимость: радиус игроков меньше радиуса выстрелов и эффектов", GameState.SEE_R < GameState.VIEW_R and GameState.SEE_R >= 17.0)
+	# телефон: кто пропал из снимка, тот перестаёт рисоваться
+	var c := GameState.new_game(1)
+	c.is_replica = true
+	c.players.clear()
+	a.pos = near.pos + Vector2(1, 0)
+	c.load_data(JSON.parse_string(JSON.stringify(g.to_data_for(a.id))))
+	var had := c.player(near.id) != null and c.player(near.id).connected
+	near.pos = a.pos + Vector2(GameState.SEE_R + 5.0, 0)
+	c.apply_state(g.state_for(a.id), a.id)
+	check("Видимость: ушедший из вида игрок на телефоне больше не рисуется", had and not c.player(near.id).connected, "был %s" % had)
 
 ## Скорость по сети зависит от выносливости; бег тратит выносливость по пройденному пути, а не по словам клиента
 func _net_run(lie: bool, honest_client: bool, seconds: float) -> Array:

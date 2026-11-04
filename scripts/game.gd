@@ -5,7 +5,8 @@ const PLAYER_R := 0.3
 const MAX_WEIGHT := 15.0
 const MINUTES_PER_SEC := 1.0   # скорость времени, если часы не реальные (демо-снимки)
 const MSK_OFFSET := 3 * 3600   # время в игре — московское (UTC+3, без перехода на летнее)
-const VIEW_R := 40.0            # радиус, в котором видны другие игроки (клеток)
+const VIEW_R := 40.0            # радиус, в котором приходят выстрелы и эффекты (клеток)
+const SEE_R := 20.0             # радиус, в котором приходят другие игроки: экран телефона (до ~17 клеток) с запасом
 const START_MONEY := 500        # стартовые наличные нового персонажа, $
 const RESPAWN_TIME := 20.0      # секунд без сознания
 
@@ -886,16 +887,37 @@ func to_data() -> Dictionary:
 	return {"v": SAVE_VERSION, "seed": seed, "time": time, "uids": uids.duplicate(), "tiles": Marshalls.raw_to_base64(world.tiles),
 		"w": world.w, "p": ps}
 
+## Здание, под крышей которого стоит точка, или -1 — улица. Так же решает телефон, чью крышу не рисовать
+## (world_view.gd, inside_building): стена — снаружи, пол, дверь, окно, мебель — внутри
+func building_at(pos: Vector2) -> int:
+	if not pos.is_finite():
+		return -1
+	var x := floori(pos.x)
+	var y := floori(pos.y)
+	if not world.inside(x, y):
+		return -1
+	var b: int = world.building_of[world.idx(x, y)]
+	return b if b >= 0 and world.t(x, y) != GameWorld.WALL else -1
+
+## Видит ли тот, кто стоит в c (в здании cb), игрока p: рядом (экран с запасом) и не под чужой крышей.
+## Остальных телефон не получает вовсе — подсмотреть их положение нельзя (аудит, В3)
+func sees(c: Vector2, cb: int, p: Player) -> bool:
+	if p.pos.distance_squared_to(c) > SEE_R * SEE_R:
+		return false
+	var pb := building_at(p.pos)
+	return pb < 0 or pb == cb
+
 ## Мир для нового клиента: карта, время; из игроков — он сам полностью, остальные только внешне.
 ## Карту аккаунтов (uids) не отдаём никогда: uid — это ключ от чужого персонажа
 func to_data_for(pid: int) -> Dictionary:
 	var me := player(pid)
 	var c: Vector2 = me.pos if me != null else spawn
+	var cb := building_at(c)
 	var ps := []
 	for p: Player in players:
 		if p.id == pid:
 			ps.append(player_data(p))
-		elif p.connected and absf(p.pos.x - c.x) <= VIEW_R and absf(p.pos.y - c.y) <= VIEW_R:
+		elif p.connected and sees(c, cb, p):
 			var pub := player_public(p)
 			pub["con"] = true
 			ps.append(pub)
@@ -983,12 +1005,13 @@ func load_data(o: Dictionary) -> void:
 func state_for(pid: int) -> Dictionary:
 	var me := player(pid)
 	var c: Vector2 = me.pos if me != null else spawn
+	var cb := building_at(c)
 	var ps := PackedFloat32Array()
 	for p in players:
 		if not p.connected:
 			continue
-		# только те, кто рядом: при сотнях игроков пакет не растёт
-		if p.id != pid and (absf(p.pos.x - c.x) > VIEW_R or absf(p.pos.y - c.y) > VIEW_R):
+		# только те, кого видно: при сотнях игроков пакет не растёт, а чужие дома не просматриваются
+		if p.id != pid and not sees(c, cb, p):
 			continue
 		ps.append_array([p.id, p.pos.x, p.pos.y, p.face.x, p.face.y, float(p.atk_seq * 2 + p.atk_kind), 1.0 if p.sneaking else 0.0, p.force_seq, p.hp if p.id == pid else 0.0, p.stamina if p.id == pid else 0.0])
 	var o := {"t": "st", "time": time, "ts": Time.get_ticks_msec(), "p": ps}
@@ -1007,11 +1030,12 @@ func events_for(pid: int, full_players: bool) -> Dictionary:
 	if full_players:
 		var me := player(pid)
 		var c: Vector2 = me.pos if me != null else spawn
+		var cb := building_at(c)
 		var ps := []
 		for p in players:
 			if p.id == pid:
 				ps.append(player_data(p))          # себе — всё
-			elif p.connected and absf(p.pos.x - c.x) <= VIEW_R and absf(p.pos.y - c.y) <= VIEW_R:
+			elif p.connected and sees(c, cb, p):
 				ps.append(player_public(p))        # другим — только внешность
 		o["p"] = ps
 	# общие списки здесь НЕ очищаются: функцию вызывают для каждого игрока по очереди, а очищает их
