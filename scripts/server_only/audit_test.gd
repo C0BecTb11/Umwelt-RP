@@ -27,6 +27,7 @@ func _ready() -> void:
 	test_remote_door()
 	test_bullet_window()
 	test_remote_no_false_rollback()
+	test_remote_through()
 	test_smooth_remote()
 	test_attack_sync()
 	test_house_layout()
@@ -142,6 +143,34 @@ func test_remote_wall() -> void:
 	var o2 := {"mx": 0.0, "my": 0.0, "run": false, "fs": f.force_seq, "fx": 0.0, "fy": 1.0, "x": f.pos.x, "y": wc.y + 0.5}
 	g.remote_input(f, o2)
 	check("Сеть: игрок не может прислать позицию внутри стены", not g.world.circle_blocked(f.pos.x, f.pos.y, 0.25), "позиция %s внутри стены принята" % f.pos)
+
+## Позиция за стеной или закрытой дверью (в пределах запаса хода) — сервер не принимает (BF-024)
+func test_remote_through() -> void:
+	var g := _game()
+	var w := g.world
+	var f := g.join_player("t3", "Друг")
+	var tried := {"стена": 0, "дверь": 0}
+	var passed := 0
+	for y in range(2, w.h - 2):
+		for x in range(2, w.w - 2):
+			var tt := w.t(x, y)
+			if tt != GameWorld.WALL and tt != GameWorld.DOOR:
+				continue
+			for d: Vector2i in [Vector2i(1, 0), Vector2i(0, 1)]:
+				if w.solid(x - d.x, y - d.y) or w.solid(x + d.x, y + d.y):
+					continue
+				var a := Vector2(x + 0.5, y + 0.5) - Vector2(d) * 1.0
+				var b := Vector2(x + 0.5, y + 0.5) + Vector2(d) * 1.0
+				if w.circle_blocked(a.x, a.y, GameState.PLAYER_R) or w.circle_blocked(b.x, b.y, GameState.PLAYER_R):
+					continue
+				tried["стена" if tt == GameWorld.WALL else "дверь"] += 1
+				g.push_player(f, a)
+				f.move_budget = 2.5
+				g.remote_input(f, {"mx": 0.0, "my": 0.0, "run": true, "fs": f.force_seq, "fx": 1.0, "fy": 0.0, "x": b.x, "y": b.y})
+				if f.pos.distance_to(b) < 0.01:
+					passed += 1
+	check("Сеть: нельзя прислать позицию за стеной или закрытой дверью (%d стен, %d дверей)" % [tried["стена"], tried["дверь"]],
+		passed == 0 and tried["стена"] > 0 and tried["дверь"] > 0, "прошёл насквозь %d раз" % passed)
 
 func test_remote_actions() -> void:
 	var g := _game()
@@ -322,6 +351,13 @@ func test_remote_no_false_rollback() -> void:
 					cf.pos = f.pos
 					cf.force_seq = f.force_seq
 	check("Сеть: честного игрока не откатывает у стен и углов (%d маршрутов)" % routes, rollbacks == 0, "%d ложных откатов" % rollbacks)
+	# BF-024: найденные случаи — бег по диагонали в угол; телефон обходит угол «лесенкой», прямая его задевает
+	var corner_ok := true
+	for pr: Array in [[Vector2(63.25252, 99.20341), Vector2(63.14019, 99.30158)], [Vector2(59.24063, 34.21245), Vector2(59.12773, 34.30911)],
+			[Vector2(94.73626, 45.19777), Vector2(94.84921, 45.29434)], [Vector2(46.24812, 56.78923), Vector2(46.13283, 56.69913)]]:
+		if not g._path_free(pr[0], pr[1]):
+			corner_ok = false
+	check("Сеть: бег по диагонали в угол дома не откатывается (BF-024)", corner_ok)
 
 
 ## Друг бежит и останавливается; пакеты 20 раз в секунду приходят с разбросом 20–150 мс (плохой Wi‑Fi).

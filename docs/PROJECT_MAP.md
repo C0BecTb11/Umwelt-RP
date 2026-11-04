@@ -99,7 +99,7 @@ Umwelt-RP/
 | `scripts/saves.gd` | `Saves` | Офлайн-сохранение: временный файл → основной, резервная копия, проверка формата |
 | `scripts/demo.gd` | `Demo` | Демо-сцены: `inside`, `loot`, `inv`, `night`, `evening`, `gear`, `outfit`, `crowd`, `knocked`, `armed`, `catalog` (своё время, `real_clock = false`) |
 | `scripts/server_only/server.gd` | без class_name, `load()` | Ключи `--port`, `--max`, `--noauth`; клиенты (`Client`), «привет» и проверка сборки, вход через Supabase (`_verify` → `_enter`), выдача снимков (`_send_to`), автосохранение раз в 60 с, лог статистики |
-| `scripts/server_only/audit_test.gd` | без class_name | 50 проверок (стены, сеть, сохранения и их миграции, одежда, внешность, время и др.), выход с кодом 1 при ошибке |
+| `scripts/server_only/audit_test.gd` | без class_name | 52 проверки (стены, сеть, сохранения и их миграции, одежда, внешность, время и др.), выход с кодом 1 при ошибке |
 | `scripts/server_only/nettest.gd` | без class_name | Клиент-бот: подключается, ходит, считает «откаты» и видимых игроков; переменная `NT_HOST` — внешний сервер |
 | `scripts/server_only/authtest.gd` | без class_name | Вход ботом через `account.gd` и проверка, что сервер впустил |
 | `shaders/world.gdshader` | шейдер | Параметры `player_pos`, `cam_back`, `cut`, `night` (задаёт `world_view.gd`) |

@@ -451,19 +451,26 @@ func remote_input(p: Player, o: Dictionary) -> void:
 	p.move_budget -= d
 	p.pos = np
 
-## Можно ли пройти от a до b, не проходя сквозь стены и закрытые двери (шагами по 0.15)
+## Можно ли пройти от a до b, не проходя сквозь стены и закрытые двери.
+## Телефон двигает игрока по осям (сначала X, потом Y, кадр за кадром), поэтому у угла дома его путь — «лесенка»,
+## а не прямая. Принимаем прямую или одну из двух «ступенек» (сначала X или сначала Y). Каждый путь проверяется
+## точками через 0.05 клетки — сквозь целую клетку стены или двери так не пройти (см. BF-024).
 func _path_free(a: Vector2, b: Vector2) -> bool:
-	var d := b - a
-	var steps := ceili(d.length() / 0.15)
-	if steps == 0:
+	var r := PLAYER_R - 0.05
+	if _segment_free(a, b, r):
 		return true
-	var st := d / steps
-	var c := a
-	for i in steps:
-		var n := _move_circle(c, st, PLAYER_R - 0.05)
-		if n.distance_to(c + st) > 0.1:
+	var ex := Vector2(b.x, a.y)
+	if _segment_free(a, ex, r) and _segment_free(ex, b, r):
+		return true
+	var ey := Vector2(a.x, b.y)
+	return _segment_free(a, ey, r) and _segment_free(ey, b, r)
+
+func _segment_free(a: Vector2, b: Vector2, r: float) -> bool:
+	var steps := ceili(a.distance_to(b) / 0.05)
+	for i in range(1, steps + 1):
+		var c := a.lerp(b, float(i) / steps)
+		if world.circle_blocked(c.x, c.y, r):
 			return false
-		c = n
 	return true
 
 func push_player(p: Player, to: Vector2) -> void:
