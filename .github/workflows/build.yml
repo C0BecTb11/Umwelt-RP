@@ -130,6 +130,13 @@ jobs:
           if grep -aq "SCRIPT ERROR" nt_c*.log nt_server.log; then echo "ОШИБКА: SCRIPT ERROR в сетевом тесте"; exit 1; fi
           test "$(grep -al "ИТОГ: OK" nt_c*.log | wc -l)" = "3"
 
+      # Боевой сервер предъявляет тот сертификат, что вшит в игру (иначе телефоны не подключатся, BF-038)
+      - name: Server certificate
+        run: |
+          timeout 60 ~/godot/godot --headless --path . --script docs/tools/probe_server.gd 2>&1 | grep -v "^Godot Engine" | tee probe.log
+          if grep -q "ОШИБКА" probe.log; then exit 1; fi
+          grep -q "сертификат\|ПРЕДУПРЕЖДЕНИЕ" probe.log
+
       - name: Export game pack, server, APK
         run: |
           set -o pipefail

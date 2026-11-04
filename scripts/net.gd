@@ -9,10 +9,31 @@ extends Node
 ##   проверено замерами в Zomboid, поэтому для позиций тоже надёжный, но отдельный канал.
 
 const DEFAULT_PORT := 7777
-## Шифрование канала (DTLS, BF-038): сервер — своим ключом, созданным при первом запуске; телефон шифрует,
-## но сертификат сервера не сверяет (передать его телефонам пока нечем — см. руководство, раздел 8).
-## Защищает от подслушивания (токен, деньги, вещи в пакетах), не от подмены сервера посередине.
+## Шифрование канала (DTLS, BF-038): сервер — своим ключом, созданным при первом запуске; телефон шифрует
+## и с 0.27 сверяет сертификат сервера с вшитым SERVER_CERT — подменить сервер посередине (свой Wi-Fi) нельзя.
 const TLS_NAME := "umwelt-rp"
+## Сертификат игрового сервера на Hetzner — публичный (`dtls/dtls.crt` в папке данных сервера), прислан владельцем
+## 2026-11-04, SHA-256 19:E2:A7:FF…A9:88:D7:E3. Если ключ сервера пересоздан (удалён `dtls.key`), телефоны перестанут
+## подключаться, пока здесь не будет новый сертификат (руководство, раздел 8)
+const SERVER_CERT := """-----BEGIN CERTIFICATE-----
+MIIDDzCCAfegAwIBAgIVAOaH+E4BdQNDVRvze5/1fSkbES+PMA0GCSqGSIb3DQEB
+CwUAMDUxEjAQBgNVBAMMCXVtd2VsdC1ycDESMBAGA1UECgwJVW13ZWx0IFJQMQsw
+CQYDVQQGEwJQTDAeFw0yNjAxMDEwMDAwMDBaFw00NjAxMDEwMDAwMDBaMDUxEjAQ
+BgNVBAMMCXVtd2VsdC1ycDESMBAGA1UECgwJVW13ZWx0IFJQMQswCQYDVQQGEwJQ
+TDCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBALIzjckKFjSEeFElpF87
+drQC4YnixhV6jL40R8TIlVPVxwvl6TEN1sOVQTWlPVrQR3CXExmY/P4pkCS0DjPF
+yOKlRvTYnrSzjenAqAW06U5wXnEHc8mHHK48oZK2iWcKwRWdOu8L2k9YXNtRdC27
+MZrDhJtK4lnubKf4FEtX8KquXs9sA3smBjVaOYvTE2oWPqjPpwhpl3801a+IS5WK
+MKieAzwKXuE/QBG/CtiUKNE7VklUG/LFEh685kBqxIHWukSKd2ULwSpSEeBNkssi
+tGmnuirRNjfXATAmzAKjOrtrw+bX2UaAvKIumI8vyNbQKo8E+1NBY62sREFfjqmm
+2e8CAwEAAaMWMBQwEgYDVR0TAQH/BAgwBgEB/wIBADANBgkqhkiG9w0BAQsFAAOC
+AQEAFFsDSKGDJ+KEs8ZgXUbWrpk5odM+i0PSchrhtM7gQXnPZ162ZIt7WNS5K3Ae
+i62Lxspz/LwA8s0ult4K42w8GHbER4zM6pzCl9PCQnmHSaUyk/g6wtmRpbJ6CNnE
+1LhQ6im+hpSxIt1KH53zvKlpRuM1mGs9bEDu+M4N8jNBL69j/XIjDDFqkpYL2LwP
+kScbqnC4gSRMdc654imBKp6NX8HBiFB+T6bMTxdq3EEJZ9TJY2c4fZDuL5ff980m
+bi8Z35jkrNX0OrOOLExgmM9xTuBOU0T6Uejqp5LOM5PLBLJRN43mnu8HmAx74REu
+uy3Itjsx3bfMK2KdDhX7E9l1Cg==
+-----END CERTIFICATE-----"""
 
 static var I: Net
 
@@ -67,7 +88,8 @@ func join(ip: String, port: int) -> void:
 	var p := ENetMultiplayerPeer.new()
 	var err := p.create_client(ip, port, 2)
 	if err == OK:
-		err = p.host.dtls_client_setup(TLS_NAME, client_tls())
+		var tls := client_tls(ip)
+		err = p.host.dtls_client_setup(TLS_NAME, tls) if tls != null else FAILED
 	if err != OK:
 		status = "Не удалось подключиться"
 		_lost()
@@ -76,9 +98,15 @@ func join(ip: String, port: int) -> void:
 	is_server = false
 	status = "Подключение к %s…" % ip
 
-## Настройки шифрования телефона: сертификат сервера не сверяется (см. TLS_NAME выше)
-static func client_tls() -> TLSOptions:
-	return TLSOptions.client_unsafe()
+## Настройки шифрования телефона: сервер должен предъявить сертификат pin (по умолчанию — вшитый SERVER_CERT).
+## Только для своего компьютера (127.0.0.1 — тесты и CI, там сервер создаёт себе свой ключ) сертификат не сверяется
+static func client_tls(host: String, pin: String = SERVER_CERT) -> TLSOptions:
+	if host == "127.0.0.1" or host == "localhost" or host == "::1":
+		return TLSOptions.client_unsafe()
+	var cert := X509Certificate.new()
+	if cert.load_from_string(pin) != OK:
+		return null
+	return TLSOptions.client(cert)
 
 ## Ключ и сертификат сервера: создаются один раз и лежат в dir (на Hetzner — папка данных сервера)
 static func server_tls(dir: String) -> TLSOptions:

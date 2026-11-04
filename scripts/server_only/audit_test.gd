@@ -1012,29 +1012,52 @@ func test_dtls() -> void:
 	srv.host.dtls_server_setup(t2)
 	var enc := ENetMultiplayerPeer.new()
 	enc.create_client("127.0.0.1", 7893, 2)
-	enc.host.dtls_client_setup(Net.TLS_NAME, Net.client_tls())
+	enc.host.dtls_client_setup(Net.TLS_NAME, Net.client_tls("127.0.0.1"))
 	var plain := ENetMultiplayerPeer.new()
 	plain.create_client("127.0.0.1", 7893, 2)
+	# сверка сертификата (BF-038): «боевой» адрес — телефон ждёт именно этот сертификат
+	var pin_ok := ENetMultiplayerPeer.new()
+	pin_ok.create_client("127.0.0.1", 7893, 2)
+	pin_ok.host.dtls_client_setup(Net.TLS_NAME, Net.client_tls("2.31.45.237", c2))
+	var pin_bad := ENetMultiplayerPeer.new()      # сервер с чужим ключом (как подменный в своём Wi-Fi)
+	pin_bad.create_client("127.0.0.1", 7893, 2)
+	pin_bad.host.dtls_client_setup(Net.TLS_NAME, Net.client_tls("2.31.45.237"))
 	var got := ""
 	var sent := false
-	for i in 300:
+	var got_pin := false
+	var sent_pin := false
+	for i in 400:
 		srv.poll()
-		enc.poll()
-		plain.poll()
+		for cl: ENetMultiplayerPeer in [enc, plain, pin_ok, pin_bad]:
+			cl.poll()
 		if not sent and enc.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED:
 			enc.set_target_peer(1)
 			enc.put_packet("проверка".to_utf8_buffer())
 			sent = true
+		if not sent_pin and pin_ok.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED:
+			pin_ok.set_target_peer(1)
+			pin_ok.put_packet("сверено".to_utf8_buffer())
+			sent_pin = true
 		while srv.get_available_packet_count() > 0:
-			got = srv.get_packet().get_string_from_utf8()
-		if got != "" and i > 150:
+			var m := srv.get_packet().get_string_from_utf8()
+			if m == "сверено":
+				got_pin = true
+			else:
+				got = m
+		if got != "" and got_pin and i > 200:
 			break
 		OS.delay_msec(10)
 	var plain_ok := plain.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED
+	var bad_ok := pin_bad.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED
 	check("Сеть: зашифрованный клиент подключается и передаёт данные, без шифрования — не подключается",
 		got == "проверка" and not plain_ok, "получено «%s», нешифрованный подключён: %s" % [got, plain_ok])
-	plain.close()
-	enc.close()
+	check("Сеть: телефон подключается к серверу со своим сертификатом и не подключается к серверу с чужим ключом",
+		got_pin and not bad_ok, "со своим сертификатом данные дошли: %s; с чужим подключён: %s" % [got_pin, bad_ok])
+	var x := X509Certificate.new()
+	check("Сеть: вшитый сертификат сервера читается, для локального адреса сверки нет",
+		x.load_from_string(Net.SERVER_CERT) == OK and Net.client_tls("2.31.45.237") != null and Net.client_tls("2.31.45.237", "мусор") == null)
+	for cl: ENetMultiplayerPeer in [enc, plain, pin_ok, pin_bad]:
+		cl.close()
 	srv.close()
 
 ## Подпись обновлений (BF-039): лаунчер принимает манифест только с верной подписью
