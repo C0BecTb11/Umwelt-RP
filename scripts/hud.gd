@@ -253,6 +253,9 @@ func _panel_tap(g: GameState, me: GameState.Player, p: Vector2) -> void:
 			elif btn_d.has_point(p) and _editor_btn() != "":
 				screen.next = "editor"
 				screen.request_exit(false)
+			elif btn_d.has_point(p) and screen.mode == GameScreen.Mode.CLIENT:
+				screen.next = "account"            # экран аккаунта: выйти из аккаунта, удалить аккаунт (BF-044)
+				screen.request_exit(false)
 		Pnl.INV:
 			var col := _col_rect(0, 1)
 			if col.has_point(p):
@@ -585,6 +588,8 @@ func _draw_pause() -> void:
 	var bw := minf(panel_rect.size.x * 0.6, 360.0)
 	var cx := panel_rect.get_center().x
 	var ed := _editor_btn()
+	if ed == "" and screen.mode == GameScreen.Mode.CLIENT:
+		ed = "Аккаунт"
 	var sp := 56.0 if ed != "" else 66.0
 	var bh := 44.0 if ed != "" else 50.0
 	var y := panel_rect.position.y + (64 if ed != "" else 80)
@@ -600,7 +605,7 @@ func _draw_pause() -> void:
 	btn_d = Rect2()
 	if ed != "":
 		btn_d = Rect2(cx - bw / 2, y + sp * 3, bw, bh)
-		_rr(btn_d, 10, Color(0.42, 0.34, 0.14))
+		_rr(btn_d, 10, Color(0.42, 0.34, 0.14) if ed != "Аккаунт" else Color(0.3, 0.27, 0.36))
 		_text(btn_d.get_center() + Vector2(0, 6), ed, 16, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER)
 	_text(Vector2(cx, y + sp * (4 if ed != "" else 2) + (26 if ed != "" else 80)), "Umwelt RP · версия 0.%s" % Version.BUILD, 12, Color(0.56, 0.56, 0.56), HORIZONTAL_ALIGNMENT_CENTER)
 

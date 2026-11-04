@@ -191,7 +191,8 @@ func render_time() -> float:
 var auth_token := ""          # токен аккаунта Supabase; сервер сам узнаёт по нему, кто это
 
 func _on_connected() -> void:
-	Net.I.send({"t": "hello", "token": auth_token, "uid": Profile.uid, "nick": Profile.nick, "build": Version.BUILD})
+	# id телефона нужен только тестовому серверу без аккаунтов (--noauth); с аккаунтом его не отправляем
+	Net.I.send({"t": "hello", "token": auth_token, "uid": Profile.uid if auth_token == "" else "", "nick": Profile.nick, "build": Version.BUILD})
 
 var _hello_sent := false
 

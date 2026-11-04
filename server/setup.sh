@@ -23,7 +23,7 @@ if [ "$(swapon --show | wc -l)" = "0" ] && [ ! -f /swapfile ]; then
   grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
 fi
 
-if ss -lun | grep -q ":$PORT "; then
+if ss -lun | grep -q ":$PORT " && ! systemctl is-active --quiet umwelt-server; then   # наш же сервер — не тревога
   echo "!! ВНИМАНИЕ: порт $PORT/UDP уже кем-то занят — напиши об этом в чат"
 fi
 

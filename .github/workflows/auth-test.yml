@@ -40,3 +40,7 @@ jobs:
           set -e
           echo "--- сервер"; grep -a "^\[" server.log || true
           grep -q "ИТОГ: OK" client.log
+          # BF-044: сервер читает журнал удалённых аккаунтов publishable-ключом (функция deleted_accounts)
+          for i in $(seq 1 10); do grep -aq "журнал удалённых аккаунтов" server.log && break; sleep 1; done
+          grep -a "журнал удалённых аккаунтов" server.log
+          grep -aq "журнал удалённых аккаунтов: доступен" server.log
