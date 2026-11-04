@@ -69,6 +69,7 @@ Umwelt-RP/
 │   ├── BUGFIX_LOG.md          Журнал ошибок BF-NNN
 │   ├── PROJECT_MAP.md         Этот файл
 │   ├── SUPABASE_MAP.md        База Supabase: таблицы, RLS, права, функции, миграции (проверено по самой базе)
+│   ├── DATA_FLOW.md           Движение данных телефон ↔ сервер ↔ Supabase ↔ GitHub, утечки и дублирование
 │   └── tools/
 │       ├── extract_chars.gd   Инструмент: извлечение частей моделей из glTF Quaternius (запуск вне проекта)
 │       └── map_format.py      Черновик карты из Supabase (JSON) → текст maps/city.json в принятом виде
