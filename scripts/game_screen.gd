@@ -140,10 +140,7 @@ func _process(dt: float) -> void:
 		if input_t <= 0.0 and p != null:
 			input_t = 0.05
 			var o := {"t": "in", "ts": Time.get_ticks_msec(), "mx": mv.x, "my": mv.y, "run": run, "x": p.pos.x, "y": p.pos.y,
-				"fx": p.face.x, "fy": p.face.y, "cl": p.climb, "fs": p.force_seq}
-			if p.climb >= 0.0:
-				o["ctx"] = p.cl_to.x
-				o["cty"] = p.cl_to.y
+				"fx": p.face.x, "fy": p.face.y, "fs": p.force_seq}
 			Net.I.send_fast(o)
 		game.tick_replica(dt)
 		# всё чужое рисуем чуть в прошлом, между двумя пришедшими снимками — плавно и без забегания
@@ -151,7 +148,6 @@ func _process(dt: float) -> void:
 		for pl in game.players:
 			if pl.id == local_pid:
 				pl.rface = pl.face
-				pl.rclimb = pl.climb
 				continue
 			GameState.sample_snaps(pl, rt)
 	else:
@@ -164,11 +160,9 @@ func _process(dt: float) -> void:
 		for pl in game.players:
 			pl.rpos = pl.pos
 			pl.rface = pl.face
-			pl.rclimb = pl.climb
 		for m in game.pop_messages(local_pid):
 			hud.add_msg(m)
 		game.world.dirty_tiles.clear()
-		game.world.dirty_cont.clear()
 		game.fx_net.clear()
 		if not paused:
 			autosave_t -= dt

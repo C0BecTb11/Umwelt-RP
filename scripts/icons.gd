@@ -62,27 +62,6 @@ static func item(ci: CanvasItem, id: String, c: Vector2, size: float) -> void:
 			_rr(ci, Rect2(30, 18, 36, 64), 8, Color8(0xD8, 0x3A, 0x3A))
 			ci.draw_polyline(PackedVector2Array([Vector2(32, 56), Vector2(42, 46), Vector2(54, 58), Vector2(64, 50)]), Color.WHITE, 5.0, true)
 			_rr(ci, Rect2(34, 12, 28, 8), 3, Color8(0xC8, 0xC8, 0xC8))
-		"bandage":
-			_rr(ci, Rect2(50, 52, 36, 14), 3, Color8(0xF4, 0xF4, 0xF4))
-			_circ(ci, Vector2(42, 48), 26, Color8(0xF4, 0xF4, 0xF4))
-			_circ(ci, Vector2(42, 48), 9, Color8(0xD8, 0xD8, 0xD8))
-			ci.draw_arc(Vector2(42, 48), 17, 0, TAU, 24, Color8(0xD8, 0xD8, 0xD8), 2.5)
-		"rag":
-			_poly(ci, [Vector2(16, 30), Vector2(40, 22), Vector2(62, 32), Vector2(82, 24), Vector2(78, 70), Vector2(54, 76), Vector2(34, 68), Vector2(18, 74)], Color8(0xB8, 0xA8, 0x88))
-			ci.draw_line(Vector2(30, 40), Vector2(66, 44), Color8(0x8A, 0x7A, 0x5C), 3.0)
-			ci.draw_line(Vector2(28, 56), Vector2(64, 60), Color8(0x8A, 0x7A, 0x5C), 3.0)
-		"disinfectant":
-			_rr(ci, Rect2(40, 10, 16, 14), 3, Color8(0xF0, 0xF0, 0xF0))
-			_rr(ci, Rect2(28, 24, 40, 62), 8, Color8(0x40, 0xA8, 0x60))
-			ci.draw_rect(Rect2(44, 40, 8, 30), Color.WHITE)
-			ci.draw_rect(Rect2(33, 51, 30, 8), Color.WHITE)
-		"tweezers":
-			_stroke(ci, Vector2(30, 14), Vector2(50, 84), 6, Color8(0xC0, 0xC4, 0xCC))
-			_stroke(ci, Vector2(66, 14), Vector2(50, 84), 6, Color8(0xC0, 0xC4, 0xCC))
-		"pills":
-			_rr(ci, Rect2(30, 30, 36, 54), 6, Color8(0xE8, 0x90, 0x30))
-			_rr(ci, Rect2(26, 16, 44, 16), 4, Color8(0xF4, 0xF4, 0xF4))
-			_rr(ci, Rect2(34, 46, 28, 20), 2, Color8(0xF4, 0xF4, 0xF4))
 		"knife":
 			_poly(ci, [Vector2(22, 74), Vector2(64, 24), Vector2(74, 18), Vector2(70, 34), Vector2(32, 80)], Color8(0xD8, 0xDC, 0xE4))
 			_stroke(ci, Vector2(20, 76), Vector2(30, 66), 9, Color8(0x2A, 0x2A, 0x2A))
@@ -106,10 +85,6 @@ static func item(ci: CanvasItem, id: String, c: Vector2, size: float) -> void:
 				var x := 26.0 + i * 14
 				_rr(ci, Rect2(x - 5, 24, 10, 26), 2, Color8(0xD8, 0xA8, 0x30))
 				ci.draw_circle(Vector2(x, 24), 5, Color8(0xB8, 0x70, 0x30))
-		"planks":
-			ci.draw_set_transform(c - Vector2(48, 48) * k, 0.0, Vector2(k, k))
-			_poly(ci, [Vector2(10, 44), Vector2(82, 18), Vector2(86, 32), Vector2(14, 58)], Color8(0xB0, 0x7A, 0x44))
-			_poly(ci, [Vector2(14, 66), Vector2(86, 40), Vector2(90, 54), Vector2(18, 80)], Color8(0xC0, 0x8A, 0x54))
 		"tshirt", "hoodie", "shirt", "suit_jacket", "biker_vest", "work_vest", "tactical":
 			var jc: Color = Items.def(id)["color"]
 			var sleeve := key in ["tshirt", "biker_vest", "work_vest"]
@@ -199,26 +174,13 @@ static func glyph(ci: CanvasItem, kind: String, c: Vector2, r: float, col: Color
 			ci.draw_line(c + Vector2(-0.55, -0.6) * r, c + Vector2(-0.55, -0.15) * r, col, w, true)
 			ci.draw_line(c + Vector2(-0.15, -0.6) * r, c + Vector2(-0.15, -0.15) * r, col, w, true)
 			ci.draw_colored_polygon(PackedVector2Array([c + Vector2(0.3, 0.6) * r, c + Vector2(0.3, -0.6) * r, c + Vector2(0.62, -0.2) * r, c + Vector2(0.45, 0.05) * r, c + Vector2(0.42, 0.6) * r]), col)
-		"drop", "bleed":
+		"drop":
 			var pts := PackedVector2Array()
 			for i in 17:
 				var a := PI * i / 16.0
 				pts.append(c + Vector2(cos(a) * 0.5, 0.2 + sin(a) * 0.45) * r)
 			pts.append(c + Vector2(0, -0.7) * r)
 			ci.draw_colored_polygon(pts, col)
-			if kind == "bleed":
-				ci.draw_circle(c + Vector2(0.62, 0.55) * r, r * 0.12, col)
-				ci.draw_circle(c + Vector2(-0.66, 0.4) * r, r * 0.09, col)
-		"fever":
-			ci.draw_line(c + Vector2(0, -0.6) * r, c + Vector2(0, 0.2) * r, col, w, true)
-			ci.draw_circle(c + Vector2(0, 0.38) * r, r * 0.24, col)
-			ci.draw_line(c + Vector2(0.25, -0.4) * r, c + Vector2(0.45, -0.4) * r, col, w, true)
-			ci.draw_line(c + Vector2(0.25, -0.1) * r, c + Vector2(0.45, -0.1) * r, col, w, true)
-		"wound":
-			ci.draw_line(c + Vector2(-0.5, 0.5) * r, c + Vector2(0.5, -0.5) * r, col, r * 0.3, true)
-			ci.draw_circle(c, r * 0.14, Color(0.82, 0.25, 0.25))
-		"glass":
-			ci.draw_colored_polygon(PackedVector2Array([c + Vector2(-0.2, -0.65) * r, c + Vector2(0.45, 0.5) * r, c + Vector2(-0.45, 0.35) * r]), col)
 		"weight":
 			ci.draw_arc(c + Vector2(0, -0.42) * r, r * 0.2, 0, TAU, 16, col, w, true)
 			ci.draw_colored_polygon(PackedVector2Array([c + Vector2(-0.35, -0.2) * r, c + Vector2(0.35, -0.2) * r, c + Vector2(0.55, 0.6) * r, c + Vector2(-0.55, 0.6) * r]), col)
@@ -231,21 +193,6 @@ static func glyph(ci: CanvasItem, kind: String, c: Vector2, r: float, col: Color
 				e.append(c + Vector2(cos(a) * 0.65, sin(a) * 0.32) * r)
 			ci.draw_polyline(e, col, w, true)
 			ci.draw_circle(c, r * 0.18, col)
-		"panic":
-			ci.draw_line(c + Vector2(0, -0.6) * r, c + Vector2(0, 0.15) * r, col, r * 0.24, true)
-			ci.draw_circle(c + Vector2(0, 0.5) * r, r * 0.13, col)
-		"hand":
-			Icons._sb.bg_color = col
-			Icons._sb.set_corner_radius_all(int(r * 0.2))
-			Icons._sb.border_width_left = 0
-			Icons._sb.border_width_right = 0
-			Icons._sb.border_width_top = 0
-			Icons._sb.border_width_bottom = 0
-			Icons._sb.draw(ci.get_canvas_item(), Rect2(c + Vector2(-0.42, -0.1) * r, Vector2(0.84, 0.75) * r))
-			for i in 4:
-				var fx := -0.32 + i * 0.21
-				var top := -0.45 if (i == 0 or i == 3) else -0.6
-				ci.draw_line(c + Vector2(fx, top) * r, c + Vector2(fx, 0.0) * r, col, r * 0.16, true)
 		"run":
 			ci.draw_circle(c + Vector2(0.15, -0.55) * r, r * 0.15, col)
 			ci.draw_polyline(PackedVector2Array([c + Vector2(-0.45, -0.15) * r, c + Vector2(-0.05, -0.3) * r, c + Vector2(0.35, -0.05) * r]), col, w, true)
@@ -263,13 +210,6 @@ static func glyph(ci: CanvasItem, kind: String, c: Vector2, r: float, col: Color
 		"gear":
 			ci.draw_colored_polygon(PackedVector2Array([c + Vector2(-0.25, -0.6) * r, c + Vector2(0.25, -0.6) * r, c + Vector2(0.7, -0.25) * r, c + Vector2(0.5, 0.0) * r, c + Vector2(0.35, -0.12) * r, c + Vector2(0.35, 0.65) * r, c + Vector2(-0.35, 0.65) * r, c + Vector2(-0.35, -0.12) * r, c + Vector2(-0.5, 0.0) * r, c + Vector2(-0.7, -0.25) * r]), col)
 			ci.draw_arc(c + Vector2(0, -0.6) * r, r * 0.16, 0, PI, 8, Color(0.1, 0.1, 0.12), r * 0.1, true)
-		"body":
-			ci.draw_circle(c + Vector2(0, -0.5) * r, r * 0.2, col)
-			ci.draw_rect(Rect2(c + Vector2(-0.25, -0.25) * r, Vector2(0.5, 0.5) * r), col)
-			ci.draw_line(c + Vector2(-0.38, -0.2) * r, c + Vector2(-0.45, 0.2) * r, col, w, true)
-			ci.draw_line(c + Vector2(0.38, -0.2) * r, c + Vector2(0.45, 0.2) * r, col, w, true)
-			ci.draw_line(c + Vector2(-0.13, 0.3) * r, c + Vector2(-0.15, 0.7) * r, col, w, true)
-			ci.draw_line(c + Vector2(0.13, 0.3) * r, c + Vector2(0.15, 0.7) * r, col, w, true)
 		"pause":
 			ci.draw_rect(Rect2(c + Vector2(-0.32, -0.42) * r, Vector2(0.22, 0.84) * r), col)
 			ci.draw_rect(Rect2(c + Vector2(0.1, -0.42) * r, Vector2(0.22, 0.84) * r), col)
@@ -281,9 +221,6 @@ static func glyph(ci: CanvasItem, kind: String, c: Vector2, r: float, col: Color
 		"door":
 			ci.draw_rect(Rect2(c + Vector2(-0.38, -0.65) * r, Vector2(0.76, 1.3) * r), col, false, w)
 			ci.draw_circle(c + Vector2(0.18, 0) * r, r * 0.08, col)
-		"search":
-			ci.draw_arc(c + Vector2(-0.12, -0.12) * r, r * 0.38, 0, TAU, 24, col, w, true)
-			ci.draw_line(c + Vector2(0.16, 0.16) * r, c + Vector2(0.55, 0.55) * r, col, r * 0.22, true)
 		"sun":
 			ci.draw_circle(c, r * 0.35, col)
 			for i in 8:

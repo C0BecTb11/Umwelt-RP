@@ -20,14 +20,11 @@ func _ready() -> void:
 	test_corner()
 	test_stuck_escape()
 	test_remote_teleport()
-	test_remote_climb_anywhere()
+	test_remote_wall()
 	test_remote_actions()
 	test_saves()
 	test_world_gen()
 	test_remote_door()
-	test_remote_climb_host_driven()
-	test_save_mid_climb()
-	test_death_mid_climb()
 	test_bullet_window()
 	test_remote_no_false_rollback()
 	test_smooth_remote()
@@ -36,6 +33,7 @@ func _ready() -> void:
 	test_wear()
 	test_look()
 	test_clock()
+	test_old_world()
 	test_rp_rules()
 	test_player_card()
 	print("\nИТОГО: %d прошло, %d ошибок" % [passes, fails])
@@ -43,6 +41,19 @@ func _ready() -> void:
 
 func _game() -> GameState:
 	return GameState.new_game(777)
+
+## Открытое место: круг радиусом 2 клетки без препятствий (для проверок, где стены мешают)
+func _open_spot(g: GameState) -> Vector2:
+	for y in range(5, 95):
+		for x in range(5, 95):
+			var ok := true
+			for dy in range(-2, 3):
+				for dx in range(-2, 3):
+					if g.world.solid(x + dx, y + dy):
+						ok = false
+			if ok:
+				return Vector2(x + 0.5, y + 0.5)
+	return g.spawn
 
 ## Клетка стены с полом по одну сторону и улицей по другую
 func _find_wall(g: GameState) -> Vector2i:
@@ -116,25 +127,19 @@ func test_remote_teleport() -> void:
 	var f := g.join_player("t1", "Друг")
 	var start := f.pos
 	var fs := f.force_seq
-	var o := {"mx": 0.0, "my": 0.0, "run": false, "fs": fs, "cl": -1.0, "fx": 1.0, "fy": 0.0}
+	var o := {"mx": 0.0, "my": 0.0, "run": false, "fs": fs, "fx": 1.0, "fy": 0.0}
 	for k in 10:
 		o["x"] = f.pos.x + 3.9
 		o["y"] = f.pos.y
 		g.remote_input(f, o)
 	check("Сеть: игрок не может телепортироваться (10 пакетов по 3.9 клетки)", f.pos.distance_to(start) < 3.0, "сдвинулся на %.1f клеток мгновенно" % f.pos.distance_to(start))
 
-func test_remote_climb_anywhere() -> void:
+func test_remote_wall() -> void:
 	var g := _game()
 	var wc := _find_wall(g)
 	var f := g.join_player("t2", "Друг")
 	f.pos = Vector2(wc.x + 0.5, wc.y - 0.4)
-	var o := {"mx": 0.0, "my": 0.0, "run": false, "fs": f.force_seq, "cl": 0.0, "fx": 0.0, "fy": 1.0,
-		"x": f.pos.x, "y": f.pos.y, "ctx": f.pos.x, "cty": wc.y + 1.5}
-	g.remote_input(f, o)
-	check("Сеть: игрок не может «перелезть» через глухую стену", f.climb < 0.0, "хост принял перелезание через стену %s" % wc)
-	var o2 := o.duplicate()
-	o2["cl"] = -1.0
-	o2["y"] = wc.y + 0.5
+	var o2 := {"mx": 0.0, "my": 0.0, "run": false, "fs": f.force_seq, "fx": 0.0, "fy": 1.0, "x": f.pos.x, "y": wc.y + 0.5}
 	g.remote_input(f, o2)
 	check("Сеть: игрок не может прислать позицию внутри стены", not g.world.circle_blocked(f.pos.x, f.pos.y, 0.25), "позиция %s внутри стены принята" % f.pos)
 
@@ -170,8 +175,8 @@ func test_remote_actions() -> void:
 		g.actions.append([f.id, {"a": "interact", "c": c}])
 		for i in 100:
 			g.update(0.02)
-	check("РП: шкафы не обыскиваются, окна не разбиваются (механики Zomboid убраны)", not g.world.containers.has(fr) and g.world.t_at(win) == W.WINDOW and f.inv.is_empty(),
-		"шкаф открыт: %s, окно: %d" % [g.world.containers.has(fr), g.world.t_at(win)])
+	check("РП: шкафы не обыскиваются, окна не разбиваются (механики Zomboid убраны)", g.world.t_at(fr) == W.FRIDGE and g.world.t_at(win) == W.WINDOW and f.inv.is_empty(),
+		"шкаф: %d, окно: %d, инв %s" % [g.world.t_at(fr), g.world.t_at(win), f.inv])
 
 func test_saves() -> void:
 	var g := _game()
@@ -232,7 +237,7 @@ func test_world_gen() -> void:
 				continue
 			var ni := w.idx(nx, ny)
 			var tt := w.t_at(ni)
-			var passable := not (tt == W.WALL or tt == W.TREE or W.is_furniture(tt) or W.is_car(tt) or tt == W.WINDOW or tt == W.WINDOW_BROKEN)
+			var passable := not (tt == W.WALL or tt == W.TREE or W.is_furniture(tt) or W.is_car(tt) or tt == W.WINDOW)
 			if passable and seen[ni] == 0:
 				seen[ni] = 1
 				q.append(ni)
@@ -263,59 +268,15 @@ func _find_opening(g: GameState, tile: int) -> Vector2i:
 				return Vector2i(x, y)
 	return Vector2i(-1, -1)
 
-func _start_remote_climb(g: GameState, f: GameState.Player) -> Vector2i:
-	var wc := _find_opening(g, W.WINDOW)
-	if wc.x < 0:
-		return wc
-	var i := g.world.idx(wc.x, wc.y)
-	g.world.tiles[i] = W.WINDOW_BROKEN
-	f.pos = Vector2(wc.x + 0.5, wc.y - 0.5)
-	var tg := g.world.climb_target(i, f.pos.x, f.pos.y)
-	g.remote_input(f, {"mx": 0.0, "my": 1.0, "run": false, "fs": f.force_seq, "cl": 0.0, "fx": 0.0, "fy": 1.0,
-		"x": f.pos.x, "y": f.pos.y, "ctx": tg.x, "cty": tg.y})
-	return wc
-
 func test_remote_door() -> void:
 	var g := _game()
 	var dc := _find_opening(g, W.DOOR)
 	var f := g.join_player("d1", "Друг")
 	f.pos = Vector2(dc.x + 0.5, dc.y - 0.35)
-	var o := {"mx": 0.0, "my": 1.0, "run": false, "fs": f.force_seq, "cl": -1.0, "fx": 0.0, "fy": 1.0,
+	var o := {"mx": 0.0, "my": 1.0, "run": false, "fs": f.force_seq, "fx": 0.0, "fy": 1.0,
 		"x": dc.x + 0.5, "y": dc.y + 1.35}
 	g.remote_input(f, o)
 	check("Сеть: игрок не может пройти сквозь закрытую дверь одним пакетом", f.pos.y < dc.y, "дверь %s, друг принят на %s" % [dc, f.pos])
-
-func test_remote_climb_host_driven() -> void:
-	var g := _game()
-	var f := g.join_player("c1", "Друг")
-	var wc := _start_remote_climb(g, f)
-	var started := f.climb >= 0.0
-	# телефон друга «завис» и больше ничего не шлёт
-	for k in 40:
-		g.update(0.05)
-	check("Сеть: перелезание игрока заканчивает сервер — нельзя зависнуть в окне неуязвимым", started and f.climb < 0.0 and g.world.climb_occ.is_empty() and f.pos.y > wc.y + 0.5,
-		"окно %s, старт %s, climb %.2f, pos %s, занято %s" % [wc, started, f.climb, f.pos, g.world.climb_occ])
-
-func test_save_mid_climb() -> void:
-	var g := _game()
-	var f := g.join_player("c2", "Друг")
-	var wc := _start_remote_climb(g, f)
-	for k in 8:
-		g.update(0.05)
-	var mid := f.climb
-	var g2 := GameState.new(g.seed)
-	g2.load_data(JSON.parse_string(JSON.stringify(g.to_data())))
-	var f2 := g2.player(f.id)
-	check("Сохранение посреди окна: персонаж не телепортируется в угол карты", mid > 0.0 and f2 != null and f2.climb < 0.0 and f2.pos.distance_to(f.cl_to) < 0.05,
-		"climb %.2f, после загрузки %s, ожидалось %s" % [mid, f2.pos if f2 else Vector2.ZERO, f.cl_to])
-
-func test_death_mid_climb() -> void:
-	var g := _game()
-	var f := g.join_player("c3", "Друг")
-	_start_remote_climb(g, f)
-	f.hp = -5.0
-	g.update(0.05)
-	check("Потеря сознания в окне освобождает окно", f.dead and g.world.climb_occ.is_empty(), "занято: %s" % g.world.climb_occ)
 
 func test_bullet_window() -> void:
 	var g := _game()
@@ -324,10 +285,8 @@ func test_bullet_window() -> void:
 	var b := Vector2(wc.x + 0.5, wc.y + 1.5)
 	var through_glass := g.world.los(a.x, a.y, b.x, b.y, true)
 	var see := g.world.los(a.x, a.y, b.x, b.y)
-	g.world.tiles[g.world.idx(wc.x, wc.y)] = W.WINDOW_BROKEN
-	var through_hole := g.world.los(a.x, a.y, b.x, b.y, true)
-	check("Бой: пуля не проходит сквозь целое стекло, но проходит в разбитое окно", see and not through_glass and through_hole,
-		"видно %s, сквозь стекло %s, сквозь проём %s" % [see, through_glass, through_hole])
+	check("Бой: через окно видно, но пуля сквозь стекло не проходит", see and not through_glass,
+		"видно %s, сквозь стекло %s" % [see, through_glass])
 
 
 ## Честный друг бегает вдоль стен и углов — хост не должен его откатывать
@@ -348,18 +307,15 @@ func test_remote_no_false_rollback() -> void:
 		g.push_player(f, st)
 		cf.pos = st
 		cf.force_seq = f.force_seq
-		cf.climb = -1.0
 		cf.move = Vector2.from_angle(randf() * TAU)
 		cf.run = randf() < 0.5
 		routes += 1
 		for i in 120:
 			c.move_player(cf, 1.0 / 60.0, false)
-			if cf.climb >= 0.0:
-				break
 			if i % 3 == 2:
 				f.last_in_ms = Time.get_ticks_msec() - 50
 				var fs := f.force_seq
-				g.remote_input(f, {"mx": cf.move.x, "my": cf.move.y, "run": cf.run, "fs": cf.force_seq, "cl": -1.0,
+				g.remote_input(f, {"mx": cf.move.x, "my": cf.move.y, "run": cf.run, "fs": cf.force_seq,
 					"fx": cf.face.x, "fy": cf.face.y, "x": cf.pos.x, "y": cf.pos.y})
 				if f.force_seq != fs:
 					rollbacks += 1
@@ -400,7 +356,7 @@ func _sim_remote(smooth: bool) -> Array:
 			e.pos = q[2]
 			if smooth:
 				clk.sample(q[1], now)
-				GameState.push_snap(e, q[1], q[2], Vector2(1, 0), -1.0)
+				GameState.push_snap(e, q[1], q[2], Vector2(1, 0))
 			qi += 1
 		if smooth:
 			GameState.sample_snaps(e, clk.render_time(now))
@@ -581,15 +537,17 @@ func test_rp_rules() -> void:
 		if int(e["id"]) == a.id and (e.has("inv") or e.has("mo")):
 			leak = true
 	check("Приватность: чужие деньги, вещи и ключи аккаунтов не уходят другим игрокам", not leak, "в пакете для другого игрока есть личные данные")
-	# драка: b стоит перед a
-	b.pos = g.unstick(a.pos + a.face * 0.8, GameState.PLAYER_R)
-	a.face = (b.pos - a.pos).normalized()
+	# драка: b стоит перед a на открытом месте (место появления случайное — у стены удары отталкивают криво)
+	a.pos = _open_spot(g)
+	a.face = Vector2(1, 0)
+	b.pos = a.pos + Vector2(0.7, 0)
 	var hp0 := b.hp
-	for k in 40:
+	for k in 60:
 		a.cooldown = 0.0
+		a.face = Vector2(1, 0)
 		g.actions.append([a.id, {"a": "attack"}])
 		g.update(0.02)
-		b.pos = g.unstick(a.pos + a.face * 0.8, GameState.PLAYER_R)
+		b.pos = a.pos + Vector2(0.7, 0)
 	check("Драка: удары по другому игроку отнимают здоровье и могут отправить в нокаут", b.hp < hp0 and b.dead, "хп %.0f, без сознания %s" % [b.hp, b.dead])
 	for k in int(GameState.RESPAWN_TIME / 0.1) + 5:
 		g.update(0.1)
@@ -642,3 +600,29 @@ func test_clock() -> void:
 		g.time = h * 60.0
 		dk.append(g.darkness())
 	check("Время: темно только ночью (07–21 светло, 23 и 3 — ночь)", dk[0] == 1.0 and dk[1] == 0.0 and dk[2] == 0.0 and dk[3] == 0.0 and dk[4] == 1.0, str(dk))
+
+## Сохранение v2 с остатками Zomboid: разбитое окно и выбитая дверь превращаются в обычные, лишние поля не мешают
+func test_old_world() -> void:
+	var g := _game()
+	var d: Dictionary = JSON.parse_string(JSON.stringify(g.to_data()))
+	var win := _find_opening(g, W.WINDOW)
+	var door := _find_opening(g, W.DOOR)
+	var t := Marshalls.base64_to_raw(d["tiles"])
+	t[g.world.idx(win.x, win.y)] = W.OLD_WINDOW_BROKEN
+	t[g.world.idx(door.x, door.y)] = W.OLD_DOOR_BROKEN
+	d["tiles"] = Marshalls.raw_to_base64(t)
+	d["v"] = 2
+	d["thp"] = [[5, 40.0]]
+	d["cont"] = {"7": [{"id": "water", "n": 1}]}
+	(d["p"][0] as Dictionary)["cl"] = 0.5
+	(d["p"][0] as Dictionary)["k"] = 3
+	var g2 := GameState.new(0)
+	g2.load_data(d)
+	var bad := 0
+	for i in g2.world.tiles.size():
+		if g2.world.t_at(i) == W.OLD_WINDOW_BROKEN or g2.world.t_at(i) == W.OLD_DOOR_BROKEN:
+			bad += 1
+	var saved: Dictionary = g2.to_data()
+	check("Сохранение v2: разбитые окна и выбитые двери стали целыми, старые поля Zomboid не сохраняются",
+		bad == 0 and g2.world.t(win.x, win.y) == W.WINDOW and g2.world.t(door.x, door.y) == W.DOOR_OPEN and not saved.has("cont") and not saved.has("thp") and int(saved["v"]) == 3,
+		"осталось сломанных %d, окно %d, дверь %d" % [bad, g2.world.t(win.x, win.y), g2.world.t(door.x, door.y)])

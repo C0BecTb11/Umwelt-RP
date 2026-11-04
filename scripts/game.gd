@@ -21,7 +21,6 @@ class Player:
 	var thirst := 10.0
 	var stamina := 100.0
 	var dead := false
-	var kills := 0
 	var eq := ""
 	var inv: Array = []
 	var move := Vector2.ZERO
@@ -34,9 +33,6 @@ class Player:
 	var ta_name := ""
 	var ta_time := 0.0
 	var ta_dur := 0.0
-	var climb := -1.0
-	var cl_from := Vector2.ZERO
-	var cl_to := Vector2.ZERO
 	var rpos := Vector2.ZERO   # позиция для отрисовки
 	var name := ""
 	var remote := false        # движение считает телефон друга (хост только принимает)
@@ -50,9 +46,8 @@ class Player:
 	var bank := 0              # банковский счёт, $
 	var wear := {}             # слот → id надетой вещи (в inv её нет)
 	var look := {}             # внешность: g — пол "m"/"f", h — причёска (часть модели), sk — тон кожи 0..3
-	var snaps: Array = []      # снимки [время, x, y, fx, fy, climb] для плавной отрисовки чужого игрока
+	var snaps: Array = []      # снимки [время, x, y, fx, fy] для плавной отрисовки чужого игрока
 	var rface := Vector2(1, 0)
-	var rclimb := -1.0
 	func _init(pid: int = 0) -> void:
 		id = pid
 	func weapon() -> Dictionary: return Items.def(eq if eq != "" else "fists")
@@ -109,7 +104,7 @@ var freeze := false
 var actions: Array = []        # [pid, action Dictionary]
 var messages := {}             # pid → Array[String]
 var shots: Array = []          # [x1, y1, x2, y2, жизнь]
-var fx: Array = []             # [тип, x, y, параметр] — 1 кровь, 2 смерть зомби, 3 ранен игрок, 4 выстрел
+var fx: Array = []             # [тип, x, y, параметр] — 3 ранен игрок, 4 выстрел
 var fx_net: Array = []
 var uids := {}                 # постоянный ID телефона друга → номер персонажа
 var real_clock := true         # время = реальное московское; false — идёт само (демо-снимки)
@@ -146,7 +141,6 @@ func date_str() -> String:
 	var d := Time.get_datetime_dict_from_unix_time(int(time * 60.0))
 	return "%d %s" % [d["day"], MONTHS[int(d["month"]) - 1]]
 
-func day() -> int: return int(time / 1440.0) + 1
 func hour_f() -> float: return fmod(time, 1440.0) / 60.0
 func clock() -> String:
 	var m := int(fmod(time, 1440.0))
@@ -276,9 +270,6 @@ func _move_id(p: Player, to: int) -> void:
 	if messages.has(from):
 		messages[to] = messages[from]
 		messages.erase(from)
-	for k in world.climb_occ.keys():
-		if world.climb_occ[k] == -1 - from:
-			world.climb_occ[k] = -1 - to
 
 func _spawn_player(pid: int) -> Player:
 	var p := Player.new(pid)
@@ -298,10 +289,6 @@ func leave_player(pid: int) -> void:
 	p.connected = false
 	p.move = Vector2.ZERO
 	p.ta_act = null
-	if p.climb >= 0.0:
-		p.pos = p.cl_to
-		p.climb = -1.0
-		_release_climb(p)
 
 # ================== СИМУЛЯЦИЯ ==================
 func update(dt: float) -> void:
@@ -337,18 +324,18 @@ static func anim_rate(p: Player) -> float:
 
 ## Телефон друга: анимация своего удара сразу, не дожидаясь хоста
 func predict_attack(p: Player) -> void:
-	if p.dead or p.climb >= 0.0 or p.cooldown > 0.0:
+	if p.dead or p.cooldown > 0.0:
 		return
 	p.cooldown = p.weapon()["cd"]
 	p.atk_kind = 0
 	p.attack_anim = 1.0
 
 ## Снимок для плавной отрисовки (время отправителя, мс)
-static func push_snap(e, ts: float, pos: Vector2, face: Vector2, climb: float) -> void:
+static func push_snap(e, ts: float, pos: Vector2, face: Vector2) -> void:
 	var sn: Array = e.snaps
 	if sn.size() > 0 and ts <= sn[sn.size() - 1][0]:
 		return
-	sn.append([ts, pos.x, pos.y, face.x, face.y, climb])
+	sn.append([ts, pos.x, pos.y, face.x, face.y])
 	if sn.size() > 30:
 		sn.pop_front()
 
@@ -358,13 +345,11 @@ static func sample_snaps(e, t: float) -> void:
 	if sn.is_empty():
 		e.rpos = e.pos
 		e.rface = e.face
-		e.rclimb = e.climb
 		return
 	var last: Array = sn[sn.size() - 1]
 	if t >= last[0]:
 		e.rpos = Vector2(last[1], last[2])
 		e.rface = Vector2(last[3], last[4])
-		e.rclimb = last[5]
 		return
 	var i := sn.size() - 2
 	while i > 0 and sn[i][0] > t:
@@ -378,10 +363,6 @@ static func sample_snaps(e, t: float) -> void:
 	var fa := Vector2(a[3], a[4])
 	var fb := Vector2(b[3], b[4])
 	e.rface = Vector2.from_angle(lerp_angle(fa.angle(), fb.angle(), f)) if fa.length() > 0.01 and fb.length() > 0.01 else fb
-	if a[5] >= 0.0 and b[5] >= 0.0:
-		e.rclimb = lerpf(a[5], b[5], f)
-	else:
-		e.rclimb = b[5] if f > 0.5 else a[5]
 
 func _cell_at(p: Vector2) -> int:
 	return world.idx(clampi(floori(p.x), 0, world.w - 1), clampi(floori(p.y), 0, world.h - 1))
@@ -400,32 +381,17 @@ func move_speed(p: Player, mag: float) -> Array:
 		speed *= 0.8
 	return [speed, running]
 
-## Перемещение игрока. authoritative=false — предсказание на телефоне друга (без ран и шума)
-func move_player(p: Player, dt: float, authoritative: bool) -> Array:
+## Перемещение игрока. _authoritative=false — предсказание на телефоне (сейчас поведение одинаковое)
+func move_player(p: Player, dt: float, _authoritative: bool) -> Array:
 	var mag := p.move.length()
 	var ms := move_speed(p, mag)
 	var speed: float = ms[0]
 	var running: bool = ms[1]
-	if p.climb >= 0.0:
-		p.climb += dt / 1.3
-		p.pos = p.cl_from.lerp(p.cl_to, minf(p.climb, 1.0))
-		if p.climb >= 1.0:
-			p.climb = -1.0
-			_release_climb(p)
-		return [false, 0.0]
 	if mag > 0.1:
 		var n := p.move / maxf(1.0, mag)
 		p.face = p.move / mag
-		var before := p.pos
 		p.pos = _move_circle(p.pos, n * speed * dt, PLAYER_R)
-		if p.pos.distance_to(before) < speed * dt * 0.5:
-			_try_climb(p, n, authoritative)
 	return [running, mag]
-
-func _release_climb(p: Player) -> void:
-	for k in world.climb_occ.keys():
-		if world.climb_occ[k] == -1 - p.id:
-			world.climb_occ.erase(k)
 
 func _update_player(p: Player, dt: float) -> void:
 	if not p.connected:
@@ -440,25 +406,14 @@ func _update_player(p: Player, dt: float) -> void:
 	p.attack_anim = maxf(0.0, p.attack_anim - dt * anim_rate(p))
 	var running := false
 	var mag := 0.0
-	if p.remote and p.climb >= 0.0:
-		# перелезание друга хост ведёт сам: нельзя «зависнуть» в окне неуязвимым
-		p.climb += dt / 1.3
-		p.pos = p.cl_from.lerp(p.cl_to, minf(p.climb, 1.0))
-		if p.climb >= 1.0:
-			p.climb = -1.0
-			_release_climb(p)
-			push_player(p, p.cl_to)
-	elif p.remote:
+	if p.remote:
 		# позицию прислал телефон друга; здесь только последствия движения
-		mag = p.move.length() if p.climb < 0.0 else 0.0
+		mag = p.move.length()
 		running = move_speed(p, mag)[1] if mag > 0.1 else false
 	else:
 		var r := move_player(p, dt, true)
 		running = r[0]
 		mag = r[1]
-	if p.climb >= 0.0:
-		_finish_player(p, dt, false, 0.0)
-		return
 	if mag > 0.1:
 		if running:
 			p.stamina -= dt * 12.0
@@ -473,7 +428,7 @@ func _update_player(p: Player, dt: float) -> void:
 			_perform(p, a)
 	_finish_player(p, dt, running, mag)
 
-## Ввод с телефона друга: позиция, взгляд, перелезание. Всё проверяется — подделку хост откатывает
+## Ввод с телефона друга: позиция и взгляд. Всё проверяется — подделку хост откатывает
 func remote_input(p: Player, o: Dictionary) -> void:
 	p.move = Vector2(float(o.get("mx", 0.0)), float(o.get("my", 0.0))).limit_length(1.0)
 	p.run = bool(o.get("run", false))
@@ -489,22 +444,6 @@ func remote_input(p: Player, o: Dictionary) -> void:
 	var fc := Vector2(float(o.get("fx", p.face.x)), float(o.get("fy", p.face.y)))
 	if fc.length() > 0.01:
 		p.face = fc.normalized()
-	var cl := float(o.get("cl", -1.0))
-	if p.climb >= 0.0:
-		# лезет в окно: позиция только на отрезке перелезания
-		if cl < 0.0:
-			p.climb = -1.0
-			_release_climb(p)
-			if np.distance_to(p.cl_to) < 0.4 and not world.circle_blocked(np.x, np.y, PLAYER_R - 0.05):
-				p.pos = np
-			else:
-				push_player(p, p.cl_to)
-			p.move_budget = 1.0
-			return
-		return      # ход перелезания ведёт хост сам (см. _update_player)
-	if cl >= 0.0:
-		_remote_start_climb(p, o)
-		return
 	var d := np.distance_to(p.pos)
 	if d > p.move_budget + 0.25 or world.circle_blocked(np.x, np.y, PLAYER_R - 0.05) or not _path_free(p.pos, np):
 		push_player(p, p.pos)       # подделка или рассинхрон — вернуть друга туда, где он был
@@ -527,55 +466,9 @@ func _path_free(a: Vector2, b: Vector2) -> bool:
 		c = n
 	return true
 
-func _remote_start_climb(p: Player, o: Dictionary) -> void:
-	var to := Vector2(float(o.get("ctx", p.pos.x)), float(o.get("cty", p.pos.y)))
-	var mid := (p.pos + to) * 0.5
-	var wc := world.idx(clampi(floori(mid.x), 0, world.w - 1), clampi(floori(mid.y), 0, world.h - 1))
-	var ok := world.t_at(wc) == GameWorld.WINDOW_BROKEN and world.barr_at(wc) == 0 and not world.climb_occ.has(wc)
-	if ok:
-		var c := Vector2(wc % world.w + 0.5, wc / world.w + 0.5)
-		var tg := world.climb_target(wc, p.pos.x, p.pos.y)
-		ok = c.distance_to(p.pos) < 1.15 and tg.distance_to(to) < 0.3 and not world.circle_blocked(tg.x, tg.y, PLAYER_R)
-	if not ok:
-		push_player(p, p.pos)
-		return
-	p.climb = 0.0
-	p.cl_from = p.pos
-	p.cl_to = to
-	world.climb_occ[wc] = -1 - p.id
-	p.ta_act = null
-	if rnd.randf() < 0.25:
-		p.hp -= 4.0
-		msg(p.id, "Порезался о стекло")
-
 func push_player(p: Player, to: Vector2) -> void:
 	p.pos = to
 	p.force_seq += 1
-
-func _try_climb(p: Player, n: Vector2, authoritative: bool = true) -> void:
-	var wx := floori(p.pos.x + n.x * 0.6)
-	var wy := floori(p.pos.y + n.y * 0.6)
-	if not world.inside(wx, wy):
-		return
-	var wc := world.idx(wx, wy)
-	if world.t_at(wc) != GameWorld.WINDOW_BROKEN or world.barr_at(wc) != 0 or world.climb_occ.has(wc):
-		return
-	if Vector2(wx + 0.5, wy + 0.5).distance_to(p.pos) > 1.05:
-		return
-	var tg := world.climb_target(wc, p.pos.x, p.pos.y)
-	if world.circle_blocked(tg.x, tg.y, PLAYER_R):
-		return
-	p.climb = 0.0
-	p.cl_from = p.pos
-	p.cl_to = tg
-	p.face = (tg - p.pos).normalized()
-	if not authoritative:
-		return
-	world.climb_occ[wc] = -1 - p.id
-	p.ta_act = null
-	if rnd.randf() < 0.25:
-		p.hp -= 4.0
-		msg(p.id, "Порезался о стекло")
 
 func _finish_player(p: Player, dt: float, running: bool, mag: float) -> void:
 	if not running:
@@ -597,9 +490,6 @@ func knock_out(p: Player) -> void:
 	p.respawn_t = RESPAWN_TIME
 	p.move = Vector2.ZERO
 	p.ta_act = null
-	if p.climb >= 0.0:
-		p.climb = -1.0
-		_release_climb(p)
 	msg(p.id, "Ты без сознания…")
 
 func _respawn(p: Player) -> void:
@@ -634,7 +524,7 @@ func unstick(pos: Vector2, r: float) -> Vector2:
 func _timing(p: Player, a: Dictionary) -> Array:
 	match a["a"]:
 		"wear":
-			return [1.2 if Items.def(a["id"])["slot"] in ["torso", "legs", "back"] else 0.6, "Надеваю"]
+			return [1.2 if Items.def(a["id"])["slot"] in ["torso", "legs"] else 0.6, "Надеваю"]
 		"unwear":
 			return [0.8, "Снимаю"]
 		"use":
@@ -667,8 +557,6 @@ func _do_action(p: Player, a: Dictionary) -> void:
 			a[k] = int(a[k])
 	if a["a"] == "attack":
 		p.ta_act = null
-	if p.climb >= 0.0:
-		return
 	var tm := _timing(p, a)
 	if tm[0] > 0.0:
 		if p.ta_act != null:
@@ -858,12 +746,7 @@ func find_interact(p: Player) -> int:
 				continue
 			var i := world.idx(x, y)
 			var tt := world.t_at(i)
-			if tt == GameWorld.CAR_TAIL:
-				i = world.car_head(i)
-				if i < 0:
-					continue
-				tt = world.t_at(i)
-			# сейчас взаимодействовать можно только с дверями (обыск и разбивание окон из Zomboid убраны)
+			# взаимодействовать можно только с дверями
 			var useful := tt == GameWorld.DOOR or tt == GameWorld.DOOR_OPEN
 			if not useful:
 				continue
@@ -879,16 +762,15 @@ func find_interact(p: Player) -> int:
 func player_data(p: Player) -> Dictionary:
 	return {"id": p.id, "x": snappedf(p.pos.x, 0.01), "y": snappedf(p.pos.y, 0.01), "fx": snappedf(p.face.x, 0.01), "fy": snappedf(p.face.y, 0.01),
 		"hp": snappedf(p.hp, 0.01), "hu": snappedf(p.hunger, 0.01), "th": snappedf(p.thirst, 0.01), "st": snappedf(p.stamina, 0.01),
-		"dead": p.dead, "rt": snappedf(p.respawn_t, 0.1), "k": p.kills, "eq": p.eq, "mo": p.money, "bk": p.bank,
+		"dead": p.dead, "rt": snappedf(p.respawn_t, 0.1), "eq": p.eq, "mo": p.money, "bk": p.bank,
 		"inv": Items.copy(p.inv), "aa": snappedf(p.attack_anim, 0.01), "con": p.connected, "sn": p.sneaking,
-		"cl": snappedf(p.climb, 0.01), "tn": p.ta_name if p.ta_act != null else "", "tp": snappedf(p.ta_progress(), 0.01),
-		"nm": p.name, "fs": p.force_seq, "wr": p.wear.duplicate(), "lk": p.look.duplicate(),
-		"cfx": snappedf(p.cl_from.x, 0.01), "cfy": snappedf(p.cl_from.y, 0.01), "ctx": snappedf(p.cl_to.x, 0.01), "cty": snappedf(p.cl_to.y, 0.01)}
+		"tn": p.ta_name if p.ta_act != null else "", "tp": snappedf(p.ta_progress(), 0.01),
+		"nm": p.name, "fs": p.force_seq, "wr": p.wear.duplicate(), "lk": p.look.duplicate()}
 
 ## Что видят другие игроки: без инвентаря, денег и здоровья (это личное)
 func player_public(p: Player) -> Dictionary:
 	return {"id": p.id, "x": snappedf(p.pos.x, 0.01), "y": snappedf(p.pos.y, 0.01), "pub": true,
-		"dead": p.dead, "eq": p.eq, "nm": p.name, "wr": p.wear.duplicate(), "lk": p.look.duplicate(), "cl": snappedf(p.climb, 0.01), "fs": p.force_seq}
+		"dead": p.dead, "eq": p.eq, "nm": p.name, "wr": p.wear.duplicate(), "lk": p.look.duplicate(), "fs": p.force_seq}
 
 ## Применить публичные данные чужого игрока, не трогая остальное
 func player_from_public(o: Dictionary, p: Player) -> void:
@@ -909,7 +791,6 @@ func player_from(o: Dictionary, p: Player) -> void:
 	p.respawn_t = float(o.get("rt", 0.0))
 	p.money = int(o.get("mo", START_MONEY))
 	p.bank = int(o.get("bk", 0))
-	p.kills = int(o.get("k", 0))
 	p.eq = o.get("eq", "")
 	p.inv.clear()
 	for s in o.get("inv", []):
@@ -917,9 +798,6 @@ func player_from(o: Dictionary, p: Player) -> void:
 	p.attack_anim = o.get("aa", 0.0)
 	p.connected = o.get("con", true)
 	p.sneaking = o.get("sn", false)
-	p.climb = float(o.get("cl", -1.0))
-	p.cl_from = Vector2(float(o.get("cfx", p.pos.x)), float(o.get("cfy", p.pos.y)))
-	p.cl_to = Vector2(float(o.get("ctx", p.pos.x)), float(o.get("cty", p.pos.y)))
 	p.name = o.get("nm", "")
 	p.look = look_from(o.get("lk"), p.id)
 	p.wear = wear_from(o.get("wr", {}))
@@ -943,28 +821,16 @@ static func wear_from(wr) -> Dictionary:
 				out[sl] = wid
 	return out
 
-func _cont_data(d: Dictionary) -> Dictionary:
-	var o := {}
-	for k in d:
-		o[str(k)] = Items.copy(d[k])
-	return o
-
 func to_data() -> Dictionary:
-	var thp := []
-	for k in world.tile_hp:
-		thp.append([k, world.tile_hp[k]])
 	var ps := []
 	for p: Player in players:
 		ps.append(player_data(p))
 	return {"v": SAVE_VERSION, "seed": seed, "time": time, "uids": uids.duplicate(), "tiles": Marshalls.raw_to_base64(world.tiles),
-		"thp": thp, "cont": _cont_data(world.containers), "p": ps, "spawn": [spawn.x, spawn.y]}
+		"p": ps, "spawn": [spawn.x, spawn.y]}
 
-## Мир для нового клиента: карта, контейнеры, время; из игроков — он сам полностью, остальные только внешне.
+## Мир для нового клиента: карта, время; из игроков — он сам полностью, остальные только внешне.
 ## Карту аккаунтов (uids) не отдаём никогда: uid — это ключ от чужого персонажа
 func to_data_for(pid: int) -> Dictionary:
-	var thp := []
-	for k in world.tile_hp:
-		thp.append([k, world.tile_hp[k]])
 	var me := player(pid)
 	var c: Vector2 = me.pos if me != null else spawn
 	var ps := []
@@ -976,9 +842,9 @@ func to_data_for(pid: int) -> Dictionary:
 			pub["con"] = true
 			ps.append(pub)
 	return {"v": SAVE_VERSION, "seed": seed, "time": time, "tiles": Marshalls.raw_to_base64(world.tiles),
-		"thp": thp, "cont": _cont_data(world.containers), "p": ps, "spawn": [spawn.x, spawn.y]}
+		"p": ps, "spawn": [spawn.x, spawn.y]}
 
-const SAVE_VERSION := 2
+const SAVE_VERSION := 3
 
 ## Проверка формата: без карты мира загружать нечего
 static func valid_save(o) -> bool:
@@ -1006,6 +872,16 @@ static func migrate(o: Dictionary) -> Dictionary:
 				if st is Dictionary and Items.DEFS.has(str(st.get("id", ""))):
 					inv.append(st)
 			pd["inv"] = inv
+	if int(o.get("v", 1)) < 3 and o.get("tiles") is String:
+		# v3: разбитых окон и выбитых дверей больше нет (механики Zomboid убраны) — окно снова целое, дверь открыта.
+		# Прочность клеток («thp») и содержимое мебели («cont») больше не читаются.
+		var t := Marshalls.base64_to_raw(o["tiles"])
+		for i in t.size():
+			if t[i] == GameWorld.OLD_WINDOW_BROKEN:
+				t[i] = GameWorld.WINDOW
+			elif t[i] == GameWorld.OLD_DOOR_BROKEN:
+				t[i] = GameWorld.DOOR_OPEN
+		o["tiles"] = Marshalls.raw_to_base64(t)
 	o["v"] = SAVE_VERSION
 	return o
 
@@ -1017,32 +893,13 @@ func load_data(o: Dictionary) -> void:
 	for i in mini(t.size(), world.tiles.size()):
 		world.tiles[i] = t[i]
 	world.compute_buildings()
-	world.cost_dirty = true
-	world.tile_hp.clear()
-	for e in o.get("thp", []):
-		world.tile_hp[int(e[0])] = float(e[1])
-	world.barr.clear()
-	world.containers.clear()
 	var sp = o.get("spawn")
 	if sp is Array and sp.size() == 2:
 		spawn = Vector2(float(sp[0]), float(sp[1]))
-	var co: Dictionary = o.get("cont", {})
-	for k in co:
-		var l := []
-		for s in co[k]:
-			l.append({"id": s["id"], "n": int(s["n"])})
-		world.containers[int(k)] = l
 	players.clear()
 	for e in o.get("p", []):
 		var p := Player.new(int(e["id"]))
 		player_from(e, p)
-		if p.climb >= 0.0 and not is_replica:
-			# сохранились посреди окна — ставим туда, куда он лез
-			if not world.circle_blocked(p.cl_to.x, p.cl_to.y, PLAYER_R):
-				p.pos = p.cl_to
-			elif world.circle_blocked(p.pos.x, p.pos.y, PLAYER_R):
-				p.pos = unstick(p.cl_from, PLAYER_R)
-			p.climb = -1.0
 		p.rpos = p.pos
 		players.append(p)
 
@@ -1058,7 +915,7 @@ func state_for(pid: int) -> Dictionary:
 		# только те, кто рядом: при сотнях игроков пакет не растёт
 		if p.id != pid and (absf(p.pos.x - c.x) > VIEW_R or absf(p.pos.y - c.y) > VIEW_R):
 			continue
-		ps.append_array([p.id, p.pos.x, p.pos.y, p.face.x, p.face.y, float(p.atk_seq * 2 + p.atk_kind), 1.0 if p.sneaking else 0.0, p.climb, p.force_seq, p.hp if p.id == pid else 0.0, p.stamina if p.id == pid else 0.0])
+		ps.append_array([p.id, p.pos.x, p.pos.y, p.face.x, p.face.y, float(p.atk_seq * 2 + p.atk_kind), 1.0 if p.sneaking else 0.0, p.force_seq, p.hp if p.id == pid else 0.0, p.stamina if p.id == pid else 0.0])
 	var o := {"t": "st", "time": time, "ts": Time.get_ticks_msec(), "p": ps}
 	if shots.size() > 0:
 		o["sh"] = shots.duplicate(true)
@@ -1086,12 +943,6 @@ func events_for(pid: int, full_players: bool) -> Dictionary:
 			a.append([i, world.t_at(i)])
 		o["tc"] = a
 		world.dirty_tiles.clear()
-	if world.dirty_cont.size() > 0:
-		var co := {}
-		for i in world.dirty_cont:
-			co[str(i)] = Items.copy(world.containers.get(i, []))
-		o["cc"] = co
-		world.dirty_cont.clear()
 	var m := pop_messages(pid)
 	if m.size() > 0:
 		o["m"] = m
@@ -1109,7 +960,7 @@ func apply_state(o: Dictionary, local_pid: int) -> void:
 	var ps: PackedFloat32Array = o["p"]
 	var seen := {}
 	var i := 0
-	while i + 10 < ps.size():
+	while i + 9 < ps.size():
 		var pid := int(ps[i])
 		var p := player(pid)
 		if p == null:
@@ -1120,9 +971,9 @@ func apply_state(o: Dictionary, local_pid: int) -> void:
 		p.connected = true
 		seen[pid] = true
 		if pid == local_pid:
-			p.hp = ps[i + 9]
-			p.stamina = ps[i + 10]
-		var fs := int(ps[i + 8])
+			p.hp = ps[i + 8]
+			p.stamina = ps[i + 9]
+		var fs := int(ps[i + 7])
 		var ak := int(ps[i + 5])
 		var seq := ak >> 1
 		if seq != p.atk_seq:
@@ -1136,16 +987,14 @@ func apply_state(o: Dictionary, local_pid: int) -> void:
 			p.pos = Vector2(ps[i + 1], ps[i + 2])
 			p.face = Vector2(ps[i + 3], ps[i + 4])
 			p.sneaking = ps[i + 6] > 0.5
-			p.climb = ps[i + 7]
-			push_snap(p, ts, p.pos, p.face, p.climb)
+			push_snap(p, ts, p.pos, p.face)
 		elif fs != p.force_seq:
 			# хост сдвинул нас сам (дверь, откат)
 			p.force_seq = fs
 			p.pos = Vector2(ps[i + 1], ps[i + 2])
 			p.face = Vector2(ps[i + 3], ps[i + 4])
-			p.climb = ps[i + 7]
 			p.rpos = p.pos
-		i += 11
+		i += 10
 	# кто пропал из снимка — ушёл далеко или вышел из игры
 	for p in players:
 		if p.id != local_pid and not seen.has(p.id):
@@ -1175,39 +1024,24 @@ func apply_events(o: Dictionary, local_pid: int) -> void:
 		var fresh := p.snaps.is_empty() and pid != local_pid
 		var keep_pos := p.pos
 		var keep_face := p.face
-		var keep_climb := p.climb
 		var keep_fs := p.force_seq
 		var keep_aa := p.attack_anim
 		var keep_sn := p.sneaking
-		var keep_from := p.cl_from
-		var keep_to := p.cl_to
 		player_from(e, p)
 		# движение и удары приходят быстрым каналом: надёжный пакет старше и не должен их откатывать
 		p.attack_anim = keep_aa
 		if not fresh and not (pid == local_pid and int(e.get("fs", 0)) != keep_fs):
 			p.pos = keep_pos
 			p.face = keep_face
-			p.climb = keep_climb
 			p.force_seq = keep_fs
 			p.sneaking = keep_sn
-			if pid == local_pid:
-				p.cl_from = keep_from
-				p.cl_to = keep_to
 	for e in o.get("tc", []):
 		var i := int(e[0])
 		var nt := int(e[1])
 		if world.t_at(i) != nt:
 			world.events.append([i, world.t_at(i), nt])
 			world.tiles[i] = nt
-			world.cost_dirty = true
 		world.vis_dirty[i] = true
-	var cc: Dictionary = o.get("cc", {})
-	for k in cc:
-		var l := []
-		for s in cc[k]:
-			l.append({"id": s["id"], "n": int(s["n"])})
-		world.containers[int(k)] = l
-		world.vis_dirty[int(k)] = true
 	for e in o.get("fx", []):
 		fx.append(e)
 

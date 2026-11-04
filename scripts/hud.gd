@@ -1,6 +1,6 @@
 class_name Hud
 extends Control
-## Интерфейс поверх 3D: мудлы, кнопки, джойстик, панели (вещи, лут, тело, пауза).
+## Интерфейс поверх 3D: мудлы, кнопки, джойстик, панели (вещи, одежда, пауза).
 
 enum Pnl { NONE, INV, PAUSE, GEAR }
 
@@ -407,7 +407,7 @@ func _hud(g: GameState, me: GameState.Player) -> void:
 		var ring: Color = [Color(0.54, 0.56, 0.59), Color(0.91, 0.78, 0.31), Color(0.91, 0.54, 0.19), Color(0.88, 0.23, 0.23)][m.lvl]
 		draw_circle(Vector2(mx + 17, my), 17, Color(0.08, 0.09, 0.13, 0.75))
 		draw_arc(Vector2(mx + 17, my), 16, 0, TAU, 32, ring, 2.5, true)
-		Icons.glyph(self, m.g, Vector2(mx + 17, my), 12, Color(1, 0.31, 0.31) if m.g == "bleed" else Color.WHITE)
+		Icons.glyph(self, m.g, Vector2(mx + 17, my), 12, Color.WHITE)
 		_text(Vector2(mx + 17, my + 30), m.label, 10, Color(1, 1, 1, 0.87), HORIZONTAL_ALIGNMENT_CENTER, true)
 		mx += 42
 	# часы

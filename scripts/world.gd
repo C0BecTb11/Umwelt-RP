@@ -10,9 +10,9 @@ const WALL := 5
 const DOOR := 6
 const DOOR_OPEN := 7
 const WINDOW := 8
-const WINDOW_BROKEN := 9
+const OLD_WINDOW_BROKEN := 9   # больше не используется: в старых сохранениях заменяется на WINDOW (migrate v3)
 const TREE := 10
-const DOOR_BROKEN := 11
+const OLD_DOOR_BROKEN := 11    # больше не используется: в старых сохранениях заменяется на DOOR_OPEN (migrate v3)
 const FRIDGE := 12
 const COUNTER := 13
 const WARDROBE := 14
@@ -28,35 +28,25 @@ const DX4 := [1, -1, 0, 0]
 const DY4 := [0, 0, 1, -1]
 
 static func is_furniture(t: int) -> bool: return t >= FRIDGE and t <= STORESHELF
-static func is_door_like(t: int) -> bool: return t == DOOR or t == DOOR_OPEN or t == DOOR_BROKEN
-static func is_window_like(t: int) -> bool: return t == WINDOW or t == WINDOW_BROKEN
+static func is_door_like(t: int) -> bool: return t == DOOR or t == DOOR_OPEN
+static func is_window_like(t: int) -> bool: return t == WINDOW
 static func is_floor(t: int) -> bool: return t == WOOD or t == TILEFLOOR
 static func is_car(t: int) -> bool: return t >= CAR and t <= CAR_TAIL
-static func is_container(t: int) -> bool: return is_furniture(t) or t == CAR or t == CAR_V
 static func wall_like(t: int) -> bool: return t == WALL or is_window_like(t) or is_door_like(t)
 
 var w := 100
 var h := 100
 var tiles := PackedByteArray()
-var tile_hp := {}          # клетка → прочность
-var barr := {}             # клетка → уровень баррикады 1..3
-var containers := {}       # клетка → Array предметов
 var dirty_tiles := {}      # для сети
-var dirty_cont := {}
 var vis_dirty := {}        # для перестройки 3D
 var events: Array = []     # [клетка, было, стало] — для анимаций
-var climb_occ := {}        # окно → кто лезет
-var flow := PackedInt32Array()
 var buildings: Array = []  # [x0, y0, x1, y1]
 var building_of := PackedInt32Array()
-
-const BIG := 1 << 30
 
 func _init(width: int = 100, height: int = 100) -> void:
 	w = width
 	h = height
 	tiles.resize(w * h)
-	flow.resize(w * h)
 	building_of.resize(w * h)
 
 func idx(x: int, y: int) -> int: return y * w + x
@@ -68,34 +58,22 @@ func set_t(x: int, y: int, v: int) -> void:
 		tiles[y * w + x] = v
 
 func set_idx(i: int, v: int) -> void:
-	cost_dirty = true
 	events.append([i, tiles[i], v])
 	tiles[i] = v
 	dirty_tiles[i] = true
 	vis_dirty[i] = true
 
-func barr_at(i: int) -> int: return barr.get(i, 0)
-
 func solid(x: int, y: int) -> bool:
 	if not inside(x, y):
 		return true
-	var i := y * w + x
-	if barr_at(i) > 0:
-		return true
-	var tt: int = tiles[i]
-	if tt == WALL or tt == DOOR or tt == WINDOW or tt == WINDOW_BROKEN or tt == TREE:
+	var tt: int = tiles[y * w + x]
+	if tt == WALL or tt == DOOR or tt == WINDOW or tt == TREE:
 		return true
 	return is_furniture(tt) or is_car(tt)
 
 func opaque(x: int, y: int) -> bool:
 	var tt := t(x, y)
-	if tt == WALL or tt == DOOR or (is_furniture(tt) and tt != COUNTER):
-		return true
-	return inside(x, y) and barr_at(idx(x, y)) >= 2
-
-func bashable(i: int) -> bool:
-	var tt: int = tiles[i]
-	return barr_at(i) > 0 or tt == DOOR or tt == WINDOW
+	return tt == WALL or tt == DOOR or (is_furniture(tt) and tt != COUNTER)
 
 func circle_blocked(cx: float, cy: float, r: float) -> bool:
 	var x0 := floori(cx - r)
@@ -114,7 +92,7 @@ func circle_blocked(cx: float, cy: float, r: float) -> bool:
 				return true
 	return false
 
-## shot=true — для пули: целое стекло и любая баррикада тоже останавливают
+## shot=true — для пули: окно тоже останавливает
 func los(ax: float, ay: float, bx: float, by: float, shot: bool = false) -> bool:
 	var dx := bx - ax
 	var dy := by - ay
@@ -137,92 +115,9 @@ func los(ax: float, ay: float, bx: float, by: float, shot: bool = false) -> bool
 			continue
 		if opaque(x, y):
 			return false
-		if shot and inside(x, y) and (t(x, y) == WINDOW or barr_at(idx(x, y)) > 0):
+		if shot and t(x, y) == WINDOW:
 			return false
 	return true
-
-# ---------- поле потоков (Дейкстра на корзинах) ----------
-func move_cost(i: int) -> int:
-	var tt: int = tiles[i]
-	if tt == WALL or tt == TREE or is_furniture(tt) or is_car(tt):
-		return -1
-	var c := 10
-	if tt == WINDOW_BROKEN:
-		c += 35
-	if tt == DOOR or tt == WINDOW:
-		c += 60
-	c += barr_at(i) * 80
-	return c
-
-var cost := PackedInt32Array()
-var cost_dirty := true
-var _buckets: Array = []
-
-func _rebuild_cost() -> void:
-	cost.resize(w * h)
-	for i in range(w * h):
-		cost[i] = move_cost(i)
-	cost_dirty = false
-
-## Дейкстра на корзинах в окне вокруг игроков
-func compute_flow(sources: Array, max_cost: int = 520, radius: int = 34) -> void:
-	if cost_dirty or cost.size() != w * h:
-		_rebuild_cost()
-	flow.fill(BIG)
-	if _buckets.size() != max_cost + 1:
-		_buckets.resize(max_cost + 1)
-		for k in _buckets.size():
-			_buckets[k] = PackedInt32Array()
-	else:
-		for k in _buckets.size():
-			_buckets[k].clear()
-	var x0 := w
-	var y0 := h
-	var x1 := 0
-	var y1 := 0
-	for s in sources:
-		var sx: int = s.x
-		var sy: int = s.y
-		if not inside(sx, sy):
-			continue
-		var i := idx(sx, sy)
-		flow[i] = 0
-		_buckets[0].append(i)
-		x0 = mini(x0, sx - radius)
-		y0 = mini(y0, sy - radius)
-		x1 = maxi(x1, sx + radius)
-		y1 = maxi(y1, sy + radius)
-	x0 = maxi(0, x0)
-	y0 = maxi(0, y0)
-	x1 = mini(w - 1, x1)
-	y1 = mini(h - 1, y1)
-	for d in range(max_cost + 1):
-		var b: PackedInt32Array = _buckets[d]
-		var k := 0
-		while k < b.size():
-			var i: int = b[k]
-			k += 1
-			if flow[i] != d:
-				continue
-			var x := i % w
-			var y := i / w
-			if x < x1:
-				_relax(i + 1, d, max_cost)
-			if x > x0:
-				_relax(i - 1, d, max_cost)
-			if y < y1:
-				_relax(i + w, d, max_cost)
-			if y > y0:
-				_relax(i - w, d, max_cost)
-
-func _relax(ni: int, d: int, max_cost: int) -> void:
-	var c: int = cost[ni]
-	if c < 0:
-		return
-	var nd := d + c
-	if nd <= max_cost and nd < flow[ni]:
-		flow[ni] = nd
-		_buckets[nd].append(ni)
 
 # ---------- генерация города ----------
 func generate(seed: int) -> Vector2:
@@ -319,10 +214,8 @@ func _build_house(rnd: RandomNumberGenerator, lot_x: int, lot_y: int, door_top: 
 	var dx := x0 + hw / 2
 	var dy := y0 if door_top else y1
 	set_t(dx, dy, DOOR)
-	tile_hp[idx(dx, dy)] = 100.0
 	if kind == 1:
 		set_t(dx - 1, dy, DOOR)
-		tile_hp[idx(dx - 1, dy)] = 100.0
 	for y in range(y0, y1 + 1):
 		for x in range(x0, x1 + 1):
 			var edge := x == x0 or x == x1 or y == y0 or y == y1
@@ -333,7 +226,6 @@ func _build_house(rnd: RandomNumberGenerator, lot_x: int, lot_y: int, door_top: 
 				continue
 			if rnd.randf() < (0.45 if kind == 1 else 0.22):
 				set_t(x, y, WINDOW)
-				tile_hp[idx(x, y)] = 60.0
 	match kind:
 		1:
 			var sx := x0 + 2
@@ -371,7 +263,6 @@ func _fix_openings(x0: int, y0: int, x1: int, y1: int) -> void:
 					bad = true
 			if bad:
 				set_t(x, y, WALL)
-				tile_hp.erase(idx(x, y))
 
 func _house_rooms(rnd: RandomNumberGenerator, x0: int, y0: int, x1: int, y1: int, door_top: bool, door_x: int) -> void:
 	var mid := (x0 + x1) / 2 + (1 if rnd.randi() % 2 == 0 else 0)
@@ -384,7 +275,6 @@ func _house_rooms(rnd: RandomNumberGenerator, x0: int, y0: int, x1: int, y1: int
 	if gap == hmid:
 		gap = hmid + 1 if hmid + 1 < y1 else hmid - 1
 	set_t(mid, gap, DOOR_OPEN)
-	tile_hp[idx(mid, gap)] = 80.0
 	var entry_left := door_x < mid
 	var sx0 := mid + 1 if entry_left else x0 + 1
 	var sx1 := x1 - 1 if entry_left else mid - 1
@@ -395,7 +285,6 @@ func _house_rooms(rnd: RandomNumberGenerator, x0: int, y0: int, x1: int, y1: int
 		var g := sx0 + rnd.randi() % (sx1 - sx0 + 1)
 		if absi(g - mid) > 0:
 			set_t(g, hmid, DOOR_OPEN)
-			tile_hp[idx(g, hmid)] = 80.0
 			split = true
 		else:
 			for x in range(sx0, sx1 + 1):
@@ -441,50 +330,6 @@ func _place(rnd: RandomNumberGenerator, xa: int, xb: int, y: int, items: Array) 
 		set_t(x, y, items[k])
 		k += 1
 
-func loot_for(tt: int) -> String:
-	match tt:
-		FRIDGE: return "fridge"
-		COUNTER: return "counter"
-		WARDROBE: return "wardrobe"
-		SHELF: return "shelf"
-		MEDCAB: return "med"
-		LOCKER: return "police"
-		STORESHELF: return "store"
-		CAR, CAR_V: return "car"
-	return ""
-
-## Лут генерируется при первом открытии
-func open_container(i: int, rnd: RandomNumberGenerator) -> Array:
-	if containers.has(i):
-		return containers[i]
-	var list: Array = []
-	var key := loot_for(tiles[i])
-	if key != "":
-		var table: Array = Items.LOOT[key]
-		var total := 0
-		for l in table:
-			total += l[1]
-		for _r in range(rnd.randi() % 4):
-			var r := rnd.randi() % total
-			for l in table:
-				r -= l[1]
-				if r < 0:
-					Items.add_to(list, l[0], rnd.randi_range(l[2], l[3]))
-					break
-	containers[i] = list
-	dirty_cont[i] = true
-	vis_dirty[i] = true
-	return list
-
-func car_head(i: int) -> int:
-	var x := i % w
-	var y := i / w
-	if t(x - 1, y) == CAR:
-		return idx(x - 1, y)
-	if t(x, y - 1) == CAR_V:
-		return idx(x, y - 1)
-	return -1
-
 func _is_building_tile(tt: int) -> bool:
 	return tt == WALL or is_floor(tt) or is_door_like(tt) or is_window_like(tt) or is_furniture(tt)
 
@@ -527,7 +372,7 @@ func compute_buildings() -> void:
 					tail += 1
 		buildings.append([x0, y0, x1, y1])
 
-## Проём в горизонтальной стене (перелезать по оси Y)
+## Проём в горизонтальной стене (дверь открывается и проходится по оси Y)
 func along_y(x: int, y: int) -> bool:
 	var l := wall_like(t(x - 1, y))
 	var r := wall_like(t(x + 1, y))
@@ -536,12 +381,3 @@ func along_y(x: int, y: int) -> bool:
 	if wall_like(t(x, y - 1)) and wall_like(t(x, y + 1)):
 		return false
 	return l or r
-
-func climb_target(cell: int, px: float, py: float) -> Vector2:
-	var x := cell % w
-	var y := cell / w
-	var cx := x + 0.5
-	var cy := y + 0.5
-	if along_y(x, y):
-		return Vector2(cx, cy + (0.95 if py < cy else -0.95))
-	return Vector2(cx + (0.95 if px < cx else -0.95), cy)

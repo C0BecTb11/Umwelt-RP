@@ -301,17 +301,12 @@ func _walk_update(id: int, pos: Vector2, dt: float) -> void:
 	st[3] = move_toward(st[3], tgt, dt * 7.0)
 
 func _on_tile_event(i: int, from: int, to: int) -> void:
-	var c := Vector3(i % world.w + 0.5, 0, i / world.w + 0.5)
 	_mark_dirty(i)
 	if (from == W.DOOR and to == W.DOOR_OPEN) or (from == W.DOOR_OPEN and to == W.DOOR):
 		if not door_angle.has(i):
 			door_angle[i] = 90.0 if from == W.DOOR_OPEN else 0.0
 	if (to == W.DOOR or to == W.DOOR_OPEN) and not door_nodes.has(i):
 		_make_door(i)
-	if from == W.WINDOW and to == W.WINDOW_BROKEN:
-		_burst(c + Vector3(0, 1.4, 0), 26, Color(0.75, 0.9, 0.97), 0.05, 3.4, 1.6)
-	if W.is_door_like(from) and to == W.DOOR_BROKEN:
-		_burst(c + Vector3(0, 1.0, 0), 22, Color(0.66, 0.48, 0.28), 0.07, 2.8, 1.8)
 
 func _burst(at: Vector3, n: int, col: Color, size: float, speed: float, life: float, dir = null, spread: float = 0.9) -> void:
 	for k in n:
@@ -341,13 +336,6 @@ func _on_fx(f: Array, local_pid: int, me: GameState.Player) -> void:
 	var x: float = f[1]
 	var z: float = f[2]
 	match int(f[0]):
-		1:
-			_burst(Vector3(x, 1.2, z), 14, Color(0.55, 0.05, 0.05), 0.04, 2.6, 0.7, f[3], 0.6)
-			if randf() < 0.6:
-				_add_blood(x + cos(f[3]) * 0.4, z + sin(f[3]) * 0.4, 0.35)
-		2:
-			_burst(Vector3(x, 0.8, z), 26, Color(0.48, 0.05, 0.05), 0.05, 2.2, 0.9)
-			_add_blood(x, z, 0.8)
 		3:
 			_burst(Vector3(x, 1.2, z), 10, Color(0.63, 0.08, 0.08), 0.04, 2.0, 0.6)
 			if randf() < 0.6:
@@ -470,7 +458,7 @@ func _place_scene(g: GameState, me: GameState.Player, dt: float) -> void:
 		pfall[p.id] = fb
 		cm.fall = fb
 		cm.speed = st[2]
-		cm.pose(st[0], (st[3] if st.size() > 3 else 0.0) * (1.0 - fb), p.attack_anim, p.weapon_id(), fb >= 0.999, p.sneaking, false, p.rclimb)
+		cm.pose(st[0], (st[3] if st.size() > 3 else 0.0) * (1.0 - fb), p.attack_anim, p.weapon_id(), fb >= 0.999, p.sneaking)
 	for id in players.keys():
 		if not alive.has(id):
 			players[id].queue_free()

@@ -1,7 +1,7 @@
 class_name Items
 extends RefCounted
 
-enum Kind { FOOD, DRINK, MED, MELEE, GUN, AMMO, MATERIAL, WEAR }
+enum Kind { FOOD, DRINK, MED, MELEE, GUN, AMMO, WEAR }
 
 ## Слоты одежды. Каждая вещь — часть модели персонажа (assets/chars, Quaternius CC0) для мужчины "m" и/или женщины "f"
 const SLOTS := ["head", "torso", "legs", "feet"]
@@ -28,7 +28,7 @@ static var DEFS: Dictionary = _build()
 
 static func _d(name: String, kind: int, w: float, color: String, extra: Dictionary = {}) -> Dictionary:
 	var d := {"name": name, "kind": kind, "w": w, "color": Color(color),
-		"hunger": 0.0, "thirst": 0.0, "heal": 0.0, "dmg": 0.0, "range": 0.0, "cd": 0.0, "noise": 0.0, "slot": "", "prot": 0.0, "cap": 0.0}
+		"hunger": 0.0, "thirst": 0.0, "heal": 0.0, "dmg": 0.0, "range": 0.0, "cd": 0.0, "slot": ""}
 	for k in extra:
 		d[k] = extra[k]
 	return d
@@ -48,7 +48,7 @@ static func _build() -> Dictionary:
 static func _base() -> Dictionary:
 	var K := Kind
 	return {
-		"fists": _d("Кулаки", K.MELEE, 0.0, "#e0b090", {"dmg": 8.0, "range": 0.9, "cd": 0.55, "noise": 2.0}),
+		"fists": _d("Кулаки", K.MELEE, 0.0, "#e0b090", {"dmg": 8.0, "range": 0.9, "cd": 0.55}),
 		"canned": _d("Консервы", K.FOOD, 0.6, "#b0b8c0", {"hunger": 35.0}),
 		"chips": _d("Чипсы", K.FOOD, 0.2, "#e8c040", {"hunger": 15.0, "thirst": -5.0}),
 		"bread": _d("Хлеб", K.FOOD, 0.3, "#c89048", {"hunger": 25.0}),
@@ -56,11 +56,11 @@ static func _base() -> Dictionary:
 		"water": _d("Бутылка воды", K.DRINK, 0.6, "#60a8e8", {"thirst": 45.0}),
 		"soda": _d("Газировка", K.DRINK, 0.4, "#e04848", {"thirst": 25.0, "hunger": 5.0}),
 		"medkit": _d("Аптечка", K.MED, 0.4, "#e8e8e8", {"heal": 50.0}),
-		"knife": _d("Кухонный нож", K.MELEE, 0.4, "#c0c0c8", {"dmg": 22.0, "range": 1.0, "cd": 0.4, "noise": 2.0}),
-		"bat": _d("Бейсбольная бита", K.MELEE, 1.5, "#b07840", {"dmg": 38.0, "range": 1.3, "cd": 0.7, "noise": 4.0}),
-		"crowbar": _d("Лом", K.MELEE, 2.0, "#707078", {"dmg": 48.0, "range": 1.3, "cd": 0.85, "noise": 5.0}),
-		"hammer": _d("Молоток", K.MELEE, 1.0, "#905030", {"dmg": 20.0, "range": 1.0, "cd": 0.55, "noise": 3.0}),
-		"pistol": _d("Пистолет", K.GUN, 1.0, "#303034", {"dmg": 70.0, "range": 10.0, "cd": 0.45, "noise": 24.0}),
+		"knife": _d("Кухонный нож", K.MELEE, 0.4, "#c0c0c8", {"dmg": 22.0, "range": 1.0, "cd": 0.4}),
+		"bat": _d("Бейсбольная бита", K.MELEE, 1.5, "#b07840", {"dmg": 38.0, "range": 1.3, "cd": 0.7}),
+		"crowbar": _d("Лом", K.MELEE, 2.0, "#707078", {"dmg": 48.0, "range": 1.3, "cd": 0.85}),
+		"hammer": _d("Молоток", K.MELEE, 1.0, "#905030", {"dmg": 20.0, "range": 1.0, "cd": 0.55}),
+		"pistol": _d("Пистолет", K.GUN, 1.0, "#303034", {"dmg": 70.0, "range": 10.0, "cd": 0.45}),
 		"ammo": _d("Патроны 9мм", K.AMMO, 0.02, "#d0b040"),
 		# ---------- одежда: parts — часть модели для мужчины/женщины; also — что ещё закрывает (платье — и низ) ----------
 		"hard_hat": _d("Строительная каска", K.WEAR, 0.4, "#e8c020", {"slot": "head", "parts": {"m": "Worker_Head", "f": "Worker_Head"}}),
@@ -129,19 +129,6 @@ static func tint_for(wear: Dictionary, gender: String, slot: String) -> Array:
 	if not d.has("tint_color") or not (d.get("tint", {}) as Dictionary).has(gender):
 		return []
 	return [d["tint"][gender], Color(d["tint_color"])]
-
-## Таблицы лута: [id, вес шанса, мин, макс]
-static var LOOT: Dictionary = {
-	"fridge": [["water", 5, 1, 2], ["soda", 5, 1, 2], ["apple", 4, 1, 3], ["bread", 3, 1, 1], ["canned", 2, 1, 1]],
-	"counter": [["canned", 5, 1, 2], ["chips", 4, 1, 1], ["knife", 3, 1, 1], ["bread", 2, 1, 1], ["water", 2, 1, 1]],
-	"wardrobe": [["bat", 2, 1, 1], ["hammer", 2, 1, 1], ["chips", 1, 1, 1],
-		["hoodie", 3, 1, 1], ["shirt", 2, 1, 1], ["jeans", 3, 1, 1], ["shorts", 2, 1, 1], ["boots", 2, 1, 1], ["shoes", 1, 1, 1]],
-	"shelf": [["chips", 4, 1, 1], ["canned", 3, 1, 1], ["hammer", 2, 1, 1], ["crowbar", 1, 1, 1]],
-	"med": [["medkit", 3, 1, 1]],
-	"store": [["canned", 6, 1, 3], ["chips", 6, 1, 3], ["water", 6, 1, 3], ["soda", 5, 1, 3], ["bread", 3, 1, 2]],
-	"car": [["water", 4, 1, 1], ["chips", 3, 1, 1], ["crowbar", 2, 1, 1], ["ammo", 1, 3, 8], ["soda", 3, 1, 1]],
-	"police": [["pistol", 3, 1, 1], ["ammo", 6, 6, 15], ["crowbar", 2, 1, 1], ["boots", 2, 1, 1]],
-}
 
 # ---------- инвентарь: массив словарей {"id", "n"} ----------
 static func add_to(list: Array, id: String, n: int) -> void:

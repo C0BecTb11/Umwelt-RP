@@ -62,7 +62,6 @@ func _process(dt: float) -> void:
 		if c.pid >= 0:
 			_send_to(c, dt)
 	game.world.dirty_tiles.clear()
-	game.world.dirty_cont.clear()
 	game.fx_net.clear()
 	# сообщения тем, кого нет, не копим
 	for pid in game.messages.keys():
@@ -145,7 +144,7 @@ func _handle_net(dt: float) -> void:
 					if o.has("ts"):
 						var ts := float(o["ts"])
 						c.clock.sample(ts, Time.get_ticks_msec())
-						GameState.push_snap(pl, ts, pl.pos, pl.face, pl.climb)
+						GameState.push_snap(pl, ts, pl.pos, pl.face)
 			"act":
 				if c == null or c.pid < 0 or c.acts >= 30:
 					continue

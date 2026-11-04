@@ -9,7 +9,7 @@ static func create(kind: String) -> GameState:
 	g.real_clock = false          # у снимков своё время суток
 	g.time = 11 * 60.0
 	match kind:
-		"inside", "loot", "inv":
+		"inside", "inv":
 			_into_house(g, p)
 		"night":
 			g.time = 23 * 60.0

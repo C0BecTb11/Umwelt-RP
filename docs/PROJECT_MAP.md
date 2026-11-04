@@ -39,7 +39,7 @@ Umwelt-RP/
 │   ├── world_mesh.gd          WorldMesh: 3D-геометрия города по карте (чанки, крыши, двери, фонари)
 │   ├── world_view.gd          WorldView: 3D-сцена: камера, солнце, свет, игроки, эффекты
 │   ├── character.gd           CharModel: персонаж Quaternius — скелет, анимации, части одежды, оружие
-│   ├── items.gd               Items: предметы, одежда (части моделей), слоты, причёски, цвета, лут
+│   ├── items.gd               Items: предметы, одежда (части моделей), слоты, причёски, цвета
 │   ├── hud.gd                 Hud: интерфейс поверх 3D (кнопки, джойстик, панели, часы, деньги)
 │   ├── icons.gd               Icons: иконки предметов и пиктограммы — рисуются кодом
 │   ├── mesher.gd              Mesher: построитель low-poly геометрии с цветом вершин
@@ -88,18 +88,18 @@ Umwelt-RP/
 | `scripts/net.gd` | `Net` (Node, `Net.I`) | `serve`, `join`, `close`, `kick`, `send` (надёжный RPC, канал 0), `send_fast` (канал 1, надёжный); входящие — в `inbox` с полем `_from` |
 | `scripts/game.gd` | `GameState` + вложенные `Player`, `NetClock` | Игровой мир: игроки (карточка `Player`: позиция, здоровье, деньги, счёт, вещи, одежда `wear`, внешность `look`), движение, драка, нокаут и возрождение, одежда, двери, время (МСК), сохранение и миграции, снимки для сети (`state_for`, `events_for`, `apply_state`, `apply_events`) |
 | `scripts/game_screen.gd` | `GameScreen` | Режимы `SOLO` (логика на телефоне) и `CLIENT` (логика на сервере, здесь — предсказание своего движения); шлёт `in`/`act`/`hello`; принимает `init`/`st`/`ev`/`bye`; проверка обновлений раз в 180 с |
-| `scripts/world.gd` | `GameWorld` | Тайлы карты и их типы, генерация города (`generate`, дома, деревья), проходимость (`solid`, `circle_blocked`), видимость по прямой (`los`), окна и двери, здания, перелезание |
+| `scripts/world.gd` | `GameWorld` | Тайлы карты и их типы, генерация города (`generate`, дома, деревья), проходимость (`solid`, `circle_blocked`), видимость по прямой (`los`: сквозь окно видно, пуля не проходит), окна и двери, здания |
 | `scripts/world_mesh.gd` | `WorldMesh` | Чанки геометрии, стены, мебель, машины-декорации, деревья, фонари (`lamps`), крыши, двери |
 | `scripts/world_view.gd` | `WorldView` | 3D-узлы: камера (угол 54°), солнце и окружение по `darkness()`, фонари, модели игроков (`CharModel`), кровь, частицы, выстрелы; перевод джойстика в направление мира |
-| `scripts/character.gd` | `CharModel` | Загружает `assets/chars/<пол>_base.scn` и части; `set_wear()` по `Items.part_for/tint_for`; тон кожи; оружие на кости `Wrist.R`; выбор анимации в `pose()` |
-| `scripts/items.gd` | `Items` | `DEFS` (еда, оружие, одежда с `parts`/`also`/`tint`), `SLOTS`, `BARE`, `HEADS`, `COLORS`, `START_WEAR`, `LOOT`; инвентарь (`add_to`, `take`, `count`, `weight`) |
+| `scripts/character.gd` | `CharModel` | Загружает `assets/chars/<пол>_base.scn` и части; `set_wear()` по `Items.part_for/tint_for`; тон кожи; оружие на кости `Wrist.R`; выбор анимации в `pose(phase, moving, attack, weapon_id, lying, sneak)` |
+| `scripts/items.gd` | `Items` | `DEFS` (еда, оружие, одежда с `parts`/`also`/`tint`), `SLOTS`, `BARE`, `HEADS`, `COLORS`, `START_WEAR`; инвентарь (`add_to`, `take`, `count`, `weight`) |
 | `scripts/hud.gd` | `Hud` | Рисование интерфейса (`_draw`), касания, джойстик, панели `INV` / `PAUSE` / `GEAR`, сообщения, напоминание об обновлении |
 | `scripts/icons.gd` | `Icons` | `item()` — иконка предмета по id (цветные варианты — по основе), `glyph()` — пиктограммы |
 | `scripts/mesher.gd` | `Mesher` | Треугольники, коробки, трубы, эллипсоиды с цветом вершин; альфа цвета = «вид» (стена/свечение) |
 | `scripts/saves.gd` | `Saves` | Офлайн-сохранение: временный файл → основной, резервная копия, проверка формата |
 | `scripts/demo.gd` | `Demo` | Демо-сцены: `inside`, `loot`, `inv`, `night`, `evening`, `gear`, `outfit`, `crowd`, `knocked`, `armed`, `catalog` (своё время, `real_clock = false`) |
 | `scripts/server_only/server.gd` | без class_name, `load()` | Ключи `--port`, `--max`, `--noauth`; клиенты (`Client`), «привет» и проверка сборки, вход через Supabase (`_verify` → `_enter`), выдача снимков (`_send_to`), автосохранение раз в 60 с, лог статистики |
-| `scripts/server_only/audit_test.gd` | без class_name | 53 проверки (стены, сеть, сохранения, одежда, внешность, время и др.), выход с кодом 1 при ошибке |
+| `scripts/server_only/audit_test.gd` | без class_name | 50 проверок (стены, сеть, сохранения и их миграции, одежда, внешность, время и др.), выход с кодом 1 при ошибке |
 | `scripts/server_only/nettest.gd` | без class_name | Клиент-бот: подключается, ходит, считает «откаты» и видимых игроков; переменная `NT_HOST` — внешний сервер |
 | `scripts/server_only/authtest.gd` | без class_name | Вход ботом через `account.gd` и проверка, что сервер впустил |
 | `shaders/world.gdshader` | шейдер | Параметры `player_pos`, `cam_back`, `cut`, `night` (задаёт `world_view.gd`) |
@@ -193,9 +193,9 @@ CI:     godot --headless -- --audit | --nettest=… | --authtest=…  (main.gd �
 |---|---|---|---|
 | `hello` | клиент → сервер | надёжный (0) | `token`, `legacy`, `uid`, `nick`, `build` |
 | `init` | сервер → клиент | 0 | `pid`, `seed`, `world` (`to_data_for`: карта и игроки, без `uids`) |
-| `in` | клиент → сервер | быстрый (1) | ввод и позиция, `ts` для часов |
+| `in` | клиент → сервер | быстрый (1) | `ts`, `mx`/`my`, `run`, `x`/`y`, `fx`/`fy`, `fs` (ввод, позиция, взгляд, номер отката) |
 | `act` | клиент → сервер | 0 | действие игрока (не больше 30 с одного подключения за кадр сервера) |
-| `st` | сервер → клиент | 1 | позиции и время (`state_for`) |
+| `st` | сервер → клиент | 1 | время и игроки рядом (`state_for`): по 10 чисел — `id, x, y, fx, fy, atk, sneak, force_seq, hp, stamina` |
 | `ev` | сервер → клиент | 0 | события, сообщения, данные игроков (`events_for`) |
 | `bye` | сервер → клиент | 0 | отказ или выход с причиной (`why`) |
 | `disconnect` | Net → свой inbox | — | разрыв соединения (создаёт `net.gd`) |
@@ -215,7 +215,7 @@ CI:     godot --headless -- --audit | --nettest=… | --authtest=…  (main.gd �
 |---|---|
 | Карточка игрока, ID, деньги, банковский счёт | `game.gd`: класс `Player`, `join_player`, `_rekey`, `_move_id`, `tag()`, `player_data`/`player_from` |
 | Аккаунты, персонаж, пол | `account.gd`, `main.gd` (`_show_login`, `_show_create_character`), `server.gd` (`_verify`, `_enter`), Supabase `public.characters` |
-| Движение, бег, присед, перелезание | `game.gd`: `move_speed`, `move_player`, `_try_climb`, `_finish_player`; `world.gd`: `climb_target`, `circle_blocked` |
+| Движение, бег, присед | `game.gd`: `move_speed`, `move_player`, `_finish_player`; `world.gd`: `circle_blocked` |
 | Драка, нокаут, возрождение | `game.gd`: `_attack`, `hit_player`, `knock_out`, `_respawn`; анимации — `character.gd` `pose()` |
 | Одежда | `items.gd` (`DEFS` с `parts`, `SLOTS`, `BARE`, `COLORS`), `game.gd` (`_wear`, `_unwear`, `wear_from`), `character.gd` (`set_wear`), `hud.gd` (`_draw_gear`), `icons.gd` |
 | Внешность (пол, причёска, кожа) | `game.gd`: `default_look`, `look_from`, `set_gender`; `items.gd`: `HEADS`; `character.gd`: `setup`, `_apply_tone` |
@@ -253,20 +253,12 @@ CI:     godot --headless -- --audit | --nettest=… | --authtest=…  (main.gd �
 
 ## 7. Неиспользуемое и устаревшее (проверено поиском вызовов)
 
-Код не удалён — только зафиксировано (см. BUGFIX_LOG BF-022). Перед удалением — убедиться ещё раз.
-
-| Что | Где | Проверка | Статус |
-|---|---|---|---|
-| `compute_flow()`, массив `flow` | `world.gd` | вызовов `compute_flow(` нет | Не используется (поиск пути зомби из Zomboid) |
-| `bashable()` | `world.gd` | вызовов нет | Не используется (выбивание дверей зомби) |
-| `open_container()` и `Items.LOOT` | `world.gd`, `items.gd` | `open_container(` не вызывается; `LOOT` нужен только ему | Не используется (обыск убран); `containers` по-прежнему сохраняются в мир |
-| Перелезание через разбитое окно (`WINDOW_BROKEN`) | `game.gd` (`_try_climb`, `_remote_start_climb`), `world.gd` | окна больше не бьются | Спящий код |
-| Баррикады (`barr`, `barr_at`, `_barricade`) | `world.gd`, `world_mesh.gd`, `game.gd` | ставить баррикады нечем | Спящий код |
-| Иконка `"planks"` | `icons.gd` | предмета `planks` в `Items.DEFS` нет | Не используется |
-| Демо `loot` | `demo.gd` | панели лута в `hud.gd` больше нет | Ведёт себя как `inside` |
-| `GameState.day()` | `game.gd` | вызовов нет (часы показывают дату с 0.14) | Не используется |
-| Комментарий «панели (вещи, лут, тело, пауза)» | `hud.gd`, строка 2 | лута нет, есть `INV`, `PAUSE`, `GEAR` | Устаревший комментарий |
-| Комментарий «2 смерть зомби» у `fx` | `game.gd` | зомби нет | Устаревший комментарий |
+Всё найденное ранее удалено в 0.17 (см. BUGFIX_LOG BF-022): поиск пути зомби (`compute_flow`, `flow`, `cost`),
+`bashable`, обыск и лут (`containers`, `open_container`, `loot_for`, `Items.LOOT`, `Kind.MATERIAL`), баррикады,
+прочность клеток (`tile_hp`), разбитые окна и выбитые двери с перелезанием (`_try_climb`, `climb_target`,
+поля `climb`), `kills`, `GameState.day()`, демо `loot`, лишние иконки, устаревшие комментарии.
+Номера тайлов 9 и 11 оставлены как `OLD_WINDOW_BROKEN`/`OLD_DOOR_BROKEN` — только для миграции сохранений v3
+(`GameState.migrate`). Сейчас неиспользуемого кода не известно.
 
 Файлов-сирот не найдено: все скрипты и сцены подключены, все `.scn` из `assets/chars` либо используются в
 `items.gd`, либо входят в список частей скрипта извлечения.

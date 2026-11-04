@@ -74,7 +74,6 @@ func _tile(m: Mesher, x: int, y: int) -> void:
 	var hv := hash2(x, y)
 	var fx := float(x)
 	var fz := float(y)
-	var i := w.idx(x, y)
 	if W.wall_like(t):
 		_ground_under_wall(m, x, y)
 		_walls(m, x, y, t)
@@ -100,14 +99,6 @@ func _tile(m: Mesher, x: int, y: int) -> void:
 			W.TREE: _tree(m, x, y)
 			W.CAR: _car(m, x, y, true)
 			W.CAR_V: _car(m, x, y, false)
-			W.DOOR_BROKEN: _broken_door(m, x, y)
-	# баррикада
-	var bl := w.barr_at(i)
-	if bl > 0:
-		_barricade(m, x, y, bl)
-	# кучка вещей
-	if not W.is_container(t) and t != W.CAR_TAIL and w.containers.has(i) and not w.containers[i].is_empty():
-		_pile(m, x, y, w.containers[i])
 
 func _floor_near(x: int, y: int) -> int:
 	for k in 4:
@@ -248,7 +239,7 @@ func _walls(m: Mesher, x: int, y: int, t: int) -> void:
 				m.aabb(x if l else cx - h, 0, cz - h - 0.01, x + 1.0 if r else cx + h, 0.18, cz + h + 0.01, base)
 			if u or d:
 				m.aabb(cx - h - 0.01, 0, y if u else cz - h, cx + h + 0.01, 0.18, y + 1.0 if d else cz + h, base)
-		W.WINDOW, W.WINDOW_BROKEN:
+		W.WINDOW:
 			_seg(m, x, y, horiz, 0, 0.95, col, cap)
 			_seg(m, x, y, horiz, 1.85, WH, col, cap)
 			var frame := c(0xEDE6DA, 0)
@@ -260,27 +251,13 @@ func _walls(m: Mesher, x: int, y: int, t: int) -> void:
 				m.aabb(cx - h - 0.05, 0.95, y + 0.04, cx + h + 0.05, 1.0, y + 0.96, frame)
 				m.aabb(cx - h, 1.0, y, cx + h, 1.85, y + 0.06, frame)
 				m.aabb(cx - h, 1.0, y + 0.94, cx + h, 1.85, y + 1.0, frame)
-			if t == W.WINDOW:
-				var glass := c(0x7FA6BA, 0)
-				if horiz:
-					m.aabb(x + 0.06, 1.0, cz - 0.02, x + 0.94, 1.85, cz + 0.02, glass)
-					m.aabb(cx - 0.02, 1.0, cz - 0.03, cx + 0.02, 1.85, cz + 0.03, frame)
-				else:
-					m.aabb(cx - 0.02, 1.0, y + 0.06, cx + 0.02, 1.85, y + 0.94, glass)
-					m.aabb(cx - 0.03, 1.0, cz - 0.02, cx + 0.03, 1.85, cz + 0.02, frame)
+			var glass := c(0x7FA6BA, 0)
+			if horiz:
+				m.aabb(x + 0.06, 1.0, cz - 0.02, x + 0.94, 1.85, cz + 0.02, glass)
+				m.aabb(cx - 0.02, 1.0, cz - 0.03, cx + 0.02, 1.85, cz + 0.03, frame)
 			else:
-				var g := c(0x9FC4D4, 0)
-				if horiz:
-					m.tri(Vector3(x + 0.06, 1.0, cz), Vector3(x + 0.3, 1.0, cz), Vector3(x + 0.1, 1.3, cz), g)
-					m.tri(Vector3(x + 0.94, 1.85, cz), Vector3(x + 0.7, 1.85, cz), Vector3(x + 0.9, 1.55, cz), g)
-				else:
-					m.tri(Vector3(cx, 1.0, y + 0.06), Vector3(cx, 1.0, y + 0.3), Vector3(cx, 1.3, y + 0.1), g)
-					m.tri(Vector3(cx, 1.85, y + 0.94), Vector3(cx, 1.85, y + 0.7), Vector3(cx, 1.55, y + 0.9), g)
-				var gf := c(0x9FC4D4)
-				for k in 4:
-					var ox := cx + ((hash2(x + k, y) % 9) - 4) * 0.09
-					var oz := cz + ((hash2(x, y + k) % 9) - 4) * 0.09
-					m.tri(Vector3(ox, 0.11, oz), Vector3(ox + 0.08, 0.11, oz + 0.03), Vector3(ox + 0.02, 0.11, oz + 0.07), gf)
+				m.aabb(cx - 0.02, 1.0, y + 0.06, cx + 0.02, 1.85, y + 0.94, glass)
+				m.aabb(cx - 0.03, 1.0, cz - 0.02, cx + 0.03, 1.85, cz + 0.02, frame)
 		_:
 			_seg(m, x, y, horiz, 2.05, WH, col, cap)
 			var jamb := dk(col, 0.8)
@@ -299,48 +276,6 @@ func _seg(m: Mesher, x: int, y: int, horiz: bool, y0: float, y1: float, col: Col
 	else:
 		m.aabb(cx - HALF, y0, y, cx + HALF, y1, y + 1.0, col, cap)
 
-func _broken_door(m: Mesher, x: int, y: int) -> void:
-	m.identity()
-	m.translate(Vector3(x + 0.5, 0.12, y + 0.5))
-	m.rot_y(hash2(x, y) % 180)
-	m.box(Vector3(-0.15, 0, 0), Vector3(0.8, 0.04, 0.18), c(0x8A5E34))
-	m.rot_y(40)
-	m.box(Vector3(0.2, 0.03, 0.1), Vector3(0.6, 0.04, 0.14), c(0x6E4A2A))
-	m.identity()
-
-func _barricade(m: Mesher, x: int, y: int, level: int) -> void:
-	var horiz := w.along_y(x, y)
-	var window := W.is_window_like(w.t(x, y))
-	m.identity()
-	m.translate(Vector3(x + 0.5, 0, y + 0.5))
-	if not horiz:
-		m.rot_y(90)
-	for k in level:
-		var yy := (1.15 if window else 0.6) + k * 0.35
-		for side in [-0.16, 0.16]:
-			m.push()
-			m.translate(Vector3(0, yy, side))
-			m.rot_z(9.0 if k % 2 == 0 else -8.0)
-			m.box(Vector3.ZERO, Vector3(1.12, 0.16, 0.05), c(0xB07A44 if k % 2 == 0 else 0x9A6A3A))
-			m.box(Vector3(-0.45, 0, 0.03), Vector3(0.03, 0.03, 0.02), c(0x606060))
-			m.box(Vector3(0.45, 0, 0.03), Vector3(0.03, 0.03, 0.02), c(0x606060))
-			m.pop()
-	m.identity()
-
-func _pile(m: Mesher, x: int, y: int, list: Array) -> void:
-	var gy := ground_h(w.t(x, y))
-	if W.is_door_like(w.t(x, y)) or W.is_window_like(w.t(x, y)):
-		gy = 0.1
-	m.identity()
-	m.translate(Vector3(x + 0.5, gy, y + 0.5))
-	m.rot_y(hash2(x, y) % 60)
-	m.box(Vector3(0, 0.15, 0), Vector3(0.42, 0.3, 0.36), c(0x9A7448))
-	m.box(Vector3(0, 0.15, 0), Vector3(0.44, 0.04, 0.38), c(0x6A4A2A))
-	var ic: Color = Items.def(list[0]["id"])["color"]
-	m.box(Vector3(0.05, 0.36, 0.02), Vector3(0.18, 0.12, 0.14), Color(ic.r, ic.g, ic.b, 1.0))
-	m.identity()
-
-# ================== МЕБЕЛЬ ==================
 func _furniture(m: Mesher, x: int, y: int, t: int) -> void:
 	# спиной к стене, лицом в комнату (если стен несколько — к той, напротив которой свободно)
 	var yaw := 0.0
@@ -421,9 +356,6 @@ func _furniture(m: Mesher, x: int, y: int, t: int) -> void:
 					var side := -1.0 if b < 4 else 1.0
 					var bc2 := c([0xD04838, 0xE8C040, 0x4A8AD0, 0xE8E8E0, 0x5AA050][(hv + b + s * 3) % 5])
 					m.box(Vector3(-0.33 + (b % 4) * 0.22, sy2 + 0.12, side * 0.22), Vector3(0.16, 0.2, 0.18), bc2)
-	# обысканная пустая мебель — тёмная метка сверху
-	if w.containers.has(w.idx(x, y)) and w.containers[w.idx(x, y)].is_empty():
-		m.box(Vector3(0, 0.02, 0.36), Vector3(0.5, 0.01, 0.1), c(0x202020))
 	m.identity()
 
 # ================== УЛИЦА ==================

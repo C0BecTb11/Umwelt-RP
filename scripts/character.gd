@@ -192,13 +192,12 @@ func _play(a: String, blend: float = 0.2, from_start: bool = false) -> void:
 			ap.seek(0.0, true)
 		cur = a
 
-## Поза на кадр (параметры — как у прежней модели, чтобы world_view не менять)
-func pose(_phase: float, moving: float, attack: float, weapon_id: String, lying: bool, sneak: bool, _angry: bool, climb: float) -> void:
+## Поза на кадр: выбор анимации по движению, удару, оружию и потере сознания
+func pose(_phase: float, moving: float, attack: float, weapon_id: String, lying: bool, sneak: bool) -> void:
 	if ap == null:
 		return
 	_set_weapon(weapon_id)
 	var ly := fall if fall >= 0.0 else (1.0 if lying else 0.0)
-	root.position = Vector3.ZERO
 	# без сознания: падает и лежит
 	if ly > 0.01:
 		attacking = false
@@ -229,13 +228,6 @@ func pose(_phase: float, moving: float, attack: float, weapon_id: String, lying:
 		ap.speed_scale = 1.25
 		return
 	attacking = false
-	# перелезание: бег с подъёмом корпуса по дуге
-	if climb >= 0.0:
-		var arc := sin(PI * clampf(climb, 0.0, 1.0))
-		root.position.y = arc * 0.5
-		_play("Run", 0.12)
-		ap.speed_scale = 1.0
-		return
 	if moving > 0.05 and speed > 0.15:
 		if speed > 3.0 and not sneak:
 			_play("Run", 0.18)
