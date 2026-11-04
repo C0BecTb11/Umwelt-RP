@@ -76,7 +76,7 @@ Umwelt-RP/
 │       └── map_format.py      Черновик карты из Supabase (JSON) → текст maps/city.json в принятом виде
 └── .github/workflows/
     ├── build.yml              Пуш в main → автотесты (+ SCRIPT ERROR) → сетевой тест (сервер + 3 бота) → game.pck, сервер, (APK при необходимости) → релиз «latest»
-    └── auth-test.yml          Проверка входа: сервер + бот Test_Bot через настоящий Supabase
+    └── auth-test.yml          Проверка входа: сервер + бот Test_Bot через настоящий Supabase (пароль — секрет BOT_PASSWORD)
 ```
 
 `*.uid` рядом со скриптами — служебные идентификаторы Godot 4.4, удалять нельзя. Ветка `gh-pages` (отдельно от
@@ -277,7 +277,7 @@ CI:     godot --headless -- --audit | --nettest=… | --authtest=…  (main.gd �
 | `maps/city.json` | Карта для всех: сервер и офлайн. Битый файл — сервер не загрузит город (проверяет автотест «Карта: …»). Символы клеток — `GameWorld.MAP_CHARS`; id объектов должны быть в `props.gd` |
 | `scripts/props.gd` | id объектов записаны в карте: переименование или удаление id — карта перестанет загружаться |
 | `scripts/server_only/server.gd` | Вход в игру, сохранение мира на сервере |
-| `.github/workflows/build.yml` | Выпуск всего: пакет, сервер, APK, ключ подписи (кэш) |
+| `.github/workflows/build.yml` | Выпуск всего: пакет, сервер, APK. Ключ подписи — из секретов `ANDROID_KEYSTORE_B64`/`_PASS`, отпечаток сверяется; без него сборка останавливается |
 | `server/update.sh`, `setup.sh` | Обновление сервера на Hetzner (общий сервер с sw-rpg) |
 | `shaders/world.gdshader` | Вид всего города; параметры задаёт `world_view.gd` |
 

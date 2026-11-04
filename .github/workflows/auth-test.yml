@@ -1,7 +1,7 @@
 name: Auth test
 
 # Вход по аккаунту целиком: Supabase (настоящий проект) → локальный игровой сервер.
-# Тестовый аккаунт-бот bot@umwelt-rp.test без прав, кроме своего персонажа Test_Bot.
+# Тестовый аккаунт-бот bot@umwelt-rp.test без прав, кроме своего персонажа Test_Bot. Пароль — секрет BOT_PASSWORD (с 0.23, BF-026).
 on:
   push:
     branches: [ main ]
@@ -28,12 +28,15 @@ jobs:
           wget -q https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip
           unzip -q Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip && mv Godot_v${GODOT_VERSION}-stable_linux.x86_64 godot && rm *.zip
       - name: Server + client login
+        env:
+          BOT_PASSWORD: ${{ secrets.BOT_PASSWORD }}
         run: |
+          if [ -z "$BOT_PASSWORD" ]; then echo "ОШИБКА: нет секрета BOT_PASSWORD"; exit 1; fi
           ~/godot/godot --headless --path . --import > /dev/null 2>&1 || true
           XDG_DATA_HOME=$PWD/d1 timeout 60 ~/godot/godot --headless --path . -- --server --port=7795 > server.log 2>&1 &
           sleep 4
           set +e
-          XDG_DATA_HOME=$PWD/d2 timeout 50 ~/godot/godot --headless --path . -- --no-update --authtest=bot@umwelt-rp.test,gao0-HhcxoppSYBS,7795 2>&1 | tee client.log
+          XDG_DATA_HOME=$PWD/d2 timeout 50 ~/godot/godot --headless --path . -- --no-update --authtest=bot@umwelt-rp.test,$BOT_PASSWORD,7795 2>&1 | tee client.log
           set -e
           echo "--- сервер"; grep -a "^\[" server.log || true
           grep -q "ИТОГ: OK" client.log

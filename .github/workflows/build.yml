@@ -6,8 +6,6 @@ on:
   push:
     branches: [ main ]
   workflow_dispatch:
-  schedule:
-    - cron: "17 4 * * 1"   # раз в неделю: не даёт кэшу с ключом подписи APK протухнуть (7 дней без обращений)
 
 permissions:
   contents: write
@@ -47,22 +45,21 @@ jobs:
           mv templates/* ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable/
           rm -rf templates *.tpz
 
-      # Ключ подписи APK. Потеряется — новые APK нельзя будет поставить поверх старых (см. docs/РУКОВОДСТВО.md)
-      - name: Restore signing key
-        id: key-cache
-        uses: actions/cache@v4
-        with:
-          path: ~/keystore
-          key: umwelt-android-keystore-v1
-
-      - name: Create signing key (first run only)
-        if: steps.key-cache.outputs.cache-hit != 'true'
+      # Ключ подписи APK — из секретов репозитория (с 0.23; раньше лежал в кэше Actions, BF-037).
+      # Нет секрета или ключ не тот — сборка останавливается: новый ключ НЕ создаётся, иначе APK не встанет поверх старого
+      - name: Signing key (from secrets)
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+          KS_SHA256: "0623ae806820d63821ef2e128d27cd6263a483f21a78801129181397c84ba34c"
         run: |
+          if [ -z "$KS" ] || [ -z "$KS_PASS" ]; then echo "ОШИБКА: нет ключа подписи в секретах"; exit 1; fi
           mkdir -p ~/keystore
-          PASS=$(openssl rand -base64 18 | tr -d '/+=')
-          echo -n "$PASS" > ~/keystore/pass
-          keytool -genkeypair -keystore ~/keystore/release.keystore -alias umwelt -keyalg RSA -keysize 2048 \
-            -validity 20000 -storepass "$PASS" -keypass "$PASS" -dname "CN=Umwelt RP, O=C0BecTb11, C=PL"
+          echo "$KS" | base64 -d > ~/keystore/release.keystore
+          echo -n "$KS_PASS" > ~/keystore/pass
+          FP=$(keytool -list -v -keystore ~/keystore/release.keystore -storepass "$KS_PASS" -alias umwelt | grep -m1 "SHA256:" | sed 's/.*SHA256: //' | tr -d ':' | tr 'A-F' 'a-f')
+          if [ "$FP" != "$KS_SHA256" ]; then echo "ОШИБКА: ключ из секретов не тот, которым подписаны выпущенные APK"; exit 1; fi
+          echo "ключ подписи на месте, отпечаток совпадает"
 
       - name: Editor settings
         run: |
