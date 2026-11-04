@@ -1,7 +1,7 @@
 # Umwelt RP — техническая карта проекта (PROJECT_MAP)
 
 Что где лежит, кто кого вызывает и что сломается при изменении файла. Составлено по исходному коду
-(проверено 2026-11-03, после коммита 7c1d475). Правила и процессы — в `docs/РУКОВОДСТВО.md`, история ошибок —
+(проверено 2026-11-03, после коммита 7c1d475; карта из файла и редактор — 2026-11-04, версия 0.19). Правила и процессы — в `docs/РУКОВОДСТВО.md`, история ошибок —
 в `docs/BUGFIX_LOG.md`; здесь они не повторяются.
 
 **Обновлять карту в том же коммите**, где добавляется, удаляется или переименовывается файл, меняется
@@ -35,8 +35,10 @@ Umwelt-RP/
 │   ├── net.gd                 Net: сеть ENet (сервер или клиент), Net.I
 │   ├── game.gd                GameState: вся игровая логика, игроки, сохранение, сетевые снимки
 │   ├── game_screen.gd         GameScreen: игровой экран (SOLO / CLIENT), ввод, приём снимков
-│   ├── world.gd               GameWorld: карта 100×100, генерация города, проходимость, двери, окна
-│   ├── world_mesh.gd          WorldMesh: 3D-геометрия города по карте (чанки, крыши, двери, фонари)
+│   ├── world.gd               GameWorld: карта из файла (load_map/map_data), проходимость, объекты, двери, окна
+│   ├── props.gd               Объекты карты: каталог (фонарь, скамейка, гидрант…), столкновения, модели (без class_name)
+│   ├── map_editor.gd          Редактор карты: офлайн, только владелец; черновик → Supabase map_drafts (без class_name)
+│   ├── world_mesh.gd          WorldMesh: 3D-геометрия города по карте (чанки, объекты, крыши, двери; фонари — из объектов)
 │   ├── world_view.gd          WorldView: 3D-сцена: камера, солнце, свет, игроки, эффекты
 │   ├── character.gd           CharModel: персонаж Quaternius — скелет, анимации, части одежды, оружие
 │   ├── items.gd               Items: предметы, одежда (части моделей), слоты, причёски, цвета
@@ -50,6 +52,8 @@ Umwelt-RP/
 │       ├── audit_test.gd      Автотесты механик (--audit), запускаются в CI перед сборкой
 │       ├── nettest.gd         Сетевой тест: клиенты подключаются к серверу (--nettest=…)
 │       └── authtest.gd        Проверка входа Supabase → сервер (--authtest=…), в CI auth-test.yml
+├── maps/
+│   └── city.json              Карта игры: ряды клеток символами, объекты, точка появления. Попадает в пакет и сервер
 ├── shaders/
 │   └── world.gdshader         Шейдер города: цвет вершин, прорезание стен перед игроком, свечение окон ночью
 ├── assets/chars/              Модели персонажей Quaternius (CC0), извлечены скриптом docs/tools/extract_chars.gd
@@ -64,7 +68,9 @@ Umwelt-RP/
 │   ├── РУКОВОДСТВО.md         Руководство: правила, процессы, сервер, аккаунты, журнал, версии
 │   ├── BUGFIX_LOG.md          Журнал ошибок BF-NNN
 │   ├── PROJECT_MAP.md         Этот файл
-│   └── tools/extract_chars.gd Инструмент: извлечение частей моделей из glTF Quaternius (запуск вне проекта)
+│   └── tools/
+│       ├── extract_chars.gd   Инструмент: извлечение частей моделей из glTF Quaternius (запуск вне проекта)
+│       └── map_format.py      Черновик карты из Supabase (JSON) → текст maps/city.json в принятом виде
 └── .github/workflows/
     ├── build.yml              Пуш в main → автотесты → game.pck, сервер, (APK при необходимости) → релиз «latest»
     └── auth-test.yml          Проверка входа: сервер + бот Test_Bot через настоящий Supabase
@@ -84,22 +90,24 @@ Umwelt-RP/
 | `scripts/boot.gd` | `Boot` | `host()`, `port()` из Engine meta (по умолчанию 2.31.45.237:7777); `SUPABASE_URL`, `SUPABASE_KEY` (публичный publishable-ключ) |
 | `scripts/version.gd` | `Version` | `BUILD` — сверяется клиентом и сервером в «привет» |
 | `scripts/profile.gd` | `Profile` | Статические настройки: `uid`, `nick`, `low_gfx`; `load_profile()` / `save_profile()` |
-| `scripts/account.gd` | без class_name, `preload` | Supabase REST: `sign_up`, `sign_in`, `refresh`, `load_character` (id, name), `create_character(name, gender)`, `explain` (ошибки по-русски), сессия в `user://account.cfg` |
+| `scripts/account.gd` | без class_name, `preload` | Supabase REST: `sign_up`, `sign_in`, `refresh`, `load_character` (id, name), `create_character(name, gender)`, `explain` (ошибки по-русски), сессия в `user://account.cfg`; `check_admin()` (RPC `is_admin`, ответ в `user://editor.cfg`), `admin_cached()` |
 | `scripts/net.gd` | `Net` (Node, `Net.I`) | `serve`, `join`, `close`, `kick`, `send` (надёжный RPC, канал 0), `send_fast` (канал 1, надёжный); входящие — в `inbox` с полем `_from` |
 | `scripts/game.gd` | `GameState` + вложенные `Player`, `NetClock` | Игровой мир: игроки (карточка `Player`: позиция, здоровье, деньги, счёт, вещи, одежда `wear`, внешность `look`), движение, драка, нокаут и возрождение, одежда, двери, время (МСК), сохранение и миграции, снимки для сети (`state_for`, `events_for`, `apply_state`, `apply_events`) |
 | `scripts/game_screen.gd` | `GameScreen` | Режимы `SOLO` (логика на телефоне) и `CLIENT` (логика на сервере, здесь — предсказание своего движения); шлёт `in`/`act`/`hello`; принимает `init`/`st`/`ev`/`bye`; проверка обновлений раз в 180 с |
-| `scripts/world.gd` | `GameWorld` | Тайлы карты и их типы, генерация города (`generate`, дома, деревья), проходимость (`solid`, `circle_blocked`), видимость по прямой (`los`: сквозь окно видно, пуля не проходит), окна и двери, здания |
-| `scripts/world_mesh.gd` | `WorldMesh` | Чанки геометрии, стены, мебель, машины-декорации, деревья, фонари (`lamps`), крыши, двери |
-| `scripts/world_view.gd` | `WorldView` | 3D-узлы: камера (угол 54°), солнце и окружение по `darkness()`, фонари, модели игроков (`CharModel`), кровь, частицы, выстрелы; перевод джойстика в направление мира |
+| `scripts/world.gd` | `GameWorld` | Тайлы и их типы; карта из файла: `read_map_file`, `load_map` (с проверкой, при ошибке мир не меняется), `map_data`, `map_text`, символы клеток `MAP_CHARS`; объекты `props` и круги столкновений `prop_cols` (`index_props`); проходимость (`solid`, `circle_blocked` — стены и объекты), видимость по прямой (`los`: сквозь окно видно, пуля не проходит), окна и двери, здания (`compute_buildings`) |
+| `scripts/props.gd` | без class_name, `preload` | `DEFS` (название, круги `col`), `ORDER` (палитра редактора), `colliders()`, `lamp_head()`, `build()` — модель объекта в `Mesher` |
+| `scripts/map_editor.gd` | без class_name, `load()` из main | Камера сверху, инструменты Рука/Кисть/Прямоугольник/Рамка/Объект/Выбор/Спавн, отмена, черновик `user://map_draft.json`, «Пройтись», «Из игры», «Отправить» (POST `map_drafts`). Логика правок (`paint`, `rect`, `place_prop`, `move_prop`, `rotate_prop`, `delete_prop`, `set_spawn`, `undo`) отдельно от касаний |
+| `scripts/world_mesh.gd` | `WorldMesh` | Чанки геометрии, стены, мебель, машины-декорации, деревья, объекты карты (`Props.build`), фонари (`lamps` из объектов, `refresh_lamps`), крыши, двери |
+| `scripts/world_view.gd` | `WorldView` | 3D-узлы: камера (`cam_pitch`, 54° в игре), солнце и окружение по `darkness()`, фонари, модели игроков (`CharModel`), кровь, частицы, выстрелы; перевод джойстика в направление мира; для редактора — `hide_roofs`, `rebuild_static`, `mark_point`, `ground_point` |
 | `scripts/character.gd` | `CharModel` | Загружает `assets/chars/<пол>_base.scn` и части; `set_wear()` по `Items.part_for/tint_for`; тон кожи; оружие на кости `Wrist.R`; выбор анимации в `pose(phase, moving, attack, weapon_id, lying, sneak)` |
 | `scripts/items.gd` | `Items` | `DEFS` (еда, оружие, одежда с `parts`/`also`/`tint`), `SLOTS`, `BARE`, `HEADS`, `COLORS`, `START_WEAR`; инвентарь (`add_to`, `take`, `count`, `weight`) |
-| `scripts/hud.gd` | `Hud` | Рисование интерфейса (`_draw`), касания, джойстик, панели `INV` / `PAUSE` / `GEAR`, сообщения, напоминание об обновлении |
+| `scripts/hud.gd` | `Hud` | Рисование интерфейса (`_draw`), касания, джойстик, панели `INV` / `PAUSE` / `GEAR`, сообщения, напоминание об обновлении; в паузе офлайна — «Редактор карты» (владелец) / «Вернуться в редактор» |
 | `scripts/icons.gd` | `Icons` | `item()` — иконка предмета по id (цветные варианты — по основе), `glyph()` — пиктограммы |
 | `scripts/mesher.gd` | `Mesher` | Треугольники, коробки, трубы, эллипсоиды с цветом вершин; альфа цвета = «вид» (стена/свечение) |
 | `scripts/saves.gd` | `Saves` | Офлайн-сохранение: временный файл → основной, резервная копия, проверка формата |
-| `scripts/demo.gd` | `Demo` | Демо-сцены: `inside`, `loot`, `inv`, `night`, `evening`, `gear`, `outfit`, `crowd`, `knocked`, `armed`, `catalog` (своё время, `real_clock = false`) |
+| `scripts/demo.gd` | `Demo` | Демо-сцены (`--demo=editor` открывает редактор карты — main.gd): `inside`, `inv`, `night`, `evening`, `gear`, `outfit`, `crowd`, `knocked`, `armed`, `catalog` (своё время, `real_clock = false`) |
 | `scripts/server_only/server.gd` | без class_name, `load()` | Ключи `--port`, `--max`, `--noauth`; клиенты (`Client`), «привет» и проверка сборки, вход через Supabase (`_verify` → `_enter`), выдача снимков (`_send_to`), автосохранение раз в 60 с, лог статистики |
-| `scripts/server_only/audit_test.gd` | без class_name | 52 проверки (стены, сеть, сохранения и их миграции, одежда, внешность, время и др.), выход с кодом 1 при ошибке |
+| `scripts/server_only/audit_test.gd` | без class_name | 66 проверок (стены, сеть, сохранения и их миграции, карта из файла, объекты, редактор карты, одежда, внешность, время и др.), выход с кодом 1 при ошибке |
 | `scripts/server_only/nettest.gd` | без class_name | Клиент-бот: подключается, ходит, считает «откаты» и видимых игроков; переменная `NT_HOST` — внешний сервер |
 | `scripts/server_only/authtest.gd` | без class_name | Вход ботом через `account.gd` и проверка, что сервер впустил |
 | `shaders/world.gdshader` | шейдер | Параметры `player_pos`, `cam_back`, `cut`, `night` (задаёт `world_view.gd`) |
@@ -120,6 +128,8 @@ Umwelt-RP/
 | `Boot` | main, account, server |
 | `Version` | game_screen, hud, server |
 | `GameScreen` | main (создаёт), hud, nettest, authtest |
+| `props.gd` | world, world_mesh, map_editor (через `preload`) |
+| `map_editor.gd` | main (`load`), audit_test |
 | `Hud` | game_screen (создаёт), main |
 | `WorldView` | game_screen (создаёт) |
 | `WorldMesh` | world_view |
@@ -128,7 +138,7 @@ Umwelt-RP/
 | `Icons` | hud |
 | `Saves` | main, game_screen, audit_test |
 | `Demo` | main |
-| `account.gd` | main, authtest (через `preload`) |
+| `account.gd` | main, authtest, hud, map_editor (через `preload`) |
 
 ### Загрузка по пути
 
@@ -137,6 +147,8 @@ Umwelt-RP/
   `preload("res://scripts/account.gd")`, назад — `res://launcher/launcher.tscn`.
 - `world.gd`, `world_mesh.gd`, `world_view.gd`, `audit_test.gd` → `preload("res://scripts/world.gd")` (константы тайлов).
 - `world_view.gd` → `load("res://shaders/world.gdshader")`.
+- `world.gd` → `res://maps/city.json` (`GameWorld.MAP_PATH`, читает `GameState.load_official_map`).
+- `main.gd` → `load("res://scripts/map_editor.gd")`; редактор и «Пройтись» — `user://map_draft.json`.
 - `character.gd` → `res://assets/chars/<m|f>_base.scn`, `res://assets/chars/<m|f>/<Часть>.scn` (имена из `items.gd`).
 
 ### Данные лаунчер → игра (только Engine meta)
@@ -155,6 +167,8 @@ Umwelt-RP/
 | `user://pck/` (пакеты, `state.json`) | launcher |
 | `user://settings.cfg` | profile |
 | `user://account.cfg` | account |
+| `user://editor.cfg` (может ли аккаунт отправлять карты) | account (`check_admin`) |
+| `user://map_draft.json` (черновик карты) | map_editor |
 | `user://save.json`, `save.bak.json` | saves (офлайн) |
 | `user://server_world.json`, `server_world.bak.json` | server (на Hetzner: `/srv/umwelt/data/godot/app_userdata/Umwelt RP/`) |
 
@@ -168,6 +182,7 @@ Umwelt-RP/
 APK → launcher.tscn ─(манифест, пакеты, SHA-256)→ scenes/main.tscn (main.gd)
         │                                            ├─ «Играть»: форма входа (account.gd → Supabase) → GameScreen CLIENT + Net.join
         │                                            └─ «Офлайн-тест»: GameScreen SOLO (Saves / новый мир)
+        │                                                 └─ пауза → «Редактор карты» (владелец) → map_editor.gd ⇄ «Пройтись» (SOLO на черновике)
 Сервер: umwelt-server.x86_64 --headless -- --server → main.gd → server_only/server.gd (+ Net.serve)
 CI:     godot --headless -- --audit | --nettest=… | --authtest=…  (main.gd → server_only/*)
 ```
@@ -186,13 +201,21 @@ CI:     godot --headless -- --audit | --nettest=… | --authtest=…  (main.gd �
 игроков раз в 0.25 с (`events_for`), сохраняет мир раз в 60 с и при выходе игрока. Кто вошёл —
 решает Supabase: токен из «привет» проверяется запросом `/auth/v1/user`, затем `characters?select=id,name,gender`.
 Ключ аккаунта в мире — `sb:<user_id>` в `GameState.uids`, ID игрока = `characters.id`.
+Карта сервера — только `maps/city.json` из его сборки; из сохранения берутся лишь состояния дверей (`load_data`).
+Игрок, оказавшийся в стене или объекте после смены карты, переставляется (`unstick` / точка появления).
+
+### Карта и редактор (Supabase)
+
+- `public.admins` — кто может отправлять карты (клиентам закрыта, политик нет); `public.is_admin()` — RPC.
+- `public.map_drafts` — черновики карт: вставлять и читать свои может только админ (RLS). Читает Claude через
+  Supabase и выпускает новой версией `maps/city.json`; игра эту таблицу не читает.
 
 ### Сетевые сообщения (поле `t`)
 
 | `t` | Откуда → куда | Канал | Что |
 |---|---|---|---|
 | `hello` | клиент → сервер | надёжный (0) | `token`, `legacy`, `uid`, `nick`, `build` |
-| `init` | сервер → клиент | 0 | `pid`, `seed`, `world` (`to_data_for`: карта и игроки, без `uids`) |
+| `init` | сервер → клиент | 0 | `pid`, `seed`, `world` (`to_data_for`: `map` — `map_data()`: ряды клеток с дверями, объекты, точка появления; игроки, без `uids`) |
 | `in` | клиент → сервер | быстрый (1) | `ts`, `mx`/`my`, `run`, `x`/`y`, `fx`/`fy`, `fs` (ввод, позиция, взгляд, номер отката) |
 | `act` | клиент → сервер | 0 | действие игрока (не больше 30 с одного подключения за кадр сервера) |
 | `st` | сервер → клиент | 1 | время и игроки рядом (`state_for`): по 10 чисел — `id, x, y, fx, fy, atk, sneak, force_seq, hp, stamina` |
@@ -223,7 +246,9 @@ CI:     godot --headless -- --audit | --nettest=… | --authtest=…  (main.gd �
 | Инвентарь, еда, аптечки, оружие | `items.gd`, `game.gd` (`_use`, `take`), `hud.gd` (`_draw_inv`) |
 | Двери | `game.gd`: `_interact`, `find_interact`; `world.gd`; `world_mesh.gd`: `build_door` |
 | Время и свет | `game.gd`: `msk_time`, `date_str`, `clock`, `darkness`, `real_clock`; `world_view.gd`: солнце, окружение, фонари; `hud.gd`: часы и дата |
-| Город и его 3D | `world.gd` (`generate`), `world_mesh.gd`, `shaders/world.gdshader` |
+| Город и его 3D | `maps/city.json`, `world.gd` (`load_map`, `map_data`), `world_mesh.gd`, `shaders/world.gdshader` |
+| Объекты карты (фонари, скамейки…) | `props.gd` (каталог, столкновения, модели), `world.gd` (`props`, `prop_cols`, `circle_blocked`), `world_mesh.gd` (`build_chunk`, `refresh_lamps`) |
+| Редактор карты | `map_editor.gd`, `main.gd` (`_open_editor`, `_on_editor_done`), `hud.gd` (`_editor_btn`), `account.gd` (`check_admin`), Supabase `admins`/`map_drafts`, `docs/tools/map_format.py` |
 | Сохранение и миграции | `game.gd` (`SAVE_VERSION`, `migrate`, `load_data`, `to_data`), `saves.gd`, `server.gd` (`save_world`, `_load_world`) |
 | Интерфейс | `hud.gd`, `icons.gd` |
 | Обновления | `launcher.gd`, `game_screen.gd` (`_check_update`), `build.yml`, `server/update.sh` |
@@ -244,6 +269,8 @@ CI:     godot --headless -- --audit | --nettest=… | --authtest=…  (main.gd �
 | `scripts/boot.gd` | Адрес сервера и Supabase для всех клиентов |
 | `scripts/items.gd` | id вещей хранятся в сохранениях; переименование или удаление id без миграции — потеря вещей. Имена частей должны существовать в `assets/chars` (проверяет автотест) |
 | `assets/chars/*.scn` | Используются по именам из `items.gd` и `character.gd`; переименование ломает одежду |
+| `maps/city.json` | Карта для всех: сервер и офлайн. Битый файл — сервер не загрузит город (проверяет автотест «Карта: …»). Символы клеток — `GameWorld.MAP_CHARS`; id объектов должны быть в `props.gd` |
+| `scripts/props.gd` | id объектов записаны в карте: переименование или удаление id — карта перестанет загружаться |
 | `scripts/server_only/server.gd` | Вход в игру, сохранение мира на сервере |
 | `.github/workflows/build.yml` | Выпуск всего: пакет, сервер, APK, ключ подписи (кэш) |
 | `server/update.sh`, `setup.sh` | Обновление сервера на Hetzner (общий сервер с sw-rpg) |

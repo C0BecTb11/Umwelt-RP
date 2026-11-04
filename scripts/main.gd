@@ -36,7 +36,13 @@ func _ready() -> void:
 				shot_list.append(int(f))
 	get_tree().set_auto_accept_quit(false)
 	if "--audit" in args:
-		add_child(load("res://scripts/server_only/audit_test.gd").new())
+		var at: GDScript = load("res://scripts/server_only/audit_test.gd")
+		if at == null or not at.can_instantiate():
+			# ошибка разбора в тестах: сразу выходим с ошибкой, а не висим до таймаута CI (BF-025)
+			printerr("ОШИБКА: audit_test.gd не загрузился (ошибка в коде тестов)")
+			get_tree().quit(1)
+			return
+		add_child(at.new())
 		return
 	for a in args:
 		if a.begins_with("--authtest="):
@@ -51,6 +57,9 @@ func _ready() -> void:
 			nt.main = self
 			add_child(nt)
 			return
+	if demo == "editor":
+		_open_editor(Vector2(-1, -1))       # для снимков и проверок: --demo=editor
+		return
 	if demo != "":
 		_start(GameScreen.Mode.SOLO, Demo.create(demo))
 		screen.demo = demo
@@ -90,6 +99,8 @@ func _notification(what: int) -> void:
 				screen.request_exit(false)      # ещё подключаемся — «Назад» = отмена
 			else:
 				h.panel = Hud.Pnl.PAUSE if h.panel == Hud.Pnl.NONE else Hud.Pnl.NONE
+		elif editor != null:
+			editor.back()
 		elif screen == null:
 			get_tree().quit()
 
@@ -115,11 +126,48 @@ func _start(mode: int, g: GameState) -> void:
 	screen.start(mode, g)
 	screen.exited.connect(_on_exit)
 
-## Выход из игры — обратно в лаунчер
+## Выход из игры — обратно в лаунчер (или в редактор карты, если пришли оттуда / выбрали его в паузе)
 func _on_exit(_delete_save: bool) -> void:
+	if screen != null and screen.next == "editor":
+		var p := screen.me()
+		var f := p.pos if p != null and screen.demo == "editor" else Vector2(-1, -1)
+		screen.queue_free()
+		screen = null
+		_open_editor(f)
+		return
 	if Net.I != null:
 		Net.I.close()
 	get_tree().change_scene_to_file.call_deferred("res://launcher/launcher.tscn")
+
+# ================== РЕДАКТОР КАРТЫ ==================
+var editor: Node
+
+func _open_editor(focus: Vector2) -> void:
+	editor = load("res://scripts/map_editor.gd").new()
+	if focus.x >= 0.0:
+		editor.focus = focus
+	add_child(editor)
+	editor.finished.connect(_on_editor_done)
+
+func _on_editor_done(action: String, focus: Vector2) -> void:
+	editor.queue_free()
+	editor = null
+	if action != "walk":
+		get_tree().change_scene_to_file.call_deferred("res://launcher/launcher.tscn")
+		return
+	# «Пройтись»: офлайн-игра на черновике, без сохранения; из паузы — обратно в редактор
+	var g := GameState.new_game(1)
+	var err := g.world.load_map(load("res://scripts/map_editor.gd").load_draft())
+	if err == "":
+		g.spawn = g.world.spawn
+	var p: GameState.Player = g.players[0]
+	p.pos = g.unstick(focus, GameState.PLAYER_R)
+	if g.world.circle_blocked(p.pos.x, p.pos.y, GameState.PLAYER_R):
+		p.pos = g.unstick(g.spawn, GameState.PLAYER_R)
+	p.rpos = p.pos
+	_start(GameScreen.Mode.SOLO, g)
+	screen.demo = "editor"
+	screen.hud.add_msg("Проверка черновика. Пауза → «Вернуться в редактор»")
 
 # ================== АККАУНТ ==================
 const AccountApi := preload("res://scripts/account.gd")
@@ -149,6 +197,7 @@ func _after_login() -> void:
 	elif n == "":
 		_show_create_character("")
 	else:
+		await acc.check_admin()
 		_connect_game()
 
 func _connect_game() -> void:

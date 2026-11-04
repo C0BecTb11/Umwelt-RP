@@ -24,6 +24,8 @@ func _ready() -> void:
 	test_remote_actions()
 	test_saves()
 	test_world_gen()
+	test_map()
+	test_editor()
 	test_remote_door()
 	test_bullet_window()
 	test_remote_no_false_rollback()
@@ -248,8 +250,6 @@ func _try_load(g: GameState, d: Dictionary) -> bool:
 
 func test_world_gen() -> void:
 	var a := GameState.new_game(4242)
-	var b := GameState.new_game(4242)
-	check("Мир: один seed — одинаковый город", a.world.tiles == b.world.tiles)
 	var w := a.world
 	var unreachable := 0
 	# все двери домов доступны с улицы: поиск в ширину от точки старта
@@ -296,6 +296,155 @@ func _find_opening(g: GameState, tile: int) -> Vector2i:
 			if w.t(x, y) == tile and not w.solid(x, y - 1) and not w.solid(x, y + 1) and w.solid(x - 1, y) and w.solid(x + 1, y):
 				return Vector2i(x, y)
 	return Vector2i(-1, -1)
+
+## Карта из файла: читается, правильная, плохую не принимает; объекты мешают ходить; двери и игроки после смены карты
+func test_map() -> void:
+	var d := GameWorld.read_map_file()
+	var w := GameWorld.new()
+	var err := w.load_map(d)
+	var lamps := 0
+	for e in w.props:
+		if e[0] == "lamp":
+			lamps += 1
+	check("Карта: maps/city.json читается без ошибок, на ней есть фонари", err == "" and lamps > 0, err)
+	check("Карта: точка появления свободна", err == "" and not w.circle_blocked(w.spawn.x, w.spawn.y, GameState.PLAYER_R), "в %s стена или объект" % w.spawn)
+	# туда-обратно через текст файла — то же самое
+	var w2 := GameWorld.new()
+	var err2 := w2.load_map(JSON.parse_string(GameWorld.map_text(w.map_data())))
+	check("Карта: сохранение в текст и загрузка обратно ничего не меняют", err2 == "" and w2.tiles == w.tiles and w2.props == w.props and w2.spawn == w.spawn, err2)
+	# испорченные карты не принимаются, мир при этом не меняется
+	var bads := []
+	var b1: Dictionary = d.duplicate(true)
+	b1["rows"][3] = "?" + str(b1["rows"][3]).substr(1)
+	bads.append(b1)
+	var b2: Dictionary = d.duplicate(true)
+	b2["rows"][5] = str(b2["rows"][5]).substr(1)
+	bads.append(b2)
+	var b3: Dictionary = d.duplicate(true)
+	b3["props"].append(["нет_такого", 5.0, 5.0, 0])
+	bads.append(b3)
+	var b4: Dictionary = d.duplicate(true)
+	b4["props"].append(["bench", -3.0, 5.0, 0])
+	bads.append(b4)
+	var b5: Dictionary = d.duplicate(true)
+	b5.erase("spawn")
+	bads.append(b5)
+	var b6: Dictionary = d.duplicate(true)
+	b6["w"] = 100000
+	bads.append(b6)
+	var accepted := 0
+	for b in bads:
+		if w2.load_map(b) == "":
+			accepted += 1
+	check("Карта: испорченный файл не принимается и не ломает мир (6 видов)", accepted == 0 and w2.tiles == w.tiles and w2.props == w.props, "принято %d" % accepted)
+	# объект мешает ходить так же, как стена
+	var g := _game()
+	var spot := _open_spot(g)
+	g.world.props.append(["hydrant", spot.x + 1.0, spot.y, 0])
+	g.world.index_props()
+	var p: GameState.Player = g.players[0]
+	p.pos = spot
+	p.move = Vector2(1, 0)
+	for k in 120:
+		g.move_player(p, 1.0 / 60.0, true)
+	check("Объекты: сквозь гидрант не пройти", p.pos.x < spot.x + 1.0 - 0.3, "игрок дошёл до %s" % p.pos)
+	var f := g.join_player("tp", "Друг")
+	g.push_player(f, spot)
+	f.move_budget = 2.5
+	g.remote_input(f, {"mx": 0.0, "my": 0.0, "run": false, "fs": f.force_seq, "fx": 1.0, "fy": 0.0, "x": spot.x + 1.0, "y": spot.y})
+	check("Объекты: игрок не может прислать позицию внутри объекта", f.pos.distance_to(Vector2(spot.x + 1.0, spot.y)) > 0.3, "позиция %s принята" % f.pos)
+	# клиент получает карту с объектами от сервера
+	var c := GameState.new(g.seed)
+	c.is_replica = true
+	c.load_data(JSON.parse_string(JSON.stringify(g.to_data_for(f.id))))
+	check("Сеть: клиент получает карту и объекты от сервера", c.world.tiles == g.world.tiles and c.world.props.size() == g.world.props.size() and c.world.circle_blocked(spot.x + 1.0, spot.y, 0.2))
+	# старое сохранение: двери берутся из него, игрок в стене новой карты переставляется
+	var door := -1
+	for i in g.world.tiles.size():
+		if g.world.t_at(i) == GameWorld.DOOR:
+			door = i
+			break
+	var sv := g.to_data()
+	var tl := Marshalls.base64_to_raw(sv["tiles"])
+	tl[door] = GameWorld.DOOR_OPEN
+	tl[0] = GameWorld.GRASS            # прочие клетки сохранения не важны — карта из файла
+	sv["tiles"] = Marshalls.raw_to_base64(tl)
+	var wall := _find_wall(g)
+	for pd in sv["p"]:
+		if int(pd["id"]) == f.id:
+			pd["x"] = wall.x + 0.5
+			pd["y"] = wall.y + 0.5
+	var g2 := GameState.new(1)
+	g2.load_data(JSON.parse_string(JSON.stringify(sv)))
+	var f2 := g2.player(f.id)
+	check("Сохранение: открытые двери остаются открытыми, карта — из файла", g2.world.t_at(door) == GameWorld.DOOR_OPEN and g2.world.t_at(0) == g.world.t_at(0))
+	check("Сохранение: игрока на месте новой стены переставляет на свободное место", f2 != null and not g2.world.circle_blocked(f2.pos.x, f2.pos.y, GameState.PLAYER_R), "позиция %s" % (f2.pos if f2 else Vector2.ZERO))
+
+## Редактор карты: правки, отмена, машины в 2 клетки, объекты; результат всегда — правильная карта
+func test_editor() -> void:
+	var ed = load("res://scripts/map_editor.gd").new()
+	ed.headless = true
+	ed.use_draft = false
+	add_child(ed)
+	var w: GameWorld = ed.w
+	var before := w.tiles.duplicate()
+	var props_before: Array = w.props.duplicate(true)
+	var spot := Vector2i(-1, -1)
+	for y in range(5, w.h - 10):
+		for x in range(5, w.w - 10):
+			var ok := true
+			for dy in 6:
+				for dx in 6:
+					if w.t(x + dx, y + dy) != W.GRASS:
+						ok = false
+			if ok:
+				spot = Vector2i(x, y)
+				break
+		if spot.x >= 0:
+			break
+	ed.begin()
+	ed.rect(spot, spot + Vector2i(5, 4), W.WALL, true)
+	ed.end()
+	var edge_ok := w.t(spot.x, spot.y) == W.WALL and w.t(spot.x + 5, spot.y + 4) == W.WALL and w.t(spot.x + 2, spot.y) == W.WALL
+	var inner_ok := w.t(spot.x + 2, spot.y + 2) == W.GRASS
+	check("Редактор: «Рамка» ставит стены только по краям", edge_ok and inner_ok and w.buildings.size() > 0)
+	ed.begin()
+	ed.paint(spot + Vector2i(2, 0), W.DOOR)
+	ed.end()
+	ed.begin()
+	ed.paint(Vector2i(spot.x + 1, spot.y + 6), ed.CAR_H)
+	ed.end()
+	var car_ok := w.t(spot.x + 1, spot.y + 6) == W.CAR and w.t(spot.x + 2, spot.y + 6) == W.CAR_TAIL
+	ed.begin()
+	ed.paint(Vector2i(spot.x + 2, spot.y + 6), W.GRASS)
+	ed.end()
+	var car_gone := not W.is_car(w.t(spot.x + 1, spot.y + 6)) and w.t(spot.x + 2, spot.y + 6) == W.GRASS
+	check("Редактор: машина ставится в 2 клетки и убирается целиком", car_ok and car_gone)
+	ed.begin()
+	var pi: int = ed.place_prop(Vector2(spot.x + 2.5, spot.y + 2.5), "hydrant", 0)
+	ed.end()
+	var blocked := w.circle_blocked(spot.x + 2.5, spot.y + 2.5, 0.2)
+	ed.begin()
+	ed.move_prop(pi, Vector2(spot.x + 3.6, spot.y + 2.6))
+	ed.rotate_prop(pi, 90)
+	ed.end()
+	var moved: bool = absf(w.props[pi][1] - (spot.x + 3.5)) < 0.01 and int(w.props[pi][3]) == 90 and w.circle_blocked(spot.x + 3.5, spot.y + 2.5, 0.2) and not w.circle_blocked(spot.x + 2.5, spot.y + 2.5, 0.2)
+	check("Редактор: объект ставится, мешает ходить, двигается по сетке 0.25 и поворачивается", pi >= 0 and blocked and moved)
+	ed.begin()
+	var bad_place: int = ed.place_prop(Vector2(-5, 3), "bench", 0)
+	var bad_id: int = ed.place_prop(Vector2(5, 3), "нет_такого", 0)
+	var spawn_wall: bool = ed.set_spawn(Vector2(spot.x + 0.5, spot.y + 0.5))
+	ed.end()
+	check("Редактор: нельзя поставить объект за край, неизвестный объект и спавн в стену", bad_place < 0 and bad_id < 0 and not spawn_wall)
+	# всё, что сделал редактор, — правильная карта
+	var w2 := GameWorld.new()
+	var err := w2.load_map(JSON.parse_string(GameWorld.map_text(w.map_data())))
+	check("Редактор: черновик — правильная карта (читается так же, как maps/city.json)", err == "" and w2.tiles == w.tiles and w2.props.size() == w.props.size(), err)
+	var n := 0
+	while ed.undo():
+		n += 1
+	check("Редактор: «Отменить» возвращает всё как было (%d шагов)" % n, w.tiles == before and w.props == props_before and w.buildings.size() > 0 and not w.circle_blocked(spot.x + 3.5, spot.y + 2.5, 0.2))
+	ed.queue_free()
 
 func test_remote_door() -> void:
 	var g := _game()
@@ -351,13 +500,33 @@ func test_remote_no_false_rollback() -> void:
 					cf.pos = f.pos
 					cf.force_seq = f.force_seq
 	check("Сеть: честного игрока не откатывает у стен и углов (%d маршрутов)" % routes, rollbacks == 0, "%d ложных откатов" % rollbacks)
-	# BF-024: найденные случаи — бег по диагонали в угол; телефон обходит угол «лесенкой», прямая его задевает
-	var corner_ok := true
-	for pr: Array in [[Vector2(63.25252, 99.20341), Vector2(63.14019, 99.30158)], [Vector2(59.24063, 34.21245), Vector2(59.12773, 34.30911)],
-			[Vector2(94.73626, 45.19777), Vector2(94.84921, 45.29434)], [Vector2(46.24812, 56.78923), Vector2(46.13283, 56.69913)]]:
-		if not g._path_free(pr[0], pr[1]):
-			corner_ok = false
-	check("Сеть: бег по диагонали в угол дома не откатывается (BF-024)", corner_ok)
+	# BF-024: бег по диагонали в угол — телефон обходит угол «лесенкой», прямая его задевает.
+	# Отдельная маленькая карта: три дерева с проходом между ними (место, где случай был пойман)
+	var cg := GameState.new(1)
+	cg.world = GameWorld.new(20, 20)
+	for t in [Vector2i(8, 8), Vector2i(11, 8), Vector2i(8, 10)]:
+		cg.world.set_t(t.x, t.y, GameWorld.TREE)
+	var tried := 0
+	var bad := 0
+	# пойманный случай: (59.24, 34.21) → (59.13, 34.31) у деревьев (58,33), (61,33), (58,35), сдвинуто на (-50, -25)
+	if not cg._path_free(Vector2(9.24063, 9.21245), Vector2(9.12773, 9.30911)):
+		bad += 1
+	# и бег к углам с разных сторон: каждые 3 кадра — проверка, как на сервере
+	for k in 400:
+		var cp := GameState.Player.new(0)
+		cp.pos = Vector2(9.5, 9.5) + Vector2.from_angle(TAU * k / 400.0) * (1.4 + (k % 7) * 0.25)
+		if cg.world.circle_blocked(cp.pos.x, cp.pos.y, GameState.PLAYER_R):
+			continue
+		cp.move = (Vector2(9.5, 9.5) - cp.pos).normalized().rotated((k % 9 - 4) * 0.12)
+		cp.run = k % 3 != 0
+		for f3 in 40:
+			var a := cp.pos
+			for _k in 3:
+				cg.move_player(cp, 1.0 / 60.0, false)
+			tried += 1
+			if not cg._path_free(a, cp.pos):
+				bad += 1
+	check("Сеть: бег по диагонали в угол дома не откатывается (BF-024, %d случаев)" % tried, bad == 0, "%d ложных откатов" % bad)
 
 
 ## Друг бежит и останавливается; пакеты 20 раз в секунду приходят с разбросом 20–150 мс (плохой Wi‑Fi).
@@ -445,7 +614,7 @@ func test_house_layout() -> void:
 	var bad_win := 0
 	var bad_dir := 0
 	var furn_win := 0
-	for sd in [777, 12345, 4242, 99]:
+	for sd in [1990]:
 		var g := GameState.new_game(sd)
 		var w := g.world
 		for b in w.buildings:

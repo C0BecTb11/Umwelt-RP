@@ -42,6 +42,9 @@ var vis_dirty := {}        # для перестройки 3D
 var events: Array = []     # [клетка, было, стало] — для анимаций
 var buildings: Array = []  # [x0, y0, x1, y1]
 var building_of := PackedInt32Array()
+var spawn := Vector2(50, 50)   # точка появления из файла карты
+var props: Array = []      # объекты карты: [id, x, y, поворот в градусах] (каталог — scripts/props.gd)
+var prop_cols := {}        # клетка → [Vector3(x, y, радиус)] — круги столкновений объектов
 
 func _init(width: int = 100, height: int = 100) -> void:
 	w = width
@@ -83,6 +86,10 @@ func circle_blocked(cx: float, cy: float, r: float) -> bool:
 	for y in range(y0, y1 + 1):
 		for x in range(x0, x1 + 1):
 			if not solid(x, y):
+				var pc: Array = prop_cols.get(y * w + x, []) if inside(x, y) else []
+				for c: Vector3 in pc:
+					if Vector2(cx - c.x, cy - c.y).length_squared() < (r + c.z) * (r + c.z):
+						return true
 				continue
 			var nx := clampf(cx, x, x + 1.0)
 			var ny := clampf(cy, y, y + 1.0)
@@ -118,217 +125,6 @@ func los(ax: float, ay: float, bx: float, by: float, shot: bool = false) -> bool
 		if shot and t(x, y) == WINDOW:
 			return false
 	return true
-
-# ---------- генерация города ----------
-func generate(seed: int) -> Vector2:
-	var rnd := RandomNumberGenerator.new()
-	rnd.seed = seed
-	tiles.fill(GRASS)
-	var step := 25
-	for k in range(w / step + 1):
-		var r0 := k * step
-		for a in w:
-			for o in 3:
-				set_t(a, r0 + o, ROAD)
-				set_t(r0 + o, a, ROAD)
-	for k in range(w / step + 1):
-		var r0 := k * step
-		for a in w:
-			for o in [-1, 3]:
-				if t(a, r0 + o) == GRASS:
-					set_t(a, r0 + o, SIDEWALK)
-				if t(r0 + o, a) == GRASS:
-					set_t(r0 + o, a, SIDEWALK)
-	var blocks: Array = []
-	var by := 0
-	while by + step <= h:
-		var bx := 0
-		while bx + step <= w:
-			blocks.append(Vector2i(bx, by))
-			bx += step
-		by += step
-	var police_block := rnd.randi() % blocks.size()
-	for bi in blocks.size():
-		var b: Vector2i = blocks[bi]
-		var ox := b.x + 4
-		var oy := b.y + 4
-		for ly in 2:
-			for lx in 2:
-				var lot_x := ox + lx * 10
-				var lot_y := oy + ly * 10
-				var roll := rnd.randf()
-				var kind := 0
-				if bi == police_block and lx == 0 and ly == 0:
-					kind = 2
-				elif roll < 0.12:
-					kind = 1
-				elif roll < 0.85:
-					kind = 0
-				else:
-					kind = -1
-				if kind < 0:
-					_scatter_trees(rnd, lot_x, lot_y)
-				else:
-					_build_house(rnd, lot_x, lot_y, ly == 0, kind)
-	# брошенные машины
-	var nroads := w / step
-	for k in range(nroads + 1):
-		var r0 := k * step
-		for b in nroads:
-			var s0 := b * step
-			if rnd.randf() < 0.6:
-				var x := s0 + 5 + rnd.randi() % 15
-				var y := r0 + (0 if rnd.randi() % 2 == 0 else 2)
-				if t(x, y) == ROAD and t(x + 1, y) == ROAD and y < h:
-					set_t(x, y, CAR)
-					set_t(x + 1, y, CAR_TAIL)
-			if rnd.randf() < 0.6:
-				var y2 := s0 + 5 + rnd.randi() % 15
-				var x2 := r0 + (0 if rnd.randi() % 2 == 0 else 2)
-				if t(x2, y2) == ROAD and t(x2, y2 + 1) == ROAD and x2 < w:
-					set_t(x2, y2, CAR_V)
-					set_t(x2, y2 + 1, CAR_TAIL)
-	for _i in range(w * h / 120):
-		var x := rnd.randi() % w
-		var y := rnd.randi() % h
-		if t(x, y) == GRASS and t(x + 1, y) == GRASS and t(x, y + 1) == GRASS and t(x - 1, y) == GRASS and t(x, y - 1) == GRASS:
-			set_t(x, y, TREE)
-	var c := (w / step / 2) * step
-	return Vector2(c + 4.5, c + 3.5)
-
-func _scatter_trees(rnd: RandomNumberGenerator, x0: int, y0: int) -> void:
-	for _i in range(4 + rnd.randi() % 4):
-		set_t(x0 + 1 + rnd.randi() % 8, y0 + 1 + rnd.randi() % 8, TREE)
-
-func _build_house(rnd: RandomNumberGenerator, lot_x: int, lot_y: int, door_top: bool, kind: int) -> void:
-	var hw := 7 + rnd.randi() % 3 if kind == 0 else 9
-	var hh := 7 + rnd.randi() % 3 if kind == 0 else 9
-	var x0 := lot_x + (10 - hw) / 2
-	var y0 := lot_y + (0 if door_top else 10 - hh)
-	var x1 := x0 + hw - 1
-	var y1 := y0 + hh - 1
-	var floor_t := WOOD if kind == 0 else TILEFLOOR
-	for y in range(y0, y1 + 1):
-		for x in range(x0, x1 + 1):
-			set_t(x, y, WALL if (x == x0 or x == x1 or y == y0 or y == y1) else floor_t)
-	var dx := x0 + hw / 2
-	var dy := y0 if door_top else y1
-	set_t(dx, dy, DOOR)
-	if kind == 1:
-		set_t(dx - 1, dy, DOOR)
-	for y in range(y0, y1 + 1):
-		for x in range(x0, x1 + 1):
-			var edge := x == x0 or x == x1 or y == y0 or y == y1
-			var corner := (x == x0 or x == x1) and (y == y0 or y == y1)
-			if not edge or corner or t(x, y) != WALL:
-				continue
-			if absi(x - dx) <= 1 and y == dy:
-				continue
-			if rnd.randf() < (0.45 if kind == 1 else 0.22):
-				set_t(x, y, WINDOW)
-	match kind:
-		1:
-			var sx := x0 + 2
-			while sx <= x1 - 2:
-				for y in range(y0 + 2, y1 - 1):
-					if y != (y0 + 1 if door_top else y1 - 1):
-						set_t(sx, y, STORESHELF)
-				sx += 2
-			set_t(x1 - 1, y1 - 1 if door_top else y0 + 1, FRIDGE)
-		2:
-			var fy := y1 - 1 if door_top else y0 + 1
-			set_t(x0 + 1, fy, LOCKER)
-			set_t(x0 + 2, fy, LOCKER)
-			set_t(x1 - 1, fy, MEDCAB)
-			set_t(x1 - 1, y0 + 1 if door_top else y1 - 1, COUNTER)
-		_:
-			_house_rooms(rnd, x0, y0, x1, y1, door_top, dx)
-	_fix_openings(x0, y0, x1, y1)
-
-## Окно, в которое упирается внутренняя стена, и окно за мебелью становятся глухой стеной:
-## иначе стена делит окно пополам и торчит наружу, а шкаф стоит вплотную к стеклу
-func _fix_openings(x0: int, y0: int, x1: int, y1: int) -> void:
-	for y in range(y0, y1 + 1):
-		for x in range(x0, x1 + 1):
-			if not is_window_like(t(x, y)):
-				continue
-			var bad := false
-			for d in 4:
-				var nx: int = x + DX4[d]
-				var ny: int = y + DY4[d]
-				if nx <= x0 or nx >= x1 or ny <= y0 or ny >= y1:
-					continue        # соседи по периметру — обычная стена дома
-				var nt := t(nx, ny)
-				if nt == WALL or is_door_like(nt) or is_furniture(nt):
-					bad = true
-			if bad:
-				set_t(x, y, WALL)
-
-func _house_rooms(rnd: RandomNumberGenerator, x0: int, y0: int, x1: int, y1: int, door_top: bool, door_x: int) -> void:
-	var mid := (x0 + x1) / 2 + (1 if rnd.randi() % 2 == 0 else 0)
-	if mid == door_x:
-		mid += 1 if mid + 1 < x1 - 1 else -1
-	for y in range(y0 + 1, y1):
-		set_t(mid, y, WALL)
-	var hmid := (y0 + y1) / 2
-	var gap := y0 + 2 + rnd.randi() % maxi(1, y1 - y0 - 3)
-	if gap == hmid:
-		gap = hmid + 1 if hmid + 1 < y1 else hmid - 1
-	set_t(mid, gap, DOOR_OPEN)
-	var entry_left := door_x < mid
-	var sx0 := mid + 1 if entry_left else x0 + 1
-	var sx1 := x1 - 1 if entry_left else mid - 1
-	var split := false
-	if sx1 - sx0 >= 1 and y1 - y0 >= 7:
-		for x in range(sx0, sx1 + 1):
-			set_t(x, hmid, WALL)
-		var g := sx0 + rnd.randi() % (sx1 - sx0 + 1)
-		if absi(g - mid) > 0:
-			set_t(g, hmid, DOOR_OPEN)
-			split = true
-		else:
-			for x in range(sx0, sx1 + 1):
-				set_t(x, hmid, WOOD)
-	var ex0 := x0 + 1 if entry_left else mid + 1
-	var ex1 := mid - 1 if entry_left else x1 - 1
-	var far := y1 - 1 if door_top else y0 + 1
-	for y in range(y0 + 1, y1):
-		for x in range(ex0, ex1 + 1):
-			set_t(x, y, TILEFLOOR)
-	_place(rnd, ex0, ex1, far, [FRIDGE, COUNTER, COUNTER])
-	if split:
-		_place(rnd, sx0, sx1, y0 + 1, [WARDROBE if rnd.randi() % 2 == 0 else SHELF])
-		_place(rnd, sx0, sx1, y1 - 1, [MEDCAB if rnd.randf() < 0.5 else WARDROBE])
-	else:
-		_place(rnd, sx0, sx1, y0 + 1, [WARDROBE])
-		_place(rnd, sx0, sx1, y1 - 1, [SHELF])
-
-func _place(rnd: RandomNumberGenerator, xa: int, xb: int, y: int, items: Array) -> void:
-	if xb < xa:
-		return
-	var cells: Array = []
-	for x in range(xa, xb + 1):
-		cells.append(x)
-	for i in range(cells.size() - 1, 0, -1):
-		var j := rnd.randi() % (i + 1)
-		var tmp = cells[i]
-		cells[i] = cells[j]
-		cells[j] = tmp
-	var k := 0
-	for x in cells:
-		if k >= items.size():
-			break
-		if not is_floor(t(x, y)):
-			continue
-		var near_door := false
-		for d in 4:
-			var nt := t(x + DX4[d], y + DY4[d])
-			if is_door_like(nt) or is_window_like(nt):
-				near_door = true        # не у двери и не перед окном
-		if near_door:
-			continue
-		set_t(x, y, items[k])
-		k += 1
 
 func _is_building_tile(tt: int) -> bool:
 	return tt == WALL or is_floor(tt) or is_door_like(tt) or is_window_like(tt) or is_furniture(tt)
@@ -381,3 +177,105 @@ func along_y(x: int, y: int) -> bool:
 	if wall_like(t(x, y - 1)) and wall_like(t(x, y + 1)):
 		return false
 	return l or r
+
+# ================== КАРТА ИЗ ФАЙЛА ==================
+## Карта игры — файл maps/city.json (её правят в редакторе карты, в игру она попадает только с выпуском).
+## Клетки хранятся строками символов: одна строка — один ряд карты, так изменения видны в истории коммитов.
+const MAP_PATH := "res://maps/city.json"
+const MAP_CHARS := ".=-wt#DdO?T!FCWSMLRcvx"   # символ = номер клетки (9 и 11 — старые, на карте недопустимы)
+const MAX_SIDE := 400
+const MAX_PROPS := 20000
+const Props = preload("res://scripts/props.gd")
+
+static func read_map_file() -> Dictionary:
+	var d = JSON.parse_string(FileAccess.get_file_as_string(MAP_PATH))
+	return d if d is Dictionary else {}
+
+## Загрузить карту; возвращает текст ошибки или "" если всё хорошо. При ошибке мир не меняется
+func load_map(d: Dictionary) -> String:
+	var nw := int(d.get("w", 0))
+	var nh := int(d.get("h", 0))
+	if nw < 10 or nh < 10 or nw > MAX_SIDE or nh > MAX_SIDE:
+		return "неверный размер карты %dx%d" % [nw, nh]
+	var rows = d.get("rows")
+	if not (rows is Array) or rows.size() != nh:
+		return "в карте должно быть %d рядов" % nh
+	var nt := PackedByteArray()
+	nt.resize(nw * nh)
+	for y in nh:
+		var row = rows[y]
+		if not (row is String) or row.length() != nw:
+			return "ряд %d: должно быть %d клеток" % [y, nw]
+		for x in nw:
+			var k := MAP_CHARS.find(row[x])
+			if k < 0 or k == OLD_WINDOW_BROKEN or k == OLD_DOOR_BROKEN:
+				return "ряд %d, клетка %d: неизвестный символ «%s»" % [y, x, row[x]]
+			nt[y * nw + x] = k
+	var np := []
+	var pr = d.get("props", [])
+	if not (pr is Array) or pr.size() > MAX_PROPS:
+		return "неверный список объектов"
+	for e in pr:
+		if not (e is Array) or e.size() != 4 or not (e[0] is String) or not Props.DEFS.has(e[0]):
+			return "неизвестный объект %s" % [e]
+		var px := float(e[1])
+		var py := float(e[2])
+		if px < 0.0 or py < 0.0 or px >= nw or py >= nh:
+			return "объект %s за краем карты" % [e]
+		np.append([str(e[0]), px, py, fposmod(float(e[3]), 360.0)])
+	var sp = d.get("spawn")
+	if not (sp is Array) or sp.size() != 2:
+		return "нет точки появления"
+	var spv := Vector2(float(sp[0]), float(sp[1]))
+	if spv.x < 1.0 or spv.y < 1.0 or spv.x > nw - 1 or spv.y > nh - 1:
+		return "точка появления за краем карты"
+	w = nw
+	h = nh
+	tiles = nt
+	building_of.resize(w * h)
+	props = np
+	spawn = spv
+	compute_buildings()
+	index_props()
+	dirty_tiles.clear()
+	vis_dirty.clear()
+	events.clear()
+	return ""
+
+## Карта в виде данных для файла (редактор сохраняет и отправляет её так же)
+func map_data() -> Dictionary:
+	var rows := []
+	for y in h:
+		var row := ""
+		for x in w:
+			row += MAP_CHARS[tiles[y * w + x]]
+		rows.append(row)
+	var pr := []
+	for e in props:
+		pr.append([e[0], snappedf(e[1], 0.01), snappedf(e[2], 0.01), roundi(e[3])])
+	return {"v": 1, "w": w, "h": h, "spawn": [snappedf(spawn.x, 0.01), snappedf(spawn.y, 0.01)], "rows": rows, "props": pr}
+
+## Текст файла карты: ряды и объекты — по одному на строку
+static func map_text(d: Dictionary) -> String:
+	var out := "{\"v\": 1, \"w\": %d, \"h\": %d, \"spawn\": %s,\n\"rows\": [\n" % [d["w"], d["h"], JSON.stringify(d["spawn"])]
+	var rows: Array = d["rows"]
+	for i in rows.size():
+		out += JSON.stringify(rows[i]) + ("," if i < rows.size() - 1 else "") + "\n"
+	out += "],\n\"props\": [\n"
+	var pr: Array = d["props"]
+	for i in pr.size():
+		out += JSON.stringify(pr[i]) + ("," if i < pr.size() - 1 else "") + "\n"
+	return out + "]}\n"
+
+## Круги столкновений объектов разложить по клеткам (после загрузки карты и правок в редакторе)
+func index_props() -> void:
+	prop_cols.clear()
+	for e in props:
+		for c: Vector3 in Props.colliders(e):
+			for y in range(floori(c.y - c.z), floori(c.y + c.z) + 1):
+				for x in range(floori(c.x - c.z), floori(c.x + c.z) + 1):
+					if inside(x, y):
+						var i := y * w + x
+						if not prop_cols.has(i):
+							prop_cols[i] = []
+						prop_cols[i].append(c)

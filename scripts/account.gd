@@ -126,6 +126,22 @@ func refresh() -> bool:
 		sign_out()          # сессия больше не действует — войти заново
 	return false
 
+# ---------- редактор карты ----------
+const EDITOR_CFG := "user://editor.cfg"
+
+## Может ли аккаунт отправлять карты (правило базы: таблица admins). Ответ запоминается в телефоне —
+## по нему в паузе офлайн-теста показывается кнопка редактора. Решает всё равно база при отправке
+func check_admin() -> void:
+	var r: Array = await _req(HTTPClient.METHOD_POST, "/rest/v1/rpc/is_admin", {}, access_token)
+	if r[0] == 200:
+		var c := ConfigFile.new()
+		c.set_value("editor", "admin", r[1] == true)
+		c.save(EDITOR_CFG)
+
+static func admin_cached() -> bool:
+	var c := ConfigFile.new()
+	return c.load(EDITOR_CFG) == OK and c.get_value("editor", "admin", false) == true
+
 # ---------- персонаж ----------
 ## Имя персонажа этого аккаунта ("" — ещё не создан). null — ошибка связи
 func load_character():

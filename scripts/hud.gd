@@ -41,6 +41,7 @@ var gear_rows: Array = []      # [Rect2, id] вещи, которые можно
 var btn_a := Rect2()
 var btn_b := Rect2()
 var btn_c := Rect2()
+var btn_d := Rect2()          # пауза: «Редактор карты» (только владелец, офлайн) или «Вернуться в редактор»
 var btn_close := Rect2()
 var panel_rect := Rect2()
 const ROW_H := 40.0
@@ -249,6 +250,9 @@ func _panel_tap(g: GameState, me: GameState.Player, p: Vector2) -> void:
 			elif btn_c.has_point(p):
 				Profile.low_gfx = not Profile.low_gfx
 				Profile.save_profile()
+			elif btn_d.has_point(p) and _editor_btn() != "":
+				screen.next = "editor"
+				screen.request_exit(false)
 		Pnl.INV:
 			var col := _col_rect(0, 1)
 			if col.has_point(p):
@@ -563,21 +567,42 @@ func _draw_inv(me: GameState.Player) -> void:
 	_rr(btn_b, 10, Color(0.42, 0.24, 0.24))
 	_text(btn_b.get_center() + Vector2(0, 5), "Выбросить", 15, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER)
 
+## Кнопка редактора карты в паузе: офлайн и только у владельца (проверено по аккаунту при входе).
+## Даже если её включить подменой файла — правки останутся в этом телефоне: сервер карту не принимает
+func _editor_btn() -> String:
+	if screen.mode != GameScreen.Mode.SOLO:
+		return ""
+	if screen.demo == "editor":
+		return "Вернуться в редактор"
+	if screen.demo == "" and AccountApi.admin_cached():
+		return "Редактор карты"
+	return ""
+
+const AccountApi = preload("res://scripts/account.gd")
+
 func _draw_pause() -> void:
 	_panel_bg("Пауза" if screen.mode == GameScreen.Mode.SOLO else "Меню")
 	var bw := minf(panel_rect.size.x * 0.6, 360.0)
 	var cx := panel_rect.get_center().x
-	var y := panel_rect.position.y + 80
-	btn_a = Rect2(cx - bw / 2, y, bw, 50)
-	btn_b = Rect2(cx - bw / 2, y + 66, bw, 50)
+	var ed := _editor_btn()
+	var sp := 56.0 if ed != "" else 66.0
+	var bh := 44.0 if ed != "" else 50.0
+	var y := panel_rect.position.y + (64 if ed != "" else 80)
+	btn_a = Rect2(cx - bw / 2, y, bw, bh)
+	btn_b = Rect2(cx - bw / 2, y + sp, bw, bh)
 	_rr(btn_a, 10, Color(0.24, 0.42, 0.24))
 	_rr(btn_b, 10, Color(0.42, 0.24, 0.24))
 	_text(btn_a.get_center() + Vector2(0, 6), "Продолжить", 16, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER)
-	_text(btn_b.get_center() + Vector2(0, 6), "Отключиться" if screen.mode == GameScreen.Mode.CLIENT else "Сохранить и выйти", 16, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER)
-	btn_c = Rect2(cx - bw / 2, y + 132, bw, 50)
+	_text(btn_b.get_center() + Vector2(0, 6), "Отключиться" if screen.mode == GameScreen.Mode.CLIENT else ("Выйти без сохранения" if screen.demo == "editor" else "Сохранить и выйти"), 16, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER)
+	btn_c = Rect2(cx - bw / 2, y + sp * 2, bw, bh)
 	_rr(btn_c, 10, Color(0.26, 0.29, 0.34))
 	_text(btn_c.get_center() + Vector2(0, 6), "Графика: низкая" if Profile.low_gfx else "Графика: высокая", 16, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER)
-	_text(Vector2(cx, y + 132 + 80), "Umwelt RP · версия 0.%s" % Version.BUILD, 12, Color(0.56, 0.56, 0.56), HORIZONTAL_ALIGNMENT_CENTER)
+	btn_d = Rect2()
+	if ed != "":
+		btn_d = Rect2(cx - bw / 2, y + sp * 3, bw, bh)
+		_rr(btn_d, 10, Color(0.42, 0.34, 0.14))
+		_text(btn_d.get_center() + Vector2(0, 6), ed, 16, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER)
+	_text(Vector2(cx, y + sp * (4 if ed != "" else 2) + (26 if ed != "" else 80)), "Umwelt RP · версия 0.%s" % Version.BUILD, 12, Color(0.56, 0.56, 0.56), HORIZONTAL_ALIGNMENT_CENTER)
 
 # ---------- экран «Тело» ----------
 

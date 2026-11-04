@@ -40,6 +40,8 @@ var flashes: Array = []       # [x, z, life]
 
 var cam_yaw := 35.0
 var cam_d := 15.5            # расстояние камеры (для демо-снимков крупным планом)
+var cam_pitch := 54.0        # наклон камеры (редактор карты смотрит круче)
+var hide_roofs := false      # редактор карты: крыши убраны, видно комнаты
 var cam_x := NAN
 var cam_z := 0.0
 var shake := 0.0
@@ -104,20 +106,11 @@ func setup(w: GameWorld) -> void:
 	chunk_dirty.resize(chunk_nodes.size())
 	chunk_dirty.fill(1)
 	# крыши
-	for bi in w.buildings.size():
-		wm.build_roof(mesher, bi)
-		var r := MeshInstance3D.new()
-		r.mesh = mesher.commit()
-		r.material_override = mat_world
-		add_child(r)
-		roof_nodes.append(r)
+	_make_roofs()
 	# двери
 	WorldMesh.build_door(mesher)
 	door_mesh = mesher.commit()
-	for i in w.tiles.size():
-		var tt := w.t_at(i)
-		if tt == W.DOOR or tt == W.DOOR_OPEN:
-			_make_door(i)
+	_make_doors()
 	# частицы и кровь
 	pm = MultiMeshInstance3D.new()
 	var mm := MultiMesh.new()
@@ -168,6 +161,49 @@ func setup(w: GameWorld) -> void:
 		s.visible = false
 		add_child(s)
 		shot_nodes.append(s)
+
+func _make_roofs() -> void:
+	for bi in world.buildings.size():
+		wm.build_roof(mesher, bi)
+		var r := MeshInstance3D.new()
+		r.mesh = mesher.commit()
+		r.material_override = mat_world
+		add_child(r)
+		roof_nodes.append(r)
+
+func _make_doors() -> void:
+	for i in world.tiles.size():
+		var tt := world.t_at(i)
+		if tt == W.DOOR or tt == W.DOOR_OPEN:
+			_make_door(i)
+
+## Редактор карты: после правки — заново крыши, двери и свет фонарей (дома и проёмы могли измениться)
+func rebuild_static() -> void:
+	for r in roof_nodes:
+		r.queue_free()
+	roof_nodes.clear()
+	for k in door_nodes:
+		door_nodes[k].queue_free()
+	door_nodes.clear()
+	door_angle.clear()
+	_make_roofs()
+	_make_doors()
+	wm.refresh_lamps()
+
+## Редактор карты: перестроить участок, где стоит (стоял) объект
+func mark_point(x: float, y: float) -> void:
+	var cx := clampi(floori(x) / WorldMesh.CHUNK, 0, wm.chunks_x - 1)
+	var cy := clampi(floori(y) / WorldMesh.CHUNK, 0, wm.chunks_y - 1)
+	chunk_dirty[cy * wm.chunks_x + cx] = 1
+
+## Точка на земле под пальцем (координаты карты)
+func ground_point(screen: Vector2) -> Vector2:
+	var o := cam.project_ray_origin(screen)
+	var n := cam.project_ray_normal(screen)
+	if absf(n.y) < 0.001:
+		return Vector2(o.x, o.z)
+	var t := (0.1 - o.y) / n.y
+	return Vector2(o.x + n.x * t, o.z + n.z * t)
 
 func _make_door(i: int) -> void:
 	var n := MeshInstance3D.new()
@@ -356,7 +392,7 @@ func _place_scene(g: GameState, me: GameState.Player, dt: float) -> void:
 	var dark := g.darkness()
 	var hh := g.hour_f()
 	# ---------- камера ----------
-	var pitch := deg_to_rad(54.0)
+	var pitch := deg_to_rad(cam_pitch)
 	var yaw := deg_to_rad(cam_yaw)
 	var D := cam_d
 	var sh := shake * shake * 0.25
@@ -430,6 +466,7 @@ func _place_scene(g: GameState, me: GameState.Player, dt: float) -> void:
 	# ---------- крыши ----------
 	for bi in roof_nodes.size():
 		# крыша над игроком не видна, но тень от неё остаётся — в доме тень, как под настоящей крышей
+		roof_nodes[bi].visible = not hide_roofs
 		roof_nodes[bi].cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY if bi == inside_building else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	# ---------- игроки ----------
 	var alive := {}

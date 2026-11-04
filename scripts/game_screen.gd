@@ -18,6 +18,7 @@ var autosave_t := 60.0
 var lost := false
 var demo := ""
 var debug_move := Vector2.ZERO   # для автотестов
+var next := ""                   # куда после выхода: "editor" — в редактор карты (main.gd)
 var _exiting := false
 
 func start(m: int, g: GameState) -> void:

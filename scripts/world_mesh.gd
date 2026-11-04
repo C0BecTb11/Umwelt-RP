@@ -14,7 +14,8 @@ const CAR_COLS := [0x8E2E2A, 0x2C4C7C, 0xD6D6CC, 0x35373B, 0x55744A, 0xC89A3C, 0
 var w: GameWorld
 var chunks_x := 0
 var chunks_y := 0
-var lamps: Array = []     # [x, z основания, x, z головы]
+var lamps: Array = []     # [x, z основания, x, z головы] — фонари из объектов карты (для света ночью)
+const Props = preload("res://scripts/props.gd")
 
 static func hash2(x: int, y: int) -> int:
 	var h := (x * 374761393 + y * 668265263) & 0xFFFFFFFF
@@ -35,18 +36,15 @@ func _init(world: GameWorld) -> void:
 	w = world
 	chunks_x = (w.w + CHUNK - 1) / CHUNK
 	chunks_y = (w.h + CHUNK - 1) / CHUNK
-	for y in w.h:
-		for x in w.w:
-			if w.t(x, y) != W.SIDEWALK:
-				continue
-			var up := w.t(x, y - 1) == W.ROAD
-			var dn := w.t(x, y + 1) == W.ROAD
-			var lf := w.t(x - 1, y) == W.ROAD
-			var rt := w.t(x + 1, y) == W.ROAD
-			if (up or dn) and not (lf or rt) and x % 9 == 4:
-				lamps.append([x + 0.5, y + 0.5, x + 0.5, y + 0.5 + (-0.8 if up else 0.8)])
-			elif (lf or rt) and not (up or dn) and y % 9 == 4:
-				lamps.append([x + 0.5, y + 0.5, x + 0.5 + (-0.8 if lf else 0.8), y + 0.5])
+	refresh_lamps()
+
+## Фонари берутся из объектов карты (после правок в редакторе — вызвать заново)
+func refresh_lamps() -> void:
+	lamps.clear()
+	for e in w.props:
+		if e[0] == "lamp":
+			var hd := Props.lamp_head(e)
+			lamps.append([e[1], e[2], hd.x, hd.y])
 
 func wall_color(x: int, y: int) -> Color:
 	var b: int = w.building_of[w.idx(clampi(x, 0, w.w - 1), clampi(y, 0, w.h - 1))]
@@ -65,9 +63,13 @@ func build_chunk(m: Mesher, cx: int, cy: int) -> void:
 	for y in range(cy * CHUNK, mini(w.h, (cy + 1) * CHUNK)):
 		for x in range(cx * CHUNK, mini(w.w, (cx + 1) * CHUNK)):
 			_tile(m, x, y)
-	for l in lamps:
-		if int(l[0]) / CHUNK == cx and int(l[1]) / CHUNK == cy:
-			_lamp(m, l)
+	for e in w.props:
+		if int(e[1]) / CHUNK == cx and int(e[2]) / CHUNK == cy:
+			m.identity()
+			m.translate(Vector3(e[1], ground_h(w.t(int(e[1]), int(e[2]))), e[2]))
+			m.rot_y(e[3])
+			Props.build(m, e[0])
+	m.identity()
 
 func _tile(m: Mesher, x: int, y: int) -> void:
 	var t := w.t(x, y)
@@ -402,13 +404,6 @@ func _car(m: Mesher, x: int, y: int, horiz: bool) -> void:
 	if hv % 3 == 0:
 		m.box(Vector3(0.4, 0.67, 0.1), Vector3(0.3, 0.01, 0.25), dk(col, 0.6))
 	m.identity()
-
-func _lamp(m: Mesher, l: Array) -> void:
-	var pole := c(0x2E3236)
-	m.aabb(l[0] - 0.05, 0.12, l[1] - 0.05, l[0] + 0.05, 3.0, l[1] + 0.05, pole)
-	m.aabb(minf(l[0], l[2]) - 0.03, 2.92, minf(l[1], l[3]) - 0.03, maxf(l[0], l[2]) + 0.03, 2.98, maxf(l[1], l[3]) + 0.03, pole)
-	m.aabb(l[2] - 0.16, 2.86, l[3] - 0.16, l[2] + 0.16, 2.98, l[3] + 0.16, c(0x3A3E42))
-	m.aabb(l[2] - 0.12, 2.82, l[3] - 0.12, l[2] + 0.12, 2.86, l[3] + 0.12, c(0xFFE6A0, 0.5))
 
 # ================== КРЫШИ ==================
 func build_roof(m: Mesher, bi: int) -> void:

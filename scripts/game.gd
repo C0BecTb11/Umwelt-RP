@@ -113,9 +113,11 @@ func _init(s: int = 0) -> void:
 	seed = s
 	rnd.seed = s ^ Time.get_ticks_usec()
 
+## Новый мир: карта из файла maps/city.json (s — только номер мира, город от него не зависит)
 static func new_game(s: int) -> GameState:
 	var g := GameState.new(s)
-	var start := g.world.generate(s)
+	g.load_official_map()
+	var start := g.spawn
 	var p := Player.new(0)
 	p.pos = start
 	p.rpos = start
@@ -123,10 +125,15 @@ static func new_game(s: int) -> GameState:
 	p.wear = Items.START_WEAR.duplicate()
 	p.look = default_look(0, "m")
 	p.money = START_MONEY
-	g.spawn = start
 	g.players.append(p)
-	g.world.compute_buildings()
 	return g
+
+## Карта игры из файла. Ошибка здесь — значит, в выпуск попал битый файл: проверяет автотест
+func load_official_map() -> void:
+	var err := world.load_map(GameWorld.read_map_file())
+	if err != "":
+		push_error("Карта maps/city.json не загрузилась: " + err)
+	spawn = world.spawn
 
 ## Московское время в минутах от 1970 года: остаток от деления на 1440 — минуты текущих суток по МСК
 static func msk_time() -> float:
@@ -832,8 +839,9 @@ func to_data() -> Dictionary:
 	var ps := []
 	for p: Player in players:
 		ps.append(player_data(p))
+	# карта берётся из файла; в сохранении клетки нужны только ради открытых и закрытых дверей
 	return {"v": SAVE_VERSION, "seed": seed, "time": time, "uids": uids.duplicate(), "tiles": Marshalls.raw_to_base64(world.tiles),
-		"p": ps, "spawn": [spawn.x, spawn.y]}
+		"w": world.w, "p": ps}
 
 ## Мир для нового клиента: карта, время; из игроков — он сам полностью, остальные только внешне.
 ## Карту аккаунтов (uids) не отдаём никогда: uid — это ключ от чужого персонажа
@@ -848,16 +856,13 @@ func to_data_for(pid: int) -> Dictionary:
 			var pub := player_public(p)
 			pub["con"] = true
 			ps.append(pub)
-	return {"v": SAVE_VERSION, "seed": seed, "time": time, "tiles": Marshalls.raw_to_base64(world.tiles),
-		"p": ps, "spawn": [spawn.x, spawn.y]}
+	return {"v": SAVE_VERSION, "seed": seed, "time": time, "map": world.map_data(), "p": ps}
 
 const SAVE_VERSION := 3
 
-## Проверка формата: без карты мира загружать нечего
+## Проверка формата: сохранение мира — словарь с клетками (по ним восстанавливаются двери)
 static func valid_save(o) -> bool:
-	if not (o is Dictionary) or not (o.get("tiles") is String):
-		return false
-	return Marshalls.base64_to_raw(o["tiles"]).size() == 100 * 100
+	return o is Dictionary and o.get("tiles") is String
 
 ## Перевод старых сохранений на текущий формат. Новое поле — новая версия и шаг здесь
 static func migrate(o: Dictionary) -> Dictionary:
@@ -896,17 +901,28 @@ func load_data(o: Dictionary) -> void:
 	o = migrate(o)
 	time = float(o.get("time", 8 * 60.0))
 	uids = o.get("uids", {}).duplicate() if o.get("uids") is Dictionary else {}
-	var t := Marshalls.base64_to_raw(str(o.get("tiles", "")))
-	for i in mini(t.size(), world.tiles.size()):
-		world.tiles[i] = t[i]
-	world.compute_buildings()
-	var sp = o.get("spawn")
-	if sp is Array and sp.size() == 2:
-		spawn = Vector2(float(sp[0]), float(sp[1]))
+	if o.get("map") is Dictionary:
+		# клиент: карту со всеми дверями прислал сервер
+		var err := world.load_map(o["map"])
+		if err != "":
+			push_error("Карта от сервера не загрузилась: " + err)
+		spawn = world.spawn
+	else:
+		# сервер и офлайн: карта — из файла игры, из сохранения — только какие двери открыты
+		load_official_map()
+		var t := Marshalls.base64_to_raw(str(o.get("tiles", "")))
+		if t.size() == world.tiles.size() and int(o.get("w", 100)) == world.w:
+			for i in t.size():
+				if GameWorld.is_door_like(world.tiles[i]) and GameWorld.is_door_like(t[i]):
+					world.tiles[i] = t[i]
 	players.clear()
 	for e in o.get("p", []):
 		var p := Player.new(int(e["id"]))
 		player_from(e, p)
+		if not is_replica and not p.dead and world.circle_blocked(p.pos.x, p.pos.y, PLAYER_R):
+			# карту поменяли, и на месте игрока теперь стена или объект — ставим рядом или к точке появления
+			var np := unstick(p.pos, PLAYER_R)
+			p.pos = np if not world.circle_blocked(np.x, np.y, PLAYER_R) else unstick(spawn, PLAYER_R)
 		p.rpos = p.pos
 		players.append(p)
 
