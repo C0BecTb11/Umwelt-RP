@@ -1,0 +1,523 @@
+Godot Engine v4.4.1.stable.official.49a5bc7b6 - https://godotengine.org
+
+зерно случайности тестов: 20261104
+OK      Движение: нельзя пройти сквозь стену
+OK      Движение: бегом тоже нельзя
+OK      Движение по диагонали: персонаж не входит в стены/мебель (200 случайных маршрутов)
+OK      Движение: нельзя выйти за край карты
+OK      Застревание: из стены выталкивает, а не даёт идти внутри неё
+OK      Сеть: игрок не может телепортироваться (10 пакетов по 3.9 клетки)
+OK      Сеть: некорректные числа в пакете движения отбрасываются (54 случаев)
+OK      Сохранение: после плохих пакетов мир сохраняется и читается обратно
+OK      Сохранение: испорченный мир не затирает рабочий файл
+OK      Сеть: игрок не может прислать позицию внутри стены
+OK      Сеть: действия с несуществующими предметами/клетками не ломают сервер и ничего не создают
+OK      РП: шкафы не обыскиваются, окна не разбиваются (механики Zomboid убраны)
+OK      Сохранение: мир и игроки восстанавливаются (все поля карточки)
+OK      Сохранение: файл без части полей загружается со значениями по умолчанию
+OK      Сохранение: повреждённый файл без резервной копии не загружается и не роняет игру
+OK      Сохранение: при порче основного файла берётся резервная копия
+OK      Мир: все комнаты достижимы через двери
+OK      Мир: к каждой мебели можно подойти
+OK      Карта: maps/city.json читается без ошибок, на ней есть фонари
+OK      Карта: точка появления свободна
+OK      Карта: сохранение в текст и загрузка обратно ничего не меняют
+OK      Карта: испорченный файл не принимается и не ломает мир (6 видов)
+OK      Объекты: сквозь гидрант не пройти
+OK      Объекты: игрок не может прислать позицию внутри объекта
+OK      Сеть: клиент получает карту и объекты от сервера
+OK      Сохранение: открытые двери остаются открытыми, карта — из файла
+OK      Сохранение: игрока на месте новой стены переставляет на свободное место
+OK      Редактор: «Рамка» ставит стены только по краям
+OK      Редактор: машина ставится в 2 клетки и убирается целиком
+OK      Редактор: объект ставится, мешает ходить, двигается по сетке 0.25 и поворачивается
+OK      Редактор: нельзя поставить объект за край, неизвестный объект и спавн в стену
+OK      Редактор: черновик — правильная карта (читается так же, как maps/city.json)
+OK      Редактор: «Отменить» возвращает всё как было (6 шагов)
+OK      Сеть: игрок не может пройти сквозь закрытую дверь одним пакетом
+OK      Бой: через окно видно, но пуля сквозь стекло не проходит
+OK      Сеть: честного игрока не откатывает у стен и углов (178 маршрутов)
+OK      Сеть: бег по диагонали в угол дома не откатывается (BF-024, 11520 случаев)
+OK      Сеть: нельзя прислать позицию за стеной или закрытой дверью (807 стен, 48 дверей)
+        было: замирал в 70% кадров бега, рывок до 0.59 клетки; стало: 0%, рывок до 0.09, пробег 0.00, итог в 0.00 от места остановки
+OK      Сеть: бегущий игрок не замирает и не дёргается на плохом Wi‑Fi
+OK      Сеть: остановился — стоит на месте, без пробега вперёд
+OK      Сеть: удар другого игрока проигрывается с начала и один раз
+OK      Сеть: надёжный пакет не откатывает позицию и удар другого игрока
+OK      Дома: внутренняя стена не делит окно и не торчит наружу
+OK      Дома: мебель не стоит вплотную к окну
+OK      Одежда: надевается, смена вещи возвращает прежнюю, чужое и неподходящее не надевается
+OK      Одежда и внешность сохраняются и загружаются
+OK      Одежда: снять — вещь возвращается в инвентарь, ничего не теряется и не множится
+OK      Персонажи: у всех вещей и причёсок есть модели
+OK      Персонажи: каска вместо причёски, цветные варианты перекрашивают нужный материал
+OK      Персонажи: платье показывает и низ, пустой слот — без одежды
+OK      Внешность: пол из базы, причёска женская
+OK      Внешность: повторный вход не меняет причёску
+OK      Внешность: неподходящая вещь снимается в инвентарь
+OK      Сохранение v1: старая одежда убрана, выдана футболка и кеды, вода на месте
+OK      Время: в игре московское
+OK      Время: дата по Москве
+OK      Время: темно только ночью (07–21 светло, 23 и 3 — ночь)
+OK      Сохранение v2: разбитые окна и выбитые двери стали целыми, старые поля Zomboid не сохраняются
+OK      Аккаунт: тот же телефон возвращается к своему персонажу с деньгами и вещами
+OK      Приватность: чужие деньги, вещи и ключи аккаунтов не уходят другим игрокам
+OK      Драка: удары по другому игроку отнимают здоровье и могут отправить в нокаут
+OK      Нокаут: через время игрок очнулся у больницы с вещами
+OK      Сеть: открытую дверь видят все игроки, а не один (BF-027)
+OK      Сеть: эффекты и выстрелы получают те, кто рядом, и только они
+OK      Видимость: свой игрок всегда в пакетах
+OK      Видимость: игрок рядом на улице виден (быстрый, полный и первый пакет)
+OK      Видимость: игрок за пределами экрана (25+ клеток) не приходит
+OK      Видимость: игрок под крышей чужого здания с улицы не виден
+OK      Видимость: из здания видно улицу рядом
+OK      Видимость: в том же здании игроки видят друг друга
+OK      Видимость: радиус игроков меньше радиуса выстрелов и эффектов
+OK      Видимость: ушедший из вида игрок на телефоне больше не рисуется
+OK      Сеть: «стою», а сам бегу — выносливость тратится, без неё скорость не выше шага (последние 5 с: 14.2 клетки)
+OK      Сеть: честный бег до усталости и дальше — без откатов
+OK      Сервер: действий не больше 15 разом и 10 в секунду (остальные отбрасываются)
+OK      Аккаунт: утёкший и короткий пароль — понятные разные сообщения (BF-045)
+OK      Удаление аккаунта: отпечаток id в игре совпадает с отпечатком базы
+OK      Удаление аккаунта: карточка удалённого аккаунта уходит из мира, остальные остаются (BF-044)
+OK      Удаление аккаунта: удалённого нет и в сохранении мира
+OK      Сервер: подключения без входа считаются по адресу, вошедшие и чужие адреса — нет (BF-043)
+OK      Сервер: персонажи по id телефона убираются, аккаунтные и общие с аккаунтом остаются (Н1)
+OK      Сервер: повторная уборка ничего не удаляет
+OK      Сервер: честные 20 пакетов движения в секунду проходят все
+OK      Сервер: токен неверного формата не идёт в Supabase
+OK      Сервер: слишком большое сообщение распознаётся, обычное — нет
+OK      Сеть: сервер не пересылает пакеты между клиентами
+OK      Сеть: ключ шифрования сервера создаётся один раз и потом не меняется
+ERROR: TLS handshake error: -30464
+   at: _do_handshake (modules/mbedtls/packet_peer_mbed_dtls.cpp:98)
+mbedtls error: returned -0x7700
+
+ERROR: TLS handshake error: -9984
+   at: _do_handshake (modules/mbedtls/packet_peer_mbed_dtls.cpp:98)
+mbedtls error: returned -0x2700
+
+ERROR: TLS handshake error: -30592
+   at: _do_handshake (modules/mbedtls/packet_peer_mbed_dtls.cpp:98)
+mbedtls error: returned -0x7780
+
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: TLS handshake error: -30464
+   at: _do_handshake (modules/mbedtls/packet_peer_mbed_dtls.cpp:98)
+mbedtls error: returned -0x7700
+
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: TLS handshake error: -30464
+   at: _do_handshake (modules/mbedtls/packet_peer_mbed_dtls.cpp:98)
+mbedtls error: returned -0x7700
+
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+ERROR: The multiplayer instance isn't currently active.
+   at: poll (modules/enet/enet_multiplayer_peer.cpp:165)
+OK      Сеть: зашифрованный клиент подключается и передаёт данные, без шифрования — не подключается
+OK      Сеть: телефон подключается к серверу со своим сертификатом и не подключается к серверу с чужим ключом
+ERROR: Error parsing X509 certificates: -8576.
+   at: load_from_string (modules/mbedtls/crypto_mbedtls.cpp:230)
+OK      Сеть: вшитый сертификат сервера читается, для локального адреса сверки нет
+Unicode parsing error: Invalid unicode codepoint (43d), cannot represent as ASCII/Latin-1
+Unicode parsing error: Invalid unicode codepoint (435), cannot represent as ASCII/Latin-1
+Unicode parsing error: Invalid unicode codepoint (43f), cannot represent as ASCII/Latin-1
+Unicode parsing error: Invalid unicode codepoint (43e), cannot represent as ASCII/Latin-1
+Unicode parsing error: Invalid unicode codepoint (434), cannot represent as ASCII/Latin-1
+Unicode parsing error: Invalid unicode codepoint (43f), cannot represent as ASCII/Latin-1
+Unicode parsing error: Invalid unicode codepoint (438), cannot represent as ASCII/Latin-1
+Unicode parsing error: Invalid unicode codepoint (441), cannot represent as ASCII/Latin-1
+Unicode parsing error: Invalid unicode codepoint (44c), cannot represent as ASCII/Latin-1
+OK      Обновления: лаунчер принимает манифест с верной подписью и отклоняет подменённый, чужой ключ, без подписи
+OK      ID: игрок без аккаунта получает номер от миллиона
+OK      ID: аккаунт получает ID из базы
+OK      ID: деньги, счёт и вещи переехали вместе с карточкой
+OK      ID: тег — «Имя (ID)»
+OK      ID: чужой номер освобождается для владельца
+OK      ID: повторный вход — та же карточка
+OK      ID: счёт и наличные сохраняются в мире
+
+ИТОГО: 98 прошло, 0 ошибок
