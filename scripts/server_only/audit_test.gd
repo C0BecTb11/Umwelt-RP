@@ -45,6 +45,7 @@ func _ready() -> void:
 	test_rp_rules()
 	test_events_all()
 	test_visibility()
+	test_spawn_spot()
 	test_stamina_net()
 	test_server_guards()
 	test_dtls()
@@ -852,6 +853,24 @@ func test_events_all() -> void:
 	var far_sh := g.state_for(far.id).has("sh")
 	check("Сеть: эффекты и выстрелы получают те, кто рядом, и только они", near_fx and near_sh and not far_fx and not far_sh,
 		"рядом: эффект %s, выстрел %s; далеко (%.0f клеток): эффект %s, выстрел %s" % [near_fx, near_sh, far.pos.distance_to(a.pos), far_fx, far_sh])
+
+## BF-046: место появления — рядом с точкой появления и не сквозь стену в соседний дом
+func test_spawn_spot() -> void:
+	var g := GameState.new_game(1)
+	g.players.clear()
+	var sb := g.building_at(g.spawn)
+	var inside := 0
+	var blocked := 0
+	var far := 0.0
+	for i in 2000:
+		var p := g._spawn_player(5000 + i)
+		if g.building_at(p.pos) != sb:
+			inside += 1
+		if g.world.circle_blocked(p.pos.x, p.pos.y, GameState.PLAYER_R):
+			blocked += 1
+		far = maxf(far, p.pos.distance_to(g.spawn))
+	check("Появление: не внутри соседнего здания, не в стене, рядом с точкой появления (2000 раз, BF-046)",
+		inside == 0 and blocked == 0 and far < 3.0, "в чужом здании %d, в стене %d, дальше всего %.2f" % [inside, blocked, far])
 
 ## Первая клетка (центр), подходящая под условие; (-1, -1) — нет такой
 func _cell_where(g: GameState, ok: Callable) -> Vector2:

@@ -58,10 +58,10 @@
 | Есть ли персонаж | `main.gd` `_after_login` → `account.gd` `load_character()` | 📱 → ☁️ `GET /rest/v1/characters?select=id,name&user_id=eq.<свой>` | ответ: `id`, `name` (RLS отдаёт только свою строку) |
 | Создание персонажа | `main.gd` `_show_create_character` → `account.gd` `valid_name()`, `create_character()` | 📱 → ☁️ `POST /rest/v1/characters` | `user_id`, `name`, `gender`; `id` база выдаёт сама; ошибки `23505` (имя занято), `23514` (формат) |
 | Админ ли | `main.gd` `_after_login` → `account.gd` `check_admin()` | 📱 → ☁️ `POST /rest/v1/rpc/is_admin` → `user://editor.cfg` | `true/false`; только для кнопки редактора карты |
-| Регистрация: согласие | `main.gd` `_show_login(register)` | 📱 | с 0.30 под кнопкой — «есть 16 лет и согласен с политикой» и кнопка «Политика конфиденциальности» → `OS.shell_open(AccountApi.PRIVACY_URL)` (https://c0bectb11.github.io/Umwelt-RP/privacy.html). Пароль при регистрации — от 8 символов (`MIN_PASSWORD`) |
-| Экран «Аккаунт» | меню игры → «Аккаунт» (`hud.gd`, `screen.next = "account"`) → `main.gd` `_on_exit` → `_show_account` | 📱 | с 0.30: соединение с игровым сервером закрывается; почта и имя персонажа — из памяти `account.gd` |
-| Выход из аккаунта | `main.gd` `_show_account` → `account.gd` `logout()` | 📱 → ☁️ `POST /auth/v1/logout?scope=local` | с 0.30 — кнопка «Выйти из аккаунта на этом телефоне»; затем `sign_out` стирает токены в `account.cfg`. `sign_out` один — когда сессия уже недействительна |
-| Удаление аккаунта | `main.gd` `_show_delete_account` (слово УДАЛИТЬ) → `account.gd` `refresh()`, `delete_account()` | 📱 → ☁️ `POST /rest/v1/rpc/delete_my_account` (свежий токен) | с 0.30 (BF-044): база удаляет пользователя, каскадом — персонажа, права, черновики, сессии; триггер пишет `sha256(id)` в `account_deletions`. Телефон стирает почту и токены из `account.cfg` |
+| Регистрация: согласие | `main.gd` `_show_login(register)` | 📱 | с 0.31 под кнопкой — «есть 16 лет и согласен с политикой» и кнопка «Политика конфиденциальности» → `OS.shell_open(AccountApi.PRIVACY_URL)` (https://c0bectb11.github.io/Umwelt-RP/privacy.html). Пароль при регистрации — от 8 символов (`MIN_PASSWORD`) |
+| Экран «Аккаунт» | меню игры → «Аккаунт» (`hud.gd`, `screen.next = "account"`) → `main.gd` `_on_exit` → `_show_account` | 📱 | с 0.31: соединение с игровым сервером закрывается; почта и имя персонажа — из памяти `account.gd` |
+| Выход из аккаунта | `main.gd` `_show_account` → `account.gd` `logout()` | 📱 → ☁️ `POST /auth/v1/logout?scope=local` | с 0.31 — кнопка «Выйти из аккаунта на этом телефоне»; затем `sign_out` стирает токены в `account.cfg`. `sign_out` один — когда сессия уже недействительна |
+| Удаление аккаунта | `main.gd` `_show_delete_account` (слово УДАЛИТЬ) → `account.gd` `refresh()`, `delete_account()` | 📱 → ☁️ `POST /rest/v1/rpc/delete_my_account` (свежий токен) | с 0.31 (BF-044): база удаляет пользователя, каскадом — персонажа, права, черновики, сессии; триггер пишет `sha256(id)` в `account_deletions`. Телефон стирает почту и токены из `account.cfg` |
 | Персонаж удалённого аккаунта | `server.gd` `_sync_deleted` (через 2 с после запуска, потом раз в 300 с; не в `--noauth`) → `drop_deleted` | 🖥 → ☁️ `POST /rest/v1/rpc/deleted_accounts` (только publishable-ключ, роль `anon`) | ответ — до 5000 отпечатков `h`; у кого `sha256(id)` совпал с ключом `sb:<id>` — ключ и карточка удаляются из мира, если он в игре — `bye` «Аккаунт удалён» и отключение, мир сохраняется. В часовых копиях — до 24 ч |
 
 Ключ API в игре — только publishable (`Boot.SUPABASE_KEY`). Все проверки прав — правилами базы (RLS).
@@ -74,7 +74,7 @@
 |---|---|---|---|
 | Адрес сервера | `launcher.gd` `_launch` → Engine meta `server_host`/`server_port` → `boot.gd` `host()`/`port()` | 📦 manifest → 📱 | `server.host`, `server.port` из манифеста (по умолчанию в `boot.gd` — 2.31.45.237:7777) |
 | Соединение | `main.gd` `_connect_game` → `net.gd` `join()` → `host.dtls_client_setup(TLS_NAME, client_tls(ip))` | 📱 → 🖥 ENet + DTLS | рукопожатие шифрования; с 0.27 сервер должен предъявить сертификат `Net.SERVER_CERT` (кроме 127.0.0.1 — тесты), иначе соединения нет; сервер — `Net.serve(…, Net.server_tls("user://dtls"))`, ключ `dtls.key`/`dtls.crt` создаётся при первом запуске сервера и лежит в его папке данных. Нешифрованный клиент не подключается |
-| «Привет» | `game_screen.gd` `_on_connected` | 📱 → 🖥 `hello`, канал 0 | `token` (токен доступа Supabase), `uid` (`Profile.uid`, случайный id телефона — с 0.30 только если токена нет, то есть для `--noauth`; с аккаунтом — пустая строка), `nick` (`Profile.nick`), `build`. До 0.28 ещё `legacy` (то же значение) |
+| «Привет» | `game_screen.gd` `_on_connected` | 📱 → 🖥 `hello`, канал 0 | `token` (токен доступа Supabase), `uid` (`Profile.uid`, случайный id телефона — с 0.31 только если токена нет, то есть для `--noauth`; с аккаунтом — пустая строка), `nick` (`Profile.nick`), `build`. До 0.28 ещё `legacy` (то же значение) |
 | Проверка сборки | `server.gd` `_handle_net` (`hello`) | 🖥 → 📱 `bye` | при несовпадении `build` — отказ с причиной |
 | Проверка токена | `server.gd` `_verify` → `_sb("/auth/v1/user")` | 🖥 → ☁️ HTTPS | заголовки: publishable-ключ + **токен игрока**; ответ: `user.id` |
 | Персонаж | `server.gd` `_verify` → `_sb("/rest/v1/characters?select=id,name,gender&user_id=eq.…")` | 🖥 → ☁️ HTTPS, тем же токеном игрока | `id`, `name`, `gender` |
@@ -113,7 +113,7 @@
 |---|---|---|---|
 | Имя, ID, пол | ☁️ `characters` | один раз при создании (изменить через API нельзя — политик `UPDATE` нет) | 📱 `account.gd` `create_character` |
 | Вся карточка `Player` (позиция, здоровье, голод, жажда, выносливость, деньги `mo`, счёт `bk`, вещи `inv`, в руке `eq`, одежда `wr`, внешность `lk`, имя `nm`) | 🖥 `server_world.json` → поле `p` (`game.gd` `player_data`) | раз в 15 с, при выходе любого игрока и (с 0.29, после перезапуска `setup.sh`) при остановке службы — по файлу-запросу `stop.request` от `umwelt-stop` (BF-029); до этого при остановке терялось до 15 с | 🖥 `server.gd` `save_world`: `GameState.save_text` (текст должен читаться обратно, иначе ничего не перезаписывается) → временный файл → проверка длины → прежний файл в `.bak`, **только если он сам читается** → замена; раз в час — копия `server_world.hЧЧ.json` (24 штуки по кругу) |
-| Связь аккаунт → ID | 🖥 `server_world.json` → `uids` (`sb:<user_id>`; старые id телефонов удалены в 0.28) | там же; удалённый аккаунт — убирается `drop_deleted` (0.30) | 🖥 |
+| Связь аккаунт → ID | 🖥 `server_world.json` → `uids` (`sb:<user_id>`; старые id телефонов удалены в 0.28) | там же; удалённый аккаунт — убирается `drop_deleted` (0.31) | 🖥 |
 | Офлайн-персонаж | 📱 `user://save.json` (`saves.gd`) | раз в 60 с, при паузе и выходе | 📱; к серверу и аккаунту не относится |
 
 Загрузка: 🖥 `server.gd` `_load_world` → `valid_save` → `load_data` → `migrate` (сохранения v1–v3 переводятся).
@@ -214,7 +214,7 @@
 | Д5 | Офлайн-персонаж и онлайн-персонаж | 📱 `save.json` и 🖥 файл мира | **не связаны**: разные деньги и вещи (так задумано для «Офлайн-теста») |
 | Д6 | Карта | `maps/city.json` в пакете телефона и в сборке сервера; 🖥 клетки в файле мира; `init.map`; 📱 `map_draft.json`; ☁️ `map_drafts` | сервер берёт карту из своей сборки, из сохранения — только двери; клиент — из `init`. Пакет и сервер одной сборки (проверка `build`) |
 | Д7 | «Админ ли» | ☁️ `admins` → 📱 `user://editor.cfg` | кэш только для кнопки; решает база при отправке |
-| Д8 | id телефона | 📱 `settings.cfg` → `hello.uid` (с 0.28 `legacy` не шлётся; с 0.30 с аккаунтом — пусто) | `uid` используется только в `--noauth` |
+| Д8 | id телефона | 📱 `settings.cfg` → `hello.uid` (с 0.28 `legacy` не шлётся; с 0.31 с аккаунтом — пусто) | `uid` используется только в `--noauth` |
 
 ### 8.4. Найденная ошибка
 

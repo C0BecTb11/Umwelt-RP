@@ -294,7 +294,7 @@ publishable-ключом (`server.gd` `_sync_deleted`, раз в 5 минут, �
 | `20261102090813` | `characters_static_id` | постоянный ID персонажа (`id`, identity) |
 | `20261102145703` | `characters_gender` | пол персонажа (`gender`, `m`/`f`) |
 | `20261104144800` | `map_drafts` | `admins`, `map_drafts`, `is_admin()`, политики, владелец — в `admins` |
-| — (SQL Editor, 2026-11-04) | `account_deletion` | **в истории миграций нет**: запущено владельцем в панели (SQL Editor), т.к. подтверждение изменения из рабочей среды Claude трижды закрывалось само. Создало `account_deletions`, `record_account_deletion()`, триггер `on_auth_user_deleted`, `delete_my_account()`, `deleted_accounts()` и их права (BF-044). Текст — в коммите 0.30 (`docs/sql/account_deletion.sql`) |
+| — (SQL Editor, 2026-11-04) | `account_deletion` | **в истории миграций нет**: запущено владельцем в панели (SQL Editor), т.к. подтверждение изменения из рабочей среды Claude трижды закрывалось само. Создало `account_deletions`, `record_account_deletion()`, триггер `on_auth_user_deleted`, `delete_my_account()`, `deleted_accounts()` и их права (BF-044). Текст — в коммите 0.31 (`docs/sql/account_deletion.sql`) |
 | `20261104183753` | `tighten_role_grants` | права `anon`/`authenticated` урезаны до нужных игре (раздел 7), права по умолчанию для новых таблиц и функций `postgres` — отозваны (Н4, BF-041) |
 
 Описание «что сделала» восстановлено по текущей структуре и журналу руководства; тексты самих миграций

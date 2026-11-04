@@ -286,7 +286,7 @@ func _move_id(p: Player, to: int) -> void:
 
 func _spawn_player(pid: int) -> Player:
 	var p := Player.new(pid)
-	p.pos = unstick(spawn + Vector2(randf_range(-1.5, 1.5), randf_range(-1.5, 1.5)), PLAYER_R)
+	p.pos = spawn_spot(1.5)
 	p.rpos = p.pos
 	p.inv = [{"id": "water", "n": 1}]
 	p.wear = Items.START_WEAR.duplicate()
@@ -555,7 +555,7 @@ func _respawn(p: Player) -> void:
 	p.hp = 60.0
 	p.hunger = minf(p.hunger, 50.0)
 	p.thirst = minf(p.thirst, 50.0)
-	push_player(p, unstick(spawn + Vector2(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)), PLAYER_R))
+	push_player(p, spawn_spot(1.0))
 	p.snaps.clear()
 	msg(p.id, "Ты очнулся у больницы")
 
@@ -571,6 +571,16 @@ func _move_circle(pos: Vector2, d: Vector2, r: float) -> Vector2:
 	return n
 
 ## Ближайшая свободная точка (кольцами до 1.5 клетки)
+## Случайное место рядом с точкой появления (в пределах spread), свободное и там же, где сама точка (на улице —
+## значит на улице). Иначе случайная точка рядом со стеной дома «проваливалась» сквозь стену внутрь (BF-046)
+func spawn_spot(spread: float) -> Vector2:
+	var sb := building_at(spawn)
+	for i in 24:
+		var c := unstick(spawn + Vector2(randf_range(-spread, spread), randf_range(-spread, spread)), PLAYER_R)
+		if not world.circle_blocked(c.x, c.y, PLAYER_R) and building_at(c) == sb:
+			return c
+	return unstick(spawn, PLAYER_R)
+
 func unstick(pos: Vector2, r: float) -> Vector2:
 	for ring in range(1, 16):
 		var dist := ring * 0.1

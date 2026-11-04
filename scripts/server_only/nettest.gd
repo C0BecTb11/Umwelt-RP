@@ -74,14 +74,16 @@ func _process(dt: float) -> void:
 				L("ИТОГ: %s" % ("OK" if ok else "ОШИБКА"))
 				get_tree().quit(0 if ok else 1)
 
-## Направление, где дальше всего свободно (из четырёх), чтобы бот не упёрся в стену сразу
+## Направление, где дальше всего свободно по улице (из четырёх), чтобы бот не упёрся в стену сразу и не зашёл в дом
 func _free_dir(scr: GameScreen) -> Vector2:
 	var best := Vector2(1, 0)
 	free_len = 0.0
 	var me := scr.me()
 	for d: Vector2 in [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1)]:
 		var l := 0.0
-		while l < 6.0 and not scr.game.world.circle_blocked(me.pos.x + d.x * (l + 0.1), me.pos.y + d.y * (l + 0.1), GameState.PLAYER_R):
+		# только по улице: игрока под чужой крышей другие не получают (0.26, BF-040) — бот, зашедший в дом, «пропал» бы
+		while l < 6.0 and not scr.game.world.circle_blocked(me.pos.x + d.x * (l + 0.1), me.pos.y + d.y * (l + 0.1), GameState.PLAYER_R) \
+				and scr.game.building_at(me.pos + d * (l + 0.1 + GameState.PLAYER_R)) < 0:
 			l += 0.1
 		if l > free_len:
 			free_len = l
