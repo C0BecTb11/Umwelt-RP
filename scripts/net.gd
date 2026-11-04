@@ -33,6 +33,8 @@ func _ready() -> void:
 	multiplayer.connection_failed.connect(func(): status = "Не удалось подключиться к серверу"; _lost())
 	multiplayer.server_disconnected.connect(func(): status = "Соединение с сервером потеряно"; _lost())
 	(multiplayer as SceneMultiplayer).peer_packet.connect(_on_bytes)
+	# сервер не пересылает пакеты клиента другим клиентам и не сообщает им о чужих подключениях (Н5)
+	(multiplayer as SceneMultiplayer).server_relay = false
 
 # ================== запуск ==================
 func serve(port: int, max_c: int) -> bool:

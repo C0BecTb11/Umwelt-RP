@@ -65,8 +65,12 @@ func _process(dt: float) -> void:
 	if step == 1:
 		var scr: GameScreen = main.screen
 		if scr.game != null and scr.me() != null:
+			step = 2
+			var ok: bool = scr.me().name == "Test_Bot"
 			L("сервер впустил: персонаж %d «%s»" % [scr.local_pid, scr.me().name])
-			L("ИТОГ: %s" % ("OK" if scr.me().name == "Test_Bot" else "ОШИБКА — имя не из базы"))
-			get_tree().quit(0 if scr.me().name == "Test_Bot" else 1)
+			await acc.logout()                # сессия бота не остаётся висеть в базе после каждой сборки
+			L("сессия закрыта")
+			L("ИТОГ: %s" % ("OK" if ok else "ОШИБКА — имя не из базы"))
+			get_tree().quit(0 if ok else 1)
 		elif scr.lost or t > 25.0:
 			fail("сервер не впустил: " + Net.I.status)

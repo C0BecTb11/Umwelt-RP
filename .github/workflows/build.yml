@@ -105,6 +105,22 @@ jobs:
           # ошибка выполнения внутри теста молча обрывает его остаток — такая сборка не выпускается
           if grep -q "SCRIPT ERROR" audit.log; then echo "ОШИБКА: в автотестах ошибка выполнения (SCRIPT ERROR)"; exit 1; fi
 
+      # Настоящая сеть: сервер (без аккаунтов) + 3 бота входят, ходят, видят друг друга, без откатов и замираний
+      - name: Network test
+        run: |
+          XDG_DATA_HOME=$PWD/nt/srv timeout 50 ~/godot/godot --headless --path . -- --server --port=7790 --noauth > nt_server.log 2>&1 &
+          sleep 4
+          pids=""
+          for i in 1 2 3; do
+            XDG_DATA_HOME=$PWD/nt/c$i timeout 40 ~/godot/godot --headless --path . -- --nettest=Бот$i,7790,2 > nt_c$i.log 2>&1 &
+            pids="$pids $!"
+          done
+          for p in $pids; do wait $p || true; done
+          grep -ah "ИТОГ\|прошёл" nt_c*.log
+          echo "--- сервер"; grep -a "^\[" nt_server.log | head -20
+          if grep -aq "SCRIPT ERROR" nt_c*.log nt_server.log; then echo "ОШИБКА: SCRIPT ERROR в сетевом тесте"; exit 1; fi
+          test "$(grep -al "ИТОГ: OK" nt_c*.log | wc -l)" = "3"
+
       - name: Export game pack, server, APK
         run: |
           set -o pipefail

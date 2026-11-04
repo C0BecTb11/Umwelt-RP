@@ -18,6 +18,7 @@ var saw_max := 0
 var frozen := 0
 var frames := 0
 var last_other := {}
+var free_len := 0.0            # сколько клеток свободно в выбранном направлении (до стены, не больше 6)
 
 func _ready() -> void:
 	var parts := role.split(",")
@@ -47,7 +48,7 @@ func _process(dt: float) -> void:
 				start_pos = scr.me().pos
 				start_fs = scr.me().force_seq
 				L("вошёл, персонаж %d на %s" % [scr.local_pid, start_pos.snapped(Vector2(0.01, 0.01))])
-				scr.debug_move = Vector2(1, 0) if nick.hash() % 2 == 0 else Vector2(0, 1)
+				scr.debug_move = _free_dir(scr)
 				step = 2
 				t = 0.0
 			elif t > 15.0:
@@ -66,10 +67,26 @@ func _process(dt: float) -> void:
 				var me := scr.me()
 				var moved := me.pos.distance_to(start_pos)
 				var rollbacks := move_rollbacks
-				var ok := saw_max >= expect and rollbacks == 0 and not scr.lost
-				L("прошёл %.2f клетки, откатов %d, видел других: %d (ожидалось %d), кадров с другими %d, из них без движения у бегущих %d" % [moved, rollbacks, saw_max, expect, frames, frozen])
+				# шагом 2 с — около 4.6 клетки, если путь свободен; замирания чужих бегущих — не больше 5% кадров
+				var need := minf(free_len, 4.6) * 0.6
+				var ok := saw_max >= expect and rollbacks == 0 and not scr.lost and moved >= need and frozen <= frames * 0.05
+				L("прошёл %.2f клетки (нужно ≥ %.2f), откатов %d, видел других: %d (ожидалось %d), кадров с другими %d, из них без движения у бегущих %d" % [moved, need, rollbacks, saw_max, expect, frames, frozen])
 				L("ИТОГ: %s" % ("OK" if ok else "ОШИБКА"))
 				get_tree().quit(0 if ok else 1)
+
+## Направление, где дальше всего свободно (из четырёх), чтобы бот не упёрся в стену сразу
+func _free_dir(scr: GameScreen) -> Vector2:
+	var best := Vector2(1, 0)
+	free_len = 0.0
+	var me := scr.me()
+	for d: Vector2 in [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1)]:
+		var l := 0.0
+		while l < 6.0 and not scr.game.world.circle_blocked(me.pos.x + d.x * (l + 0.1), me.pos.y + d.y * (l + 0.1), GameState.PLAYER_R):
+			l += 0.1
+		if l > free_len:
+			free_len = l
+			best = d
+	return best
 
 func _watch(scr: GameScreen) -> void:
 	var n := 0

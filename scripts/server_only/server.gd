@@ -19,15 +19,49 @@ var stat_t := 10.0
 var started_ms := 0
 var noauth := false
 
+const MAX_MSG := 8192          # байт: больше честный клиент не шлёт (токен в «привете» — до ~2 КБ)
+const HELLO_WAIT := 5.0        # сек. ждём «привет» от нового подключения (пока идёт проверка в Supabase — 25)
+static var _token_re: RegEx
+
+## Ведро жетонов: не больше rate событий в секунду, с запасом cap. Лишнее отбрасывается (защита от спама, С4/Н8)
+class Bucket:
+	var rate := 1.0
+	var cap := 1.0
+	var tokens := 1.0
+	var last := -1.0
+	func _init(r: float, c: float) -> void:
+		rate = r
+		cap = c
+		tokens = c
+	func take(now: float) -> bool:
+		if last >= 0.0:
+			tokens = minf(cap, tokens + maxf(0.0, now - last) * rate)
+		last = now
+		if tokens < 1.0:
+			return false
+		tokens -= 1.0
+		return true
+
 class Client:
 	var peer := 0
 	var pid := -1
 	var clock := GameState.NetClock.new()
 	var state_t := 0.0
 	var full_t := 0.0
-	var acts := 0
+	var acts := Bucket.new(10.0, 15.0)    # действия: 10 в секунду, разом до 15
+	var ins := Bucket.new(40.0, 40.0)     # пакеты движения: телефон шлёт 20 в секунду, запас на пачки после задержки
 	var hello_t := 0.0           # сколько ждём «привет» после подключения
 	var checking := false        # идёт проверка аккаунта в Supabase
+
+## Сообщение крупнее, чем бывает у честного клиента
+static func too_big(o: Dictionary) -> bool:
+	return var_to_bytes(o).size() > MAX_MSG
+
+## Токен Supabase: только символы JWT, разумная длина — до запроса в Supabase и подстановки в заголовок (Н6)
+static func valid_token(t: String) -> bool:
+	if _token_re == null:
+		_token_re = RegEx.create_from_string("[^A-Za-z0-9._-]")     # любой посторонний символ, включая перевод строки
+	return t.length() >= 20 and t.length() <= 4096 and _token_re.search(t) == null
 
 func _ready() -> void:
 	for a in OS.get_cmdline_user_args():
@@ -57,8 +91,6 @@ func _log(s: String) -> void:
 
 func _process(dt: float) -> void:
 	dt = minf(dt, 0.1)
-	for c: Client in by_peer.values():
-		c.acts = 0
 	_handle_net(dt)
 	game.update(dt)
 	for c: Client in by_peer.values():
@@ -111,13 +143,18 @@ func _handle_net(dt: float) -> void:
 	for c: Client in by_peer.values():
 		if c.pid < 0:
 			c.hello_t += dt
-			if c.hello_t > (25.0 if c.checking else 10.0):
+			if c.hello_t > (25.0 if c.checking else HELLO_WAIT):
 				Net.I.kick(c.peer)
 	while Net.I.inbox.size() > 0:
 		var o: Dictionary = Net.I.inbox.pop_front()
 		var from := int(o.get("_from", 0))
 		var t := str(o.get("t", ""))
 		var c: Client = by_peer.get(from)
+		if c != null and too_big(o):
+			_log("подключение %d: слишком большое сообщение «%s» — отключено" % [from, t.left(16)])
+			Net.I.kick(from)
+			continue
+		var now := Time.get_ticks_msec() / 1000.0
 		match t:
 			"hello":
 				if c == null or c.pid >= 0 or c.checking:
@@ -139,7 +176,7 @@ func _handle_net(dt: float) -> void:
 					c.checking = true
 					_verify(c, str(o.get("token", "")), str(o.get("legacy", "")).left(64))
 			"in":
-				if c == null or c.pid < 0:
+				if c == null or c.pid < 0 or not c.ins.take(now):
 					continue
 				var pl := game.player(c.pid)
 				if pl != null:
@@ -149,9 +186,8 @@ func _handle_net(dt: float) -> void:
 						c.clock.sample(ts, Time.get_ticks_msec())
 						GameState.push_snap(pl, ts, pl.pos, pl.face)
 			"act":
-				if c == null or c.pid < 0 or c.acts >= 30:
+				if c == null or c.pid < 0 or not c.acts.take(now):
 					continue
-				c.acts += 1
 				var a := o.duplicate()
 				a.erase("t")
 				a.erase("_from")
@@ -169,7 +205,7 @@ func _handle_net(dt: float) -> void:
 ## Проверка токена в Supabase: кто это и как зовут его персонажа. Секретные ключи серверу не нужны —
 ## запросы идут с токеном самого игрока, а правила базы отдают ему только его персонажа.
 func _verify(c: Client, token: String, legacy: String) -> void:
-	if token.length() < 20:
+	if not valid_token(token):
 		_reject(c, "Войди в аккаунт заново")
 		return
 	var u: Array = await _sb("/auth/v1/user", token)

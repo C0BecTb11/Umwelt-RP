@@ -75,7 +75,7 @@ Umwelt-RP/
 │       ├── extract_chars.gd   Инструмент: извлечение частей моделей из glTF Quaternius (запуск вне проекта)
 │       └── map_format.py      Черновик карты из Supabase (JSON) → текст maps/city.json в принятом виде
 └── .github/workflows/
-    ├── build.yml              Пуш в main → автотесты → game.pck, сервер, (APK при необходимости) → релиз «latest»
+    ├── build.yml              Пуш в main → автотесты (+ SCRIPT ERROR) → сетевой тест (сервер + 3 бота) → game.pck, сервер, (APK при необходимости) → релиз «latest»
     └── auth-test.yml          Проверка входа: сервер + бот Test_Bot через настоящий Supabase
 ```
 
@@ -93,8 +93,8 @@ Umwelt-RP/
 | `scripts/boot.gd` | `Boot` | `host()`, `port()` из Engine meta (по умолчанию 2.31.45.237:7777); `SUPABASE_URL`, `SUPABASE_KEY` (публичный publishable-ключ) |
 | `scripts/version.gd` | `Version` | `BUILD` — сверяется клиентом и сервером в «привет» |
 | `scripts/profile.gd` | `Profile` | Статические настройки: `uid`, `nick`, `low_gfx`; `load_profile()` / `save_profile()` |
-| `scripts/account.gd` | без class_name, `preload` | Supabase REST: `sign_up`, `sign_in`, `refresh`, `load_character` (id, name), `create_character(name, gender)`, `explain` (ошибки по-русски), сессия в `user://account.cfg`; `check_admin()` (RPC `is_admin`, ответ в `user://editor.cfg`), `admin_cached()` |
-| `scripts/net.gd` | `Net` (Node, `Net.I`) | `serve`, `join`, `close`, `kick`, `send` (надёжный RPC, канал 0), `send_fast` (канал 1, надёжный); входящие — в `inbox` с полем `_from` |
+| `scripts/account.gd` | без class_name, `preload` | Supabase REST: `sign_up`, `sign_in`, `refresh`, `load_character` (id, name), `create_character(name, gender)`, `explain` (ошибки по-русски), сессия в `user://account.cfg`; `check_admin()` (RPC `is_admin`, ответ в `user://editor.cfg`), `admin_cached()`; `logout()` — закрыть сессию в Supabase (вызывает проверка входа в CI) |
+| `scripts/net.gd` | `Net` (Node, `Net.I`) | `serve`, `join`, `close`, `kick`, `send` (надёжный RPC, канал 0), `send_fast` (канал 1, надёжный); входящие — в `inbox` с полем `_from`; `server_relay = false` — клиенты не получают чужих пакетов и подключений через сервер |
 | `scripts/game.gd` | `GameState` + вложенные `Player`, `NetClock` | Игровой мир: игроки (карточка `Player`: позиция, здоровье, деньги, счёт, вещи, одежда `wear`, внешность `look`), движение, драка, нокаут и возрождение, одежда, двери, время (МСК), сохранение и миграции, снимки для сети (`state_for`, `events_for`, `apply_state`, `apply_events`) |
 | `scripts/game_screen.gd` | `GameScreen` | Режимы `SOLO` (логика на телефоне) и `CLIENT` (логика на сервере, здесь — предсказание своего движения); шлёт `in`/`act`/`hello`; принимает `init`/`st`/`ev`/`bye`; проверка обновлений раз в 180 с |
 | `scripts/world.gd` | `GameWorld` | Тайлы и их типы; карта из файла: `read_map_file`, `load_map` (с проверкой, при ошибке мир не меняется), `map_data`, `map_text`, символы клеток `MAP_CHARS`; объекты `props` и круги столкновений `prop_cols` (`index_props`); проходимость (`solid`, `circle_blocked` — стены и объекты), видимость по прямой (`los`: сквозь окно видно, пуля не проходит), окна и двери, здания (`compute_buildings`) |
@@ -109,9 +109,9 @@ Umwelt-RP/
 | `scripts/mesher.gd` | `Mesher` | Треугольники, коробки, трубы, эллипсоиды с цветом вершин; альфа цвета = «вид» (стена/свечение) |
 | `scripts/saves.gd` | `Saves` | Офлайн-сохранение: временный файл → основной, резервная копия, проверка формата |
 | `scripts/demo.gd` | `Demo` | Демо-сцены (`--demo=editor` открывает редактор карты — main.gd): `inside`, `inv`, `night`, `evening`, `gear`, `outfit`, `crowd`, `knocked`, `armed`, `catalog` (своё время, `real_clock = false`) |
-| `scripts/server_only/server.gd` | без class_name, `load()` | Ключи `--port`, `--max`, `--noauth`; клиенты (`Client`), «привет» и проверка сборки, вход через Supabase (`_verify` → `_enter`), выдача снимков (`_send_to`), автосохранение раз в 15 с (`AUTOSAVE`) с проверкой «читается обратно», `.bak` и часовые копии `SAVE_HOURLY`, загрузка по цепочке (`_load_world`), лог статистики |
-| `scripts/server_only/audit_test.gd` | без class_name | 73 проверки (стены, сеть, некорректные пакеты, рассылка событий всем, скорость по выносливости, сохранения и их миграции, карта из файла, объекты, редактор карты, одежда, внешность, время и др.), выход с кодом 1 при ошибке |
-| `scripts/server_only/nettest.gd` | без class_name | Клиент-бот: подключается, ходит, считает «откаты» и видимых игроков; переменная `NT_HOST` — внешний сервер |
+| `scripts/server_only/server.gd` | без class_name, `load()` | Ключи `--port`, `--max`, `--noauth`; клиенты (`Client`), «привет» и проверка сборки, вход через Supabase (`_verify` → `_enter`), выдача снимков (`_send_to`), автосохранение раз в 15 с (`AUTOSAVE`) с проверкой «читается обратно», `.bak` и часовые копии `SAVE_HOURLY`, загрузка по цепочке (`_load_world`), лог статистики; защита: `Bucket` (действия 10/с, пакеты движения 40/с), `too_big` (> 8 КБ — отключение), `valid_token`, `HELLO_WAIT` 5 с |
+| `scripts/server_only/audit_test.gd` | без class_name | 78 проверок (стены, сеть, некорректные пакеты, рассылка событий всем, скорость по выносливости, защита сервера, сохранения и их миграции, карта из файла, объекты, редактор карты, одежда, внешность, время и др.), выход с кодом 1 при ошибке |
+| `scripts/server_only/nettest.gd` | без class_name | Клиент-бот: подключается, ходит, считает «откаты» и видимых игроков; переменная `NT_HOST` — внешний сервер; идёт в самое свободное направление и проверяет пройденный путь и замирания; запускается в CI (`build.yml`, «Network test») |
 | `scripts/server_only/authtest.gd` | без class_name | Вход ботом через `account.gd` и проверка, что сервер впустил |
 | `shaders/world.gdshader` | шейдер | Параметры `player_pos`, `cam_back`, `cut`, `night` (задаёт `world_view.gd`) |
 
@@ -222,7 +222,7 @@ CI:     godot --headless -- --audit | --nettest=… | --authtest=…  (main.gd �
 | `hello` | клиент → сервер | надёжный (0) | `token`, `legacy`, `uid`, `nick`, `build` |
 | `init` | сервер → клиент | 0 | `pid`, `seed`, `world` (`to_data_for`: `map` — `map_data()`: ряды клеток с дверями, объекты, точка появления; игроки, без `uids`) |
 | `in` | клиент → сервер | быстрый (1) | `ts`, `mx`/`my`, `run`, `x`/`y`, `fx`/`fy`, `fs` (ввод, позиция, взгляд, номер отката) |
-| `act` | клиент → сервер | 0 | действие игрока (не больше 30 с одного подключения за кадр сервера) |
+| `act` | клиент → сервер | 0 | действие игрока (с 0.22: не больше 10 в секунду, разом до 15; любое сообщение > 8 КБ — отключение) |
 | `st` | сервер → клиент | 1 | время и игроки рядом (`state_for`): по 10 чисел — `id, x, y, fx, fy, atk, sneak, force_seq, hp, stamina`; `sh` — выстрелы рядом |
 | `ev` | сервер → клиент | 0 | события, сообщения, данные игроков (`events_for`) |
 | `bye` | сервер → клиент | 0 | отказ или выход с причиной (`why`) |

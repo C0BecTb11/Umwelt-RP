@@ -28,6 +28,13 @@ func _save() -> void:
 func has_session() -> bool:
 	return refresh_token != ""
 
+## Закрыть сессию в Supabase (только эту) и забыть её на телефоне. Сейчас вызывает проверка входа в CI,
+## чтобы её сессии не копились в базе
+func logout() -> void:
+	if access_token != "":
+		await _req(HTTPClient.METHOD_POST, "/auth/v1/logout?scope=local", {}, access_token)
+	sign_out()
+
 func sign_out() -> void:
 	refresh_token = ""
 	access_token = ""

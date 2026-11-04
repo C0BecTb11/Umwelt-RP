@@ -45,6 +45,7 @@ func _ready() -> void:
 	test_rp_rules()
 	test_events_all()
 	test_stamina_net()
+	test_server_guards()
 	test_player_card()
 	print("\nИТОГО: %d прошло, %d ошибок" % [passes, fails])
 	get_tree().quit(1 if fails > 0 else 0)
@@ -891,6 +892,37 @@ func test_stamina_net() -> void:
 		cheat[1] < 30.0 and cheat[1] >= 0.0 and cheat[3] < 5.0 * 2.3 * 1.25 * 1.1, "выносливость %.0f, за последние 5 с %.1f клетки, откатов %d" % [cheat[1], cheat[3], cheat[2]])
 	var honest := _net_run(false, true, 40.0)
 	check("Сеть: честный бег до усталости и дальше — без откатов", honest[2] == 0, "откатов %d, выносливость %.0f" % [honest[2], honest[1]])
+
+## Защита сервера: лимиты действий и пакетов, размер сообщений, формат токена, без пересылки между клиентами
+func test_server_guards() -> void:
+	var S = load("res://scripts/server_only/server.gd")
+	var b = S.Bucket.new(10.0, 15.0)
+	var burst := 0
+	for i in 100:
+		if b.take(100.0):
+			burst += 1
+	var next := 0
+	for i in 100:
+		if b.take(101.0):
+			next += 1
+	check("Сервер: действий не больше 15 разом и 10 в секунду (остальные отбрасываются)", burst == 15 and next == 10, "разом %d, через секунду %d" % [burst, next])
+	var ins = S.Bucket.new(40.0, 40.0)
+	var honest := 0
+	for k in 200:                      # честный телефон: 20 пакетов в секунду, 10 секунд
+		if ins.take(200.0 + k * 0.05):
+			honest += 1
+	check("Сервер: честные 20 пакетов движения в секунду проходят все", honest == 200, "%d из 200" % honest)
+	var tok := "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+	var bad_tokens := ["", "short", tok + "\r\nX-Evil: 1", tok + " ", "x".repeat(5000), tok + "\t", tok + "\n"]
+	var bad_ok := 0
+	for t in bad_tokens:
+		if S.valid_token(t):
+			bad_ok += 1
+	check("Сервер: токен неверного формата не идёт в Supabase", S.valid_token(tok) and bad_ok == 0, "принято плохих %d" % bad_ok)
+	var small := {"t": "hello", "token": tok, "legacy": "a".repeat(24), "uid": "a".repeat(24), "nick": "N", "build": "21", "_from": 5}
+	var huge := {"t": "act", "a": "use", "id": "x".repeat(10000), "_from": 5}
+	check("Сервер: слишком большое сообщение распознаётся, обычное — нет", not S.too_big(small) and S.too_big(huge))
+	check("Сеть: сервер не пересылает пакеты между клиентами", (Net.I.multiplayer as SceneMultiplayer).server_relay == false)
 
 ## Карточка игрока: постоянный ID из базы, деньги и вещи остаются за ним
 func test_player_card() -> void:
