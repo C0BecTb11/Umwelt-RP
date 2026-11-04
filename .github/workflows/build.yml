@@ -117,7 +117,8 @@ jobs:
       # Настоящая сеть: сервер (без аккаунтов) + 3 бота входят, ходят, видят друг друга, без откатов и замираний
       - name: Network test
         run: |
-          XDG_DATA_HOME=$PWD/nt/srv timeout 50 ~/godot/godot --headless --path . -- --server --port=7790 --noauth > nt_server.log 2>&1 &
+          XDG_DATA_HOME=$PWD/nt/srv timeout 80 ~/godot/godot --headless --path . -- --server --port=7790 --noauth > nt_server.log 2>&1 &
+          SRV=$!
           sleep 4
           pids=""
           for i in 1 2 3; do
@@ -125,6 +126,14 @@ jobs:
             pids="$pids $!"
           done
           for p in $pids; do wait $p || true; done
+          # С4, BF-043: с одного адреса без входа — не больше 3 подключений
+          timeout 30 ~/godot/godot --headless --path . --script docs/tools/pending_probe.gd -- 7790 2>&1 | grep "держится" | tee probe_ip.log
+          grep -q "держится: 3 из 6" probe_ip.log
+          # BF-029: остановка службы — запрос файлом, сервер сохраняет мир с игроками и выходит сам с кодом 0
+          touch "$PWD/nt/srv/godot/app_userdata/Umwelt RP/stop.request"
+          wait $SRV; echo "сервер остановлен, код $?"
+          grep -a "остановка по запросу службы: мир сохранён" nt_server.log
+          python3 -c "import json,sys; o=json.load(open('nt/srv/godot/app_userdata/Umwelt RP/server_world.json')); n=len(o['p']); print('игроков в сохранённом мире:', n); sys.exit(0 if n == 3 else 1)"
           grep -ah "ИТОГ\|прошёл" nt_c*.log
           echo "--- сервер"; grep -a "^\[" nt_server.log | head -20
           if grep -aq "SCRIPT ERROR" nt_c*.log nt_server.log; then echo "ОШИБКА: SCRIPT ERROR в сетевом тесте"; exit 1; fi

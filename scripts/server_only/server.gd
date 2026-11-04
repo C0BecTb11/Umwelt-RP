@@ -6,6 +6,9 @@ extends Node
 const SAVE_PATH := "user://server_world.json"
 const SAVE_BAK := "user://server_world.bak.json"
 const SAVE_HOURLY := "user://server_world.h%02d.json"   # копия раз в час, 24 штуки по кругу (BF-028)
+## Запрос остановки (BF-029): systemd при остановке службы создаёт этот файл (ExecStop в setup.sh) и ждёт, пока
+## сервер сохранит мир и выйдет сам. Сигнал остановки Godot не ловит — без файла мир терялся бы за последние 15 с
+const STOP_FILE := "user://stop.request"
 const WORLD_SEED := 1990
 
 var game: GameState
@@ -18,9 +21,12 @@ var autosave_t := AUTOSAVE
 var stat_t := 10.0
 var started_ms := 0
 var noauth := false
+var refused_ip := 0            # отказано подключениям сверх MAX_PENDING_IP (в журнал раз в минуту)
+var stop_t := 0.0
 
 const MAX_MSG := 8192          # байт: больше честный клиент не шлёт (токен в «привете» — до ~2 КБ)
 const HELLO_WAIT := 5.0        # сек. ждём «привет» от нового подключения (пока идёт проверка в Supabase — 25)
+const MAX_PENDING_IP := 3      # подключений без входа с одного адреса: больше — сразу отключаем (С4, BF-043)
 static var _token_re: RegEx
 
 ## Ведро жетонов: не больше rate событий в секунду, с запасом cap. Лишнее отбрасывается (защита от спама, С4/Н8)
@@ -52,6 +58,16 @@ class Client:
 	var ins := Bucket.new(40.0, 40.0)     # пакеты движения: телефон шлёт 20 в секунду, запас на пачки после задержки
 	var hello_t := 0.0           # сколько ждём «привет» после подключения
 	var checking := false        # идёт проверка аккаунта в Supabase
+	var ip := ""                 # адрес подключения
+
+## Сколько подключений с адреса ip ещё не вошли в мир (ждут «привет» или проверку аккаунта).
+## Вошедших не считаем: за одним адресом может быть много честных игроков (общий Wi-Fi, мобильный оператор)
+static func pending_from(clients: Array, ip: String) -> int:
+	var n := 0
+	for c: Client in clients:
+		if c.pid < 0 and c.ip == ip and ip != "":
+			n += 1
+	return n
 
 ## Сообщение крупнее, чем бывает у честного клиента
 static func too_big(o: Dictionary) -> bool:
@@ -72,6 +88,8 @@ func _ready() -> void:
 		elif a == "--noauth":
 			noauth = true          # только для локальных тестов: вход по uid телефона без аккаунта
 	started_ms = Time.get_ticks_msec()
+	if FileAccess.file_exists(STOP_FILE):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(STOP_FILE))   # старый запрос от прошлой остановки
 	game = _load_world()
 	if game == null:
 		game = GameState.new_game(WORLD_SEED)
@@ -137,6 +155,24 @@ func _process(dt: float) -> void:
 	if stat_t <= 0.0:
 		stat_t = 60.0
 		_log("онлайн %d, кадр %.1f мс" % [_online(), Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0])
+		if refused_ip > 0:
+			_log("отклонено лишних подключений без входа с одного адреса: %d" % refused_ip)
+			refused_ip = 0
+	stop_t -= dt
+	if stop_t <= 0.0:
+		stop_t = 0.25
+		if FileAccess.file_exists(STOP_FILE):
+			_stop()
+
+## Остановка по запросу службы: всем «до встречи», мир — на диск, файл-запрос убираем, выходим сами
+func _stop() -> void:
+	for c: Client in by_peer.values():
+		Net.I.send({"t": "bye", "why": "Сервер перезапускается — зайди через минуту"}, c.peer)
+	save_world()
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(STOP_FILE))
+	_log("остановка по запросу службы: мир сохранён, онлайн был %d" % _online())
+	set_process(false)
+	get_tree().quit(0)
 
 func _online() -> int:
 	var n := 0
@@ -165,6 +201,12 @@ func _handle_net(dt: float) -> void:
 		if not by_peer.has(id):
 			var c := Client.new()
 			c.peer = id
+			c.ip = Net.I.peer_ip(id)
+			if pending_from(by_peer.values(), c.ip) >= MAX_PENDING_IP:
+				# с этого адреса уже ждут входа несколько подключений — не даём занять все места (С4)
+				refused_ip += 1
+				Net.I.kick(id)
+				continue
 			by_peer[id] = c
 	for c: Client in by_peer.values():
 		if c.pid < 0:

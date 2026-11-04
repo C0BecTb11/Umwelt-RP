@@ -132,6 +132,15 @@ func close() -> void:
 	peers.clear()
 	inbox.clear()
 
+## Сервер: IP-адрес подключения ("" — неизвестен)
+func peer_ip(id: int) -> String:
+	var mp := multiplayer.multiplayer_peer
+	if mp is ENetMultiplayerPeer:
+		var pp := (mp as ENetMultiplayerPeer).get_peer(id)
+		if pp != null:
+			return pp.get_remote_address()
+	return ""
+
 func kick(id: int) -> void:
 	if is_server and peers.has(id):
 		multiplayer.multiplayer_peer.disconnect_peer(id)

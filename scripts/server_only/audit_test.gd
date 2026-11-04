@@ -977,6 +977,15 @@ func test_server_guards() -> void:
 		if b.take(101.0):
 			next += 1
 	check("Сервер: действий не больше 15 разом и 10 в секунду (остальные отбрасываются)", burst == 15 and next == 10, "разом %d, через секунду %d" % [burst, next])
+	# С4, BF-043: подключения без входа с одного адреса
+	var cl := []
+	for spec in [["1.2.3.4", -1], ["1.2.3.4", -1], ["1.2.3.4", 5], ["5.6.7.8", -1], ["", -1]]:
+		var cc = S.Client.new()
+		cc.ip = spec[0]
+		cc.pid = spec[1]
+		cl.append(cc)
+	check("Сервер: подключения без входа считаются по адресу, вошедшие и чужие адреса — нет (BF-043)",
+		S.pending_from(cl, "1.2.3.4") == 2 and S.pending_from(cl, "5.6.7.8") == 1 and S.pending_from(cl, "") == 0 and S.MAX_PENDING_IP == 3)
 	# Н1, BF-042: персонажи «по id телефона» на сервере с аккаунтами убираются, аккаунтные — нет
 	var g := GameState.new_game(1)
 	g.players.clear()
