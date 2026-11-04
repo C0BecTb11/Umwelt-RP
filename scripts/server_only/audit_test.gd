@@ -977,6 +977,27 @@ func test_server_guards() -> void:
 		if b.take(101.0):
 			next += 1
 	check("Сервер: действий не больше 15 разом и 10 в секунду (остальные отбрасываются)", burst == 15 and next == 10, "разом %d, через секунду %d" % [burst, next])
+	# BF-045: понятные ошибки пароля (ответы Supabase Auth при проверке утёкших и коротких паролей)
+	var AA = load("res://scripts/account.gd")
+	var pwned: String = AA.explain(422, {"code": 422, "error_code": "weak_password", "msg": "Password is known to be weak and easy to guess", "weak_password": {"reasons": ["pwned"]}})
+	var short: String = AA.explain(422, {"code": 422, "error_code": "weak_password", "msg": "Password should be at least 8 characters.", "weak_password": {"reasons": ["length"]}})
+	check("Аккаунт: утёкший и короткий пароль — понятные разные сообщения (BF-045)",
+		"утёк" in pwned and "минимум 8" in short and AA.MIN_PASSWORD == 8, "%s / %s" % [pwned, short])
+	# BF-044: удалённые аккаунты — карточка уходит из мира по отпечатку id (sha256, как считает база)
+	var gd := GameState.new_game(1)
+	gd.players.clear()
+	var keep_p := gd.join_player("sb:11111111-2222-3333-4444-555555555555", "Keep_Me", 11)
+	var del_p := gd.join_player("sb:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "Del_Me", 12)
+	del_p.money = 999
+	# отпечаток из Postgres: encode(sha256(convert_to('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee','UTF8')),'hex')
+	var pg_hash := "9af645a8fef33e6d34085cc69e0937d41d8b18c67d5f10cc9ff198b137b6e76a"
+	check("Удаление аккаунта: отпечаток id в игре совпадает с отпечатком базы", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee".sha256_text() == pg_hash, pg_hash)
+	var none: Array = S.drop_deleted(gd, [])
+	var gone_d: Array = S.drop_deleted(gd, [pg_hash.to_upper(), "0".repeat(64)])
+	check("Удаление аккаунта: карточка удалённого аккаунта уходит из мира, остальные остаются (BF-044)",
+		none.is_empty() and gone_d == [12] and gd.player(12) == null and gd.player(11) == keep_p and not gd.uids.has("sb:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee") and gd.uids.has("sb:11111111-2222-3333-4444-555555555555"),
+		"удалено %s, ключи %s" % [gone_d, gd.uids.keys()])
+	check("Удаление аккаунта: удалённого нет и в сохранении мира", not JSON.stringify(gd.to_data()).contains("Del_Me"))
 	# С4, BF-043: подключения без входа с одного адреса
 	var cl := []
 	for spec in [["1.2.3.4", -1], ["1.2.3.4", -1], ["1.2.3.4", 5], ["5.6.7.8", -1], ["", -1]]:

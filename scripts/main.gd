@@ -128,6 +128,13 @@ func _start(mode: int, g: GameState) -> void:
 
 ## Выход из игры — обратно в лаунчер (или в редактор карты, если пришли оттуда / выбрали его в паузе)
 func _on_exit(_delete_save: bool) -> void:
+	if screen != null and screen.next == "account":
+		screen.queue_free()
+		screen = null
+		if Net.I != null:
+			Net.I.close()
+		_show_account("")
+		return
 	if screen != null and screen.next == "editor":
 		var p := screen.me()
 		var f := p.pos if p != null and screen.demo == "editor" else Vector2(-1, -1)
@@ -284,7 +291,7 @@ func _show_login(err: String, register := false) -> void:
 	var mail := _field("Почта", false, LineEdit.KEYBOARD_TYPE_EMAIL_ADDRESS)
 	mail.text = acc.email
 	col.add_child(mail)
-	var pw := _field("Пароль (минимум 6 символов)" if register else "Пароль", true, LineEdit.KEYBOARD_TYPE_PASSWORD)
+	var pw := _field("Пароль (минимум %d символов)" % AccountApi.MIN_PASSWORD if register else "Пароль", true, LineEdit.KEYBOARD_TYPE_PASSWORD)
 	col.add_child(pw)
 	var go := _fbtn("Создать аккаунт" if register else "Войти", Color(0.18, 0.42, 0.23), func(): pass)
 	col.add_child(go)
@@ -294,8 +301,9 @@ func _show_login(err: String, register := false) -> void:
 	col.add_child(_fbtn("Назад", Color(0.2, 0.2, 0.24), _back_to_launcher))
 	go.pressed.connect(func():
 		var m := mail.text.strip_edges()
-		if m == "" or pw.text.length() < 6:
-			form_status.text = "Введи почту и пароль (минимум 6 символов)"
+		# при входе старый короткий пароль (до 8 символов) ещё действует — длину требуем только при регистрации
+		if m == "" or pw.text == "" or (register and pw.text.length() < AccountApi.MIN_PASSWORD):
+			form_status.text = "Введи почту и пароль (минимум %d символов)" % AccountApi.MIN_PASSWORD if register else "Введи почту и пароль"
 			return
 		go.disabled = true
 		form_status.text = "Подожди…"
@@ -314,6 +322,54 @@ func _show_login(err: String, register := false) -> void:
 			else:
 				form_status.text = acc.last_error
 				go.disabled = false)
+
+## Аккаунт (из меню игры): вернуться в игру, выйти из аккаунта на этом телефоне, удалить аккаунт
+func _show_account(err: String) -> void:
+	var col := _form_base("Аккаунт")
+	col.add_child(_flabel("%s\nПерсонаж: %s" % [acc.email, acc.char_name if acc.char_name != "" else "—"], 14, Color(0.8, 0.8, 0.8)))
+	col.add_child(_fbtn("Вернуться в игру", Color(0.18, 0.42, 0.23), _play_server))
+	col.add_child(_fbtn("Выйти из аккаунта на этом телефоне", Color(0.23, 0.29, 0.35), func():
+		_form_wait("Выход…")
+		await acc.logout()
+		_back_to_launcher()))
+	col.add_child(_fbtn("Удалить аккаунт…", Color(0.42, 0.18, 0.18), _show_delete_account))
+	col.add_child(form_status)
+	form_status.text = err
+	col.add_child(_fbtn("В меню", Color(0.2, 0.2, 0.24), _back_to_launcher))
+
+## Удаление аккаунта навсегда — только после слова «УДАЛИТЬ»
+func _show_delete_account() -> void:
+	var col := _form_base("Удаление аккаунта")
+	var info := _flabel("Навсегда удалятся: аккаунт (%s), персонаж %s со всеми деньгами, вещами и одеждой. Вернуть нельзя. Чтобы подтвердить, напиши слово УДАЛИТЬ." % [acc.email, acc.char_name if acc.char_name != "" else ""], 13, Color(0.9, 0.75, 0.75))
+	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	info.custom_minimum_size = Vector2(360, 0)
+	col.add_child(info)
+	var word := _field("УДАЛИТЬ", false, LineEdit.KEYBOARD_TYPE_DEFAULT)
+	col.add_child(word)
+	var go := _fbtn("Удалить навсегда", Color(0.55, 0.14, 0.14), func(): pass)
+	col.add_child(go)
+	col.add_child(form_status)
+	col.add_child(_fbtn("Отмена", Color(0.2, 0.2, 0.24), func(): _show_account("")))
+	go.pressed.connect(func():
+		if word.text.strip_edges().to_upper() != "УДАЛИТЬ":
+			form_status.text = "Напиши слово УДАЛИТЬ, чтобы подтвердить"
+			return
+		go.disabled = true
+		form_status.text = "Удаляю…"
+		if not await acc.refresh():
+			form_status.text = acc.last_error if acc.last_error != "" else "Не получилось войти — попробуй ещё раз"
+			go.disabled = false
+			return
+		if await acc.delete_account():
+			var done := _form_base("Аккаунт удалён")
+			var t := _flabel("Аккаунт и персонаж удалены. Из мира игры персонаж исчезнет в течение нескольких минут.", 14, Color(0.8, 0.8, 0.8))
+			t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			t.custom_minimum_size = Vector2(360, 0)
+			done.add_child(t)
+			done.add_child(_fbtn("В меню", Color(0.2, 0.2, 0.24), _back_to_launcher))
+		else:
+			form_status.text = acc.last_error
+			go.disabled = false)
 
 func _show_create_character(err: String) -> void:
 	var col := _form_base("Создание персонажа")

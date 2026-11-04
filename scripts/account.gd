@@ -4,6 +4,7 @@ extends Node
 ## Пароль уходит только в Supabase по HTTPS; игровому серверу передаётся токен доступа.
 
 const CFG := "user://account.cfg"
+const MIN_PASSWORD := 8        # как в настройках Supabase (Auth → минимальная длина пароля); раньше было 6
 
 var email := ""
 var refresh_token := ""
@@ -83,6 +84,12 @@ static func explain(code: int, d) -> String:
 	if d is Dictionary:
 		msg = str(d.get("msg", d.get("message", d.get("error_description", d.get("error", ""))))).to_lower()
 		var ec := str(d.get("error_code", d.get("code", "")))
+		if ec == "weak_password":
+			var why = d.get("weak_password", {})
+			var reasons = why.get("reasons", []) if why is Dictionary else []
+			if reasons is Array and reasons.has("pwned"):
+				return "Этот пароль уже утёк в интернет (есть в базах взломов) — придумай другой"
+			return "Пароль слишком простой: минимум %d символов" % MIN_PASSWORD
 		if ec == "23505":
 			return "Это имя уже занято"
 		if ec == "23514":
@@ -93,8 +100,10 @@ static func explain(code: int, d) -> String:
 		return "Эта почта уже зарегистрирована — нажми «Войти»"
 	if "email not confirmed" in msg:
 		return "Почта не подтверждена — открой письмо и нажми ссылку"
-	if "password" in msg and ("6" in msg or "short" in msg or "weak" in msg):
-		return "Пароль слишком простой: минимум 6 символов"
+	if "password" in msg and ("pwned" in msg or "leaked" in msg or "breach" in msg):
+		return "Этот пароль уже утёк в интернет (есть в базах взломов) — придумай другой"
+	if "password" in msg and ("characters" in msg or "short" in msg or "weak" in msg):
+		return "Пароль слишком простой: минимум %d символов" % MIN_PASSWORD
 	if "email" in msg and ("invalid" in msg or "format" in msg):
 		return "Похоже, почта написана с ошибкой"
 	if "rate limit" in msg or code == 429:
@@ -131,6 +140,19 @@ func refresh() -> bool:
 	last_error = explain(r[0], r[1])
 	if r[0] >= 400 and r[0] < 500:
 		sign_out()          # сессия больше не действует — войти заново
+	return false
+
+# ---------- удаление аккаунта (BF-044) ----------
+## Удалить свой аккаунт навсегда: база удаляет пользователя, персонажа, права и черновики (функция delete_my_account),
+## игровой сервер убирает карточку персонажа из мира по журналу удалений. Перед вызовом нужен свежий токен
+func delete_account() -> bool:
+	var r: Array = await _req(HTTPClient.METHOD_POST, "/rest/v1/rpc/delete_my_account", {}, access_token)
+	if r[0] >= 200 and r[0] < 300:
+		sign_out()
+		email = ""
+		_save()
+		return true
+	last_error = explain(r[0], r[1])
 	return false
 
 # ---------- редактор карты ----------

@@ -21,11 +21,13 @@ var autosave_t := AUTOSAVE
 var stat_t := 10.0
 var started_ms := 0
 var noauth := false
+var deleted_t := 5.0           # проверка удалённых аккаунтов (BF-044): через 5 с после запуска, потом раз в DELETED_EVERY
 var refused_ip := 0            # отказано подключениям сверх MAX_PENDING_IP (в журнал раз в минуту)
 var stop_t := 0.0
 
 const MAX_MSG := 8192          # байт: больше честный клиент не шлёт (токен в «привете» — до ~2 КБ)
 const HELLO_WAIT := 5.0        # сек. ждём «привет» от нового подключения (пока идёт проверка в Supabase — 25)
+const DELETED_EVERY := 300.0   # сек.: как часто сервер спрашивает Supabase об удалённых аккаунтах (BF-044)
 const MAX_PENDING_IP := 3      # подключений без входа с одного адреса: больше — сразу отключаем (С4, BF-043)
 static var _token_re: RegEx
 
@@ -130,6 +132,55 @@ static func drop_phone_chars(g: GameState) -> int:
 			n += 1
 	return n
 
+## Удалённые аккаунты (BF-044): у кого sha256(id) есть в hashes — ключ «sb:id» и карточка персонажа убираются из
+## мира. Возвращает id удалённых карточек (сервер отключает тех, кто в игре)
+static func drop_deleted(g: GameState, hashes: Array) -> Array:
+	var wanted := {}
+	for h in hashes:
+		wanted[str(h).to_lower()] = true
+	var gone := []
+	for k in g.uids.keys():
+		var key := str(k)
+		if key.begins_with("sb:") and wanted.has(key.substr(3).sha256_text()):
+			gone.append(int(g.uids[k]))
+			g.uids.erase(k)
+	for i in range(g.players.size() - 1, -1, -1):
+		if gone.has(g.players[i].id):
+			g.players.remove_at(i)
+	return gone
+
+## Спросить Supabase об удалённых аккаунтах (publishable-ключ, функция deleted_accounts: только отпечатки id)
+func _sync_deleted() -> void:
+	var h := HTTPRequest.new()
+	h.timeout = 15.0
+	add_child(h)
+	var err := h.request(Boot.SUPABASE_URL + "/rest/v1/rpc/deleted_accounts", PackedStringArray(["apikey: " + Boot.SUPABASE_KEY, "Content-Type: application/json"]), HTTPClient.METHOD_POST, "{}")
+	if err != OK:
+		h.queue_free()
+		return
+	var r: Array = await h.request_completed
+	h.queue_free()
+	if r[0] != HTTPRequest.RESULT_SUCCESS or int(r[1]) != 200:
+		return
+	var d = JSON.parse_string((r[3] as PackedByteArray).get_string_from_utf8())
+	if not (d is Array):
+		return
+	var hashes := []
+	for e in d:
+		if e is Dictionary and e.has("h"):
+			hashes.append(str(e["h"]))
+	var gone := drop_deleted(game, hashes)
+	if gone.is_empty():
+		return
+	# кто сейчас в игре под удалённым аккаунтом (например, со второго телефона) — отключаем
+	for c: Client in by_peer.values():
+		if gone.has(c.pid):
+			Net.I.send({"t": "bye", "why": "Аккаунт удалён"}, c.peer)
+			Net.I.kick(c.peer)
+			c.pid = -1
+	_log("удалены персонажи удалённых аккаунтов: %d" % gone.size())
+	save_world()
+
 func _log(s: String) -> void:
 	print("[%s] %s" % [Time.get_datetime_string_from_system(), s])
 
@@ -158,6 +209,11 @@ func _process(dt: float) -> void:
 		if refused_ip > 0:
 			_log("отклонено лишних подключений без входа с одного адреса: %d" % refused_ip)
 			refused_ip = 0
+	if not noauth:
+		deleted_t -= dt
+		if deleted_t <= 0.0:
+			deleted_t = DELETED_EVERY
+			_sync_deleted()
 	stop_t -= dt
 	if stop_t <= 0.0:
 		stop_t = 0.25
