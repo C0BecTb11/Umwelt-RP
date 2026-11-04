@@ -191,7 +191,7 @@ func render_time() -> float:
 var auth_token := ""          # токен аккаунта Supabase; сервер сам узнаёт по нему, кто это
 
 func _on_connected() -> void:
-	Net.I.send({"t": "hello", "token": auth_token, "legacy": Profile.uid, "uid": Profile.uid, "nick": Profile.nick, "build": Version.BUILD})
+	Net.I.send({"t": "hello", "token": auth_token, "uid": Profile.uid, "nick": Profile.nick, "build": Version.BUILD})
 
 var _hello_sent := false
 

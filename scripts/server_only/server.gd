@@ -80,11 +80,37 @@ func _ready() -> void:
 	for p in game.players:
 		p.connected = false
 		p.remote = true
+	if not noauth:
+		var gone := drop_phone_chars(game)
+		if gone > 0:
+			_log("удалены персонажи без аккаунта (по id телефона): %d" % gone)
 	if not Net.I.serve(port, max_clients, Net.server_tls("user://dtls")):
 		_log("ОШИБКА: " + Net.I.status)
 		get_tree().quit(1)
 		return
 	_log("сборка %s, порт %d, мест %d, персонажей в базе %d, канал зашифрован (DTLS)" % [Version.BUILD, port, max_clients, game.players.size()])
+
+## Персонажи «по id телефона» (до аккаунтов) на сервере с аккаунтами больше не нужны: перенос к аккаунту по id
+## телефона убран (закрытый аудит, Н1; BF-042), а войти в них можно только в --noauth. Убираем их ключи и карточки,
+## если на карточку не ссылается ни один аккаунт. Возвращает, сколько карточек удалено
+static func drop_phone_chars(g: GameState) -> int:
+	var keep := {}
+	for k in g.uids:
+		if str(k).begins_with("sb:"):
+			keep[int(g.uids[k])] = true
+	var drop := {}
+	for k in g.uids.keys():
+		if not str(k).begins_with("sb:"):
+			if not keep.has(int(g.uids[k])):
+				drop[int(g.uids[k])] = true
+			g.uids.erase(k)
+	var n := 0
+	for i in range(g.players.size() - 1, -1, -1):
+		var p: GameState.Player = g.players[i]
+		if drop.has(p.id) and not p.connected:
+			g.players.remove_at(i)
+			n += 1
+	return n
 
 func _log(s: String) -> void:
 	print("[%s] %s" % [Time.get_datetime_string_from_system(), s])
@@ -171,10 +197,10 @@ func _handle_net(dt: float) -> void:
 					if uid.length() < 8:
 						Net.I.kick(from)
 						continue
-					_enter(c, uid, str(o.get("nick", "Гражданин")).strip_edges().left(24), "")
+					_enter(c, uid, str(o.get("nick", "Гражданин")).strip_edges().left(24))
 				else:
 					c.checking = true
-					_verify(c, str(o.get("token", "")), str(o.get("legacy", "")).left(64))
+					_verify(c, str(o.get("token", "")))
 			"in":
 				if c == null or c.pid < 0 or not c.ins.take(now):
 					continue
@@ -204,7 +230,7 @@ func _handle_net(dt: float) -> void:
 # ================== вход по аккаунту ==================
 ## Проверка токена в Supabase: кто это и как зовут его персонажа. Секретные ключи серверу не нужны —
 ## запросы идут с токеном самого игрока, а правила базы отдают ему только его персонажа.
-func _verify(c: Client, token: String, legacy: String) -> void:
+func _verify(c: Client, token: String) -> void:
 	if not valid_token(token):
 		_reject(c, "Войди в аккаунт заново")
 		return
@@ -221,7 +247,7 @@ func _verify(c: Client, token: String, legacy: String) -> void:
 	if ch[0] != 200 or not (ch[1] is Array) or ch[1].is_empty():
 		_reject(c, "У аккаунта нет персонажа — создай его при входе")
 		return
-	_enter(c, "sb:" + user_id, str(ch[1][0]["name"]), legacy, int(ch[1][0].get("id", -1)), str(ch[1][0].get("gender", "m")))
+	_enter(c, "sb:" + user_id, str(ch[1][0]["name"]), int(ch[1][0].get("id", -1)), str(ch[1][0].get("gender", "m")))
 
 func _reject(c: Client, why: String) -> void:
 	c.checking = false
@@ -242,15 +268,12 @@ func _sb(path: String, token: String) -> Array:
 		return [0, null]
 	return [int(r[1]), JSON.parse_string((r[3] as PackedByteArray).get_string_from_utf8())]
 
-## Впустить в мир. key — ключ аккаунта; legacy — старый uid телефона (персонаж до аккаунтов переходит к аккаунту)
-func _enter(c: Client, key: String, pname: String, legacy: String, static_id: int = -1, gender: String = "") -> void:
+## Впустить в мир. key — ключ аккаунта («sb:…»; в --noauth — uid телефона).
+## Перенос персонажа «по id телефона» к аккаунту убран (Н1, BF-042): чужой id телефона больше ничего не даёт
+func _enter(c: Client, key: String, pname: String, static_id: int = -1, gender: String = "") -> void:
 	c.checking = false
 	if not by_peer.has(c.peer):
 		return
-	if legacy != "" and not game.uids.has(key) and game.uids.has(legacy):
-		game.uids[key] = game.uids[legacy]
-		game.uids.erase(legacy)
-		_log("персонаж телефона %s… привязан к аккаунту %s" % [legacy.left(6), pname])
 	# тот же аккаунт уже в игре с другого подключения — старое закрываем
 	for other: Client in by_peer.values():
 		if other != c and other.pid >= 0 and game.uids.get(key, -1) == other.pid:

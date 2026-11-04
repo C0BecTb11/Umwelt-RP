@@ -977,6 +977,23 @@ func test_server_guards() -> void:
 		if b.take(101.0):
 			next += 1
 	check("Сервер: действий не больше 15 разом и 10 в секунду (остальные отбрасываются)", burst == 15 and next == 10, "разом %d, через секунду %d" % [burst, next])
+	# Н1, BF-042: персонажи «по id телефона» на сервере с аккаунтами убираются, аккаунтные — нет
+	var g := GameState.new_game(1)
+	g.players.clear()
+	var acc := g.join_player("sb:user-1", "Acc_One", 7)
+	var ph1 := g.join_player("phone-aaaaaaaaaaaa", "Гражданин-AAAA")
+	var ph2 := g.join_player("phone-bbbbbbbbbbbb", "Гражданин-BBBB")
+	var shared := g.join_player("phone-cccccccccccc", "Shared_One")
+	g.uids["sb:user-2"] = shared.id         # на эту карточку ссылается и аккаунт — её не трогаем
+	for p: GameState.Player in [acc, ph1, ph2, shared]:
+		g.leave_player(p.id)
+	var gone: int = S.drop_phone_chars(g)
+	var left_keys := g.uids.keys()
+	left_keys.sort()
+	check("Сервер: персонажи по id телефона убираются, аккаунтные и общие с аккаунтом остаются (Н1)",
+		gone == 2 and g.player(ph1.id) == null and g.player(ph2.id) == null and g.player(acc.id) == acc and g.player(shared.id) == shared
+		and left_keys == ["sb:user-1", "sb:user-2"], "удалено %d, ключи %s" % [gone, left_keys])
+	check("Сервер: повторная уборка ничего не удаляет", S.drop_phone_chars(g) == 0)
 	var ins = S.Bucket.new(40.0, 40.0)
 	var honest := 0
 	for k in 200:                      # честный телефон: 20 пакетов в секунду, 10 секунд
@@ -990,7 +1007,7 @@ func test_server_guards() -> void:
 		if S.valid_token(t):
 			bad_ok += 1
 	check("Сервер: токен неверного формата не идёт в Supabase", S.valid_token(tok) and bad_ok == 0, "принято плохих %d" % bad_ok)
-	var small := {"t": "hello", "token": tok, "legacy": "a".repeat(24), "uid": "a".repeat(24), "nick": "N", "build": "21", "_from": 5}
+	var small := {"t": "hello", "token": tok, "uid": "a".repeat(24), "nick": "N", "build": "21", "_from": 5}
 	var huge := {"t": "act", "a": "use", "id": "x".repeat(10000), "_from": 5}
 	check("Сервер: слишком большое сообщение распознаётся, обычное — нет", not S.too_big(small) and S.too_big(huge))
 	check("Сеть: сервер не пересылает пакеты между клиентами", (Net.I.multiplayer as SceneMultiplayer).server_relay == false)
