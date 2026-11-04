@@ -46,6 +46,7 @@ func _ready() -> void:
 	test_events_all()
 	test_stamina_net()
 	test_server_guards()
+	test_dtls()
 	test_player_card()
 	print("\nИТОГО: %d прошло, %d ошибок" % [passes, fails])
 	get_tree().quit(1 if fails > 0 else 0)
@@ -923,6 +924,48 @@ func test_server_guards() -> void:
 	var huge := {"t": "act", "a": "use", "id": "x".repeat(10000), "_from": 5}
 	check("Сервер: слишком большое сообщение распознаётся, обычное — нет", not S.too_big(small) and S.too_big(huge))
 	check("Сеть: сервер не пересылает пакеты между клиентами", (Net.I.multiplayer as SceneMultiplayer).server_relay == false)
+
+## Шифрование канала (BF-038): ключ сервера создаётся один раз и потом тот же; шифрованный клиент подключается
+## и передаёт данные, нешифрованный — не подключается
+func test_dtls() -> void:
+	var dir := "user://audit_dtls"
+	for f in ["dtls.key", "dtls.crt"]:
+		if FileAccess.file_exists(dir.path_join(f)):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(dir.path_join(f)))
+	var t1 := Net.server_tls(dir)
+	var c1 := FileAccess.get_file_as_string(dir.path_join("dtls.crt"))
+	var t2 := Net.server_tls(dir)
+	var c2 := FileAccess.get_file_as_string(dir.path_join("dtls.crt"))
+	check("Сеть: ключ шифрования сервера создаётся один раз и потом не меняется", t1 != null and t2 != null and c1 != "" and c1 == c2)
+	var srv := ENetMultiplayerPeer.new()
+	srv.create_server(7893, 4, 2)
+	srv.host.dtls_server_setup(t2)
+	var enc := ENetMultiplayerPeer.new()
+	enc.create_client("127.0.0.1", 7893, 2)
+	enc.host.dtls_client_setup(Net.TLS_NAME, Net.client_tls())
+	var plain := ENetMultiplayerPeer.new()
+	plain.create_client("127.0.0.1", 7893, 2)
+	var got := ""
+	var sent := false
+	for i in 300:
+		srv.poll()
+		enc.poll()
+		plain.poll()
+		if not sent and enc.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED:
+			enc.set_target_peer(1)
+			enc.put_packet("проверка".to_utf8_buffer())
+			sent = true
+		while srv.get_available_packet_count() > 0:
+			got = srv.get_packet().get_string_from_utf8()
+		if got != "" and i > 150:
+			break
+		OS.delay_msec(10)
+	var plain_ok := plain.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED
+	check("Сеть: зашифрованный клиент подключается и передаёт данные, без шифрования — не подключается",
+		got == "проверка" and not plain_ok, "получено «%s», нешифрованный подключён: %s" % [got, plain_ok])
+	plain.close()
+	enc.close()
+	srv.close()
 
 ## Карточка игрока: постоянный ID из базы, деньги и вещи остаются за ним
 func test_player_card() -> void:

@@ -80,11 +80,11 @@ func _ready() -> void:
 	for p in game.players:
 		p.connected = false
 		p.remote = true
-	if not Net.I.serve(port, max_clients):
+	if not Net.I.serve(port, max_clients, Net.server_tls("user://dtls")):
 		_log("ОШИБКА: " + Net.I.status)
 		get_tree().quit(1)
 		return
-	_log("сборка %s, порт %d, мест %d, персонажей в базе %d" % [Version.BUILD, port, max_clients, game.players.size()])
+	_log("сборка %s, порт %d, мест %d, персонажей в базе %d, канал зашифрован (DTLS)" % [Version.BUILD, port, max_clients, game.players.size()])
 
 func _log(s: String) -> void:
 	print("[%s] %s" % [Time.get_datetime_string_from_system(), s])

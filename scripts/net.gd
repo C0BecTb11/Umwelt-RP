@@ -9,6 +9,10 @@ extends Node
 ##   проверено замерами в Zomboid, поэтому для позиций тоже надёжный, но отдельный канал.
 
 const DEFAULT_PORT := 7777
+## Шифрование канала (DTLS, BF-038): сервер — своим ключом, созданным при первом запуске; телефон шифрует,
+## но сертификат сервера не сверяет (передать его телефонам пока нечем — см. руководство, раздел 8).
+## Защищает от подслушивания (токен, деньги, вещи в пакетах), не от подмены сервера посередине.
+const TLS_NAME := "umwelt-rp"
 
 static var I: Net
 
@@ -37,12 +41,20 @@ func _ready() -> void:
 	(multiplayer as SceneMultiplayer).server_relay = false
 
 # ================== запуск ==================
-func serve(port: int, max_c: int) -> bool:
+func serve(port: int, max_c: int, tls: TLSOptions) -> bool:
 	close()
+	if tls == null:
+		status = "Нет ключа шифрования — сервер без шифрования не запускается"
+		return false
 	var p := ENetMultiplayerPeer.new()
 	var err := p.create_server(port, max_c, 2)
 	if err != OK:
 		status = "Порт %d занят или недоступен (%d)" % [port, err]
+		return false
+	err = p.host.dtls_server_setup(tls)
+	if err != OK:
+		p.close()
+		status = "Не удалось включить шифрование (%d)" % err
 		return false
 	multiplayer.multiplayer_peer = p
 	is_server = true
@@ -54,6 +66,8 @@ func join(ip: String, port: int) -> void:
 	close()
 	var p := ENetMultiplayerPeer.new()
 	var err := p.create_client(ip, port, 2)
+	if err == OK:
+		err = p.host.dtls_client_setup(TLS_NAME, client_tls())
 	if err != OK:
 		status = "Не удалось подключиться"
 		_lost()
@@ -61,6 +75,25 @@ func join(ip: String, port: int) -> void:
 	multiplayer.multiplayer_peer = p
 	is_server = false
 	status = "Подключение к %s…" % ip
+
+## Настройки шифрования телефона: сертификат сервера не сверяется (см. TLS_NAME выше)
+static func client_tls() -> TLSOptions:
+	return TLSOptions.client_unsafe()
+
+## Ключ и сертификат сервера: создаются один раз и лежат в dir (на Hetzner — папка данных сервера)
+static func server_tls(dir: String) -> TLSOptions:
+	var kp := dir.path_join("dtls.key")
+	var cp := dir.path_join("dtls.crt")
+	var key := CryptoKey.new()
+	var cert := X509Certificate.new()
+	if not (FileAccess.file_exists(kp) and FileAccess.file_exists(cp) and key.load(kp) == OK and cert.load(cp) == OK):
+		DirAccess.make_dir_recursive_absolute(dir)
+		var c := Crypto.new()
+		key = c.generate_rsa(2048)
+		cert = c.generate_self_signed_certificate(key, "CN=%s,O=Umwelt RP,C=PL" % TLS_NAME, "20260101000000", "20460101000000")
+		if key.save(kp) != OK or cert.save(cp) != OK:
+			return null
+	return TLSOptions.server(key, cert)
 
 func close() -> void:
 	if multiplayer.multiplayer_peer != null and not (multiplayer.multiplayer_peer is OfflineMultiplayerPeer):
