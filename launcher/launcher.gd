@@ -1,7 +1,7 @@
 extends Control
 ## Лаунчер — стартовый экран игры (первая сцена APK). На экране только название, версия и две кнопки.
-## В фоне: берёт манифест последней сборки с GitHub Releases (HTTPS), докачивает изменившиеся пакеты,
-## проверяет SHA-256, подключает их и запускает игру в выбранном режиме.
+## В фоне: берёт манифест последней сборки с GitHub Releases (HTTPS), проверяет его подпись (BF-039),
+## докачивает изменившиеся пакеты, проверяет SHA-256, подключает их и запускает игру в выбранном режиме.
 ##
 ## ВАЖНО: этот файл обновляется только вместе с APK. Он НЕ должен использовать классы игры
 ## (Boot, Version, Net и т.д.) — они остались бы в памяти старыми после подключения пакета.
@@ -11,6 +11,9 @@ const APK_CODE := 1                       # подставляет CI; срав�
 const UPDATE_URL := "https://github.com/C0BecTb11/Umwelt-RP/releases/download/latest/"
 const PCK_DIR := "user://pck/"
 const STATE := "user://pck/state.json"    # что скачано и проверено: имя файла → sha256, "build" → номер
+## Открытый ключ подписи обновлений (PEM в base64). Подставляет CI из ключа подписи APK; закрытый ключ есть только
+## в секретах GitHub. Манифест без верной подписи не используется: ни пакеты, ни адрес сервера, ни ссылка на APK
+const UPDATE_KEY_B64 := "@UPDATE_PUBLIC_KEY@"
 
 var ver_label: Label
 var status: Label
@@ -27,6 +30,7 @@ var cur := {}
 var total_bytes := 0
 var done_bytes := 0
 var busy := true
+var bad_sig := false
 
 func _ready() -> void:
 	_build_ui()
@@ -144,8 +148,13 @@ func _fetch(url: String) -> PackedByteArray:
 	return r[3]
 
 func _load_manifest() -> bool:
+	bad_sig = false
 	var body := await _fetch(UPDATE_URL + "manifest.json")
 	if body.is_empty():
+		return false
+	var sig := await _fetch(UPDATE_URL + "manifest.sig")
+	if not signature_ok(body, sig.get_string_from_utf8(), UPDATE_KEY_B64):
+		bad_sig = true
 		return false
 	var m = JSON.parse_string(body.get_string_from_utf8())
 	if not (m is Dictionary) or not (m.get("files") is Array):
@@ -153,12 +162,27 @@ func _load_manifest() -> bool:
 	manifest = m
 	return true
 
+## Подпись манифеста: RSA, SHA-256 (как `openssl dgst -sha256 -sign`). Ключ-заглушка — сборка не из CI, без проверки
+static func signature_ok(body: PackedByteArray, sig_b64: String, key_b64: String) -> bool:
+	if key_b64.begins_with("@"):
+		return true
+	var key := CryptoKey.new()
+	if key.load_from_string(Marshalls.base64_to_utf8(key_b64), true) != OK:
+		return false
+	var sig := Marshalls.base64_to_raw(sig_b64.strip_edges())
+	if sig.is_empty():
+		return false
+	var h := HashingContext.new()
+	h.start(HashingContext.HASH_SHA256)
+	h.update(body)
+	return Crypto.new().verify(HashingContext.HASH_SHA256, h.finish(), sig, key)
+
 func _check() -> void:
 	_set_busy(true)
 	status.text = ""
 	if not await _load_manifest():
-		# нет интернета или GitHub недоступен — играем тем, что есть
-		status.text = "Не удалось проверить обновления"
+		# нет интернета, GitHub недоступен или подпись не сошлась — играем тем, что есть
+		status.text = "Обновление не прошло проверку подлинности — запускаю версию, что уже есть" if bad_sig else "Не удалось проверить обновления"
 		_set_busy(false)
 		return
 	if APK_CODE < int(manifest.get("min_apk", 0)):

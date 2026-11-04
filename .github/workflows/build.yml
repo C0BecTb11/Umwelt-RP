@@ -61,6 +61,18 @@ jobs:
           if [ "$FP" != "$KS_SHA256" ]; then echo "ОШИБКА: ключ из секретов не тот, которым подписаны выпущенные APK"; exit 1; fi
           echo "ключ подписи на месте, отпечаток совпадает"
 
+      # Подпись обновлений (BF-039): тем же ключом подписывается manifest.json; открытая часть ключа — в лаунчер
+      - name: Update signing key
+        run: |
+          PASS=$(cat ~/keystore/pass)
+          keytool -importkeystore -srckeystore ~/keystore/release.keystore -srcstorepass "$PASS" -srcalias umwelt \
+            -destkeystore ~/keystore/k.p12 -deststoretype PKCS12 -deststorepass "$PASS" -destkeypass "$PASS" -noprompt > /dev/null
+          openssl pkcs12 -in ~/keystore/k.p12 -passin pass:"$PASS" -nocerts -nodes -out ~/keystore/key.pem 2>/dev/null
+          openssl rsa -in ~/keystore/key.pem -pubout -out ~/keystore/pub.pem 2>/dev/null
+          sed -i "s|@UPDATE_PUBLIC_KEY@|$(base64 -w0 ~/keystore/pub.pem)|" launcher/launcher.gd
+          if grep -q "@UPDATE_PUBLIC_KEY@" launcher/launcher.gd; then echo "ОШИБКА: ключ не подставлен в лаунчер"; exit 1; fi
+          echo "открытый ключ подписи обновлений подставлен в лаунчер"
+
       - name: Editor settings
         run: |
           mkdir -p ~/.config/godot
@@ -165,6 +177,13 @@ jobs:
           print(json.dumps(m, ensure_ascii=False, indent=1))
           PY
 
+      - name: Sign manifest
+        run: |
+          openssl dgst -sha256 -sign ~/keystore/key.pem -out manifest.bin build/release/manifest.json
+          base64 -w0 manifest.bin > build/release/manifest.sig
+          openssl dgst -sha256 -verify ~/keystore/pub.pem -signature manifest.bin build/release/manifest.json
+          ~/godot/godot --headless --path . --script docs/tools/verify_manifest.gd -- build/release/manifest.json build/release/manifest.sig
+
       - name: Push build log on failure
         if: failure()
         run: |
@@ -193,4 +212,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          files: build/release/manifest.json
+          files: |
+            build/release/manifest.sig
+            build/release/manifest.json

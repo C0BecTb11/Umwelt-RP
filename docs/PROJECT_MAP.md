@@ -73,9 +73,10 @@ Umwelt-RP/
 │   ├── TEST_COVERAGE.md       Покрытие автотестами: что проверяется, пробелы, ненадёжные проверки, план
 │   └── tools/
 │       ├── extract_chars.gd   Инструмент: извлечение частей моделей из glTF Quaternius (запуск вне проекта)
-│       └── map_format.py      Черновик карты из Supabase (JSON) → текст maps/city.json в принятом виде
+│       ├── map_format.py      Черновик карты из Supabase (JSON) → текст maps/city.json в принятом виде
+│       └── verify_manifest.gd Проверка в CI: код лаунчера принимает подпись манифеста сборки, подменённый — нет
 └── .github/workflows/
-    ├── build.yml              Пуш в main → автотесты (+ SCRIPT ERROR) → сетевой тест (сервер + 3 бота) → game.pck, сервер, (APK при необходимости) → релиз «latest»
+    ├── build.yml              Пуш в main → ключ подписи из секретов (+ открытый ключ обновлений в лаунчер) → автотесты (+ SCRIPT ERROR) → сетевой тест → game.pck, сервер, (APK при необходимости) → manifest.json + manifest.sig → релиз «latest»
     └── auth-test.yml          Проверка входа: сервер + бот Test_Bot через настоящий Supabase (пароль — секрет BOT_PASSWORD)
 ```
 
@@ -88,7 +89,7 @@ Umwelt-RP/
 
 | Файл | Класс / тип | Ответственность |
 |---|---|---|
-| `launcher/launcher.gd` | `extends Control`, без class_name | Манифест и пакеты с GitHub Releases, SHA-256, `load_resource_pack`, запуск `scenes/main.tscn`. Классы игры **не использует** (упоминаются только в комментарии) |
+| `launcher/launcher.gd` | `extends Control`, без class_name | Манифест и пакеты с GitHub Releases: с 0.25 подпись манифеста (`signature_ok`, ключ `UPDATE_KEY_B64` подставляет CI; без подписи манифест не используется), SHA-256 пакетов, `load_resource_pack`, запуск `scenes/main.tscn`. Классы игры **не использует** (упоминаются только в комментарии) |
 | `scripts/main.gd` | `extends Node` (сцена Main) | Создаёт `Net`; по ключам запускает сервер / автотесты / демо; иначе режим из Engine meta `start_mode`; формы входа, регистрации, создания персонажа (с выбором пола); возврат в лаунчер |
 | `scripts/boot.gd` | `Boot` | `host()`, `port()` из Engine meta (по умолчанию 2.31.45.237:7777); `SUPABASE_URL`, `SUPABASE_KEY` (публичный publishable-ключ) |
 | `scripts/version.gd` | `Version` | `BUILD` — сверяется клиентом и сервером в «привет» |
@@ -110,7 +111,7 @@ Umwelt-RP/
 | `scripts/saves.gd` | `Saves` | Офлайн-сохранение: временный файл → основной, резервная копия, проверка формата |
 | `scripts/demo.gd` | `Demo` | Демо-сцены (`--demo=editor` открывает редактор карты — main.gd): `inside`, `inv`, `night`, `evening`, `gear`, `outfit`, `crowd`, `knocked`, `armed`, `catalog` (своё время, `real_clock = false`) |
 | `scripts/server_only/server.gd` | без class_name, `load()` | Ключи `--port`, `--max`, `--noauth`; клиенты (`Client`), «привет» и проверка сборки, вход через Supabase (`_verify` → `_enter`), выдача снимков (`_send_to`), автосохранение раз в 15 с (`AUTOSAVE`) с проверкой «читается обратно», `.bak` и часовые копии `SAVE_HOURLY`, загрузка по цепочке (`_load_world`), лог статистики; защита: `Bucket` (действия 10/с, пакеты движения 40/с), `too_big` (> 8 КБ — отключение), `valid_token`, `HELLO_WAIT` 5 с |
-| `scripts/server_only/audit_test.gd` | без class_name | 80 проверок (стены, сеть, шифрование канала, некорректные пакеты, рассылка событий всем, скорость по выносливости, защита сервера, сохранения и их миграции, карта из файла, объекты, редактор карты, одежда, внешность, время и др.), выход с кодом 1 при ошибке |
+| `scripts/server_only/audit_test.gd` | без class_name | 81 проверка (стены, сеть, шифрование канала, подпись обновлений, некорректные пакеты, рассылка событий всем, скорость по выносливости, защита сервера, сохранения и их миграции, карта из файла, объекты, редактор карты, одежда, внешность, время и др.), выход с кодом 1 при ошибке |
 | `scripts/server_only/nettest.gd` | без class_name | Клиент-бот: подключается, ходит, считает «откаты» и видимых игроков; переменная `NT_HOST` — внешний сервер; идёт в самое свободное направление и проверяет пройденный путь и замирания; запускается в CI (`build.yml`, «Network test») |
 | `scripts/server_only/authtest.gd` | без class_name | Вход ботом через `account.gd` и проверка, что сервер впустил |
 | `shaders/world.gdshader` | шейдер | Параметры `player_pos`, `cam_back`, `cut`, `night` (задаёт `world_view.gd`) |

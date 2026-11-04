@@ -47,6 +47,7 @@ func _ready() -> void:
 	test_stamina_net()
 	test_server_guards()
 	test_dtls()
+	test_update_signature()
 	test_player_card()
 	print("\nИТОГО: %d прошло, %d ошибок" % [passes, fails])
 	get_tree().quit(1 if fails > 0 else 0)
@@ -966,6 +967,31 @@ func test_dtls() -> void:
 	plain.close()
 	enc.close()
 	srv.close()
+
+## Подпись обновлений (BF-039): лаунчер принимает манифест только с верной подписью
+func test_update_signature() -> void:
+	var L = load("res://launcher/launcher.gd")
+	var c := Crypto.new()
+	var key := c.generate_rsa(2048)
+	var other := c.generate_rsa(2048)
+	var pub := Marshalls.utf8_to_base64(key.save_to_string(true))
+	var body := '{"build":"99","files":[],"server":{"host":"2.31.45.237","port":7777}}'.to_utf8_buffer()
+	var h := HashingContext.new()
+	h.start(HashingContext.HASH_SHA256)
+	h.update(body)
+	var sig := Marshalls.raw_to_base64(c.sign(HashingContext.HASH_SHA256, h.finish(), key))
+	h.start(HashingContext.HASH_SHA256)
+	h.update(body)
+	var foreign := Marshalls.raw_to_base64(c.sign(HashingContext.HASH_SHA256, h.finish(), other))
+	var evil := '{"build":"99","files":[],"server":{"host":"6.6.6.6","port":7777}}'.to_utf8_buffer()
+	var good_ok: bool = L.signature_ok(body, sig, pub)
+	var evil_ok: bool = L.signature_ok(evil, sig, pub)
+	var foreign_ok: bool = L.signature_ok(body, foreign, pub)
+	var none_ok: bool = L.signature_ok(body, "", pub)
+	var junk_ok: bool = L.signature_ok(body, "не подпись", pub)
+	check("Обновления: лаунчер принимает манифест с верной подписью и отклоняет подменённый, чужой ключ, без подписи",
+		good_ok and not evil_ok and not foreign_ok and not none_ok and not junk_ok,
+		"верный %s, подменённый адрес сервера %s, чужой ключ %s, без подписи %s, мусор %s" % [good_ok, evil_ok, foreign_ok, none_ok, junk_ok])
 
 ## Карточка игрока: постоянный ID из базы, деньги и вещи остаются за ним
 func test_player_card() -> void:
