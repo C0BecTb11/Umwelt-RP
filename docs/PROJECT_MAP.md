@@ -110,7 +110,7 @@ Umwelt-RP/
 | `scripts/saves.gd` | `Saves` | Офлайн-сохранение: временный файл → основной, резервная копия, проверка формата |
 | `scripts/demo.gd` | `Demo` | Демо-сцены (`--demo=editor` открывает редактор карты — main.gd): `inside`, `inv`, `night`, `evening`, `gear`, `outfit`, `crowd`, `knocked`, `armed`, `catalog` (своё время, `real_clock = false`) |
 | `scripts/server_only/server.gd` | без class_name, `load()` | Ключи `--port`, `--max`, `--noauth`; клиенты (`Client`), «привет» и проверка сборки, вход через Supabase (`_verify` → `_enter`), выдача снимков (`_send_to`), автосохранение раз в 15 с (`AUTOSAVE`) с проверкой «читается обратно», `.bak` и часовые копии `SAVE_HOURLY`, загрузка по цепочке (`_load_world`), лог статистики |
-| `scripts/server_only/audit_test.gd` | без class_name | 69 проверок (стены, сеть, некорректные пакеты, сохранения и их миграции, карта из файла, объекты, редактор карты, одежда, внешность, время и др.), выход с кодом 1 при ошибке |
+| `scripts/server_only/audit_test.gd` | без class_name | 73 проверки (стены, сеть, некорректные пакеты, рассылка событий всем, скорость по выносливости, сохранения и их миграции, карта из файла, объекты, редактор карты, одежда, внешность, время и др.), выход с кодом 1 при ошибке |
 | `scripts/server_only/nettest.gd` | без class_name | Клиент-бот: подключается, ходит, считает «откаты» и видимых игроков; переменная `NT_HOST` — внешний сервер |
 | `scripts/server_only/authtest.gd` | без class_name | Вход ботом через `account.gd` и проверка, что сервер впустил |
 | `shaders/world.gdshader` | шейдер | Параметры `player_pos`, `cam_back`, `cut`, `night` (задаёт `world_view.gd`) |
@@ -223,7 +223,7 @@ CI:     godot --headless -- --audit | --nettest=… | --authtest=…  (main.gd �
 | `init` | сервер → клиент | 0 | `pid`, `seed`, `world` (`to_data_for`: `map` — `map_data()`: ряды клеток с дверями, объекты, точка появления; игроки, без `uids`) |
 | `in` | клиент → сервер | быстрый (1) | `ts`, `mx`/`my`, `run`, `x`/`y`, `fx`/`fy`, `fs` (ввод, позиция, взгляд, номер отката) |
 | `act` | клиент → сервер | 0 | действие игрока (не больше 30 с одного подключения за кадр сервера) |
-| `st` | сервер → клиент | 1 | время и игроки рядом (`state_for`): по 10 чисел — `id, x, y, fx, fy, atk, sneak, force_seq, hp, stamina` |
+| `st` | сервер → клиент | 1 | время и игроки рядом (`state_for`): по 10 чисел — `id, x, y, fx, fy, atk, sneak, force_seq, hp, stamina`; `sh` — выстрелы рядом |
 | `ev` | сервер → клиент | 0 | события, сообщения, данные игроков (`events_for`) |
 | `bye` | сервер → клиент | 0 | отказ или выход с причиной (`why`) |
 | `disconnect` | Net → свой inbox | — | разрыв соединения (создаёт `net.gd`) |

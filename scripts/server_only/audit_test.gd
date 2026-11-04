@@ -43,6 +43,8 @@ func _ready() -> void:
 	test_clock()
 	test_old_world()
 	test_rp_rules()
+	test_events_all()
+	test_stamina_net()
 	test_player_card()
 	print("\nИТОГО: %d прошло, %d ошибок" % [passes, fails])
 	get_tree().quit(1 if fails > 0 else 0)
@@ -814,6 +816,81 @@ func test_rp_rules() -> void:
 	for k in int(GameState.RESPAWN_TIME / 0.1) + 5:
 		g.update(0.1)
 	check("Нокаут: через время игрок очнулся у больницы с вещами", not b.dead and b.hp > 0.0 and b.pos.distance_to(g.spawn) < 3.0, "без сознания %s, позиция %s" % [b.dead, b.pos])
+
+## Двери и эффекты — всем, кто рядом; выстрелы и эффекты — только тем, кто рядом (BF-027, утечка позиций)
+func test_events_all() -> void:
+	var g := GameState.new_game(1)
+	g.players.clear()
+	var a := g.join_player("uid-ev-aaaa", "A")
+	var b := g.join_player("uid-ev-bbbb", "B")
+	var far := g.join_player("uid-ev-far0", "F")
+	var door := _find_opening(g, W.DOOR)
+	var di := g.world.idx(door.x, door.y)
+	a.pos = g.unstick(Vector2(door.x + 0.5, door.y - 1.0), GameState.PLAYER_R)
+	b.pos = g.unstick(a.pos + Vector2(1.0, -0.5), GameState.PLAYER_R)
+	var corner := Vector2(4.5, 4.5) if Vector2(door).distance_to(Vector2(4, 4)) > Vector2(door).distance_to(Vector2(95, 95)) else Vector2(95.5, 95.5)
+	far.pos = g.unstick(corner, GameState.PLAYER_R)
+	g.actions.append([a.id, {"a": "interact", "c": di}])
+	g.update(0.016)
+	var got := 0
+	for p: GameState.Player in [a, b, far]:
+		var ev := g.events_for(p.id, false)
+		for e in ev.get("tc", []):
+			if int(e[0]) == di:
+				got += 1
+	check("Сеть: открытую дверь видят все игроки, а не один (BF-027)", g.world.t_at(di) == W.DOOR_OPEN and got == 3, "получили %d из 3" % got)
+	g.world.dirty_tiles.clear()
+	g.add_fx(4, a.pos.x, a.pos.y, a.id)
+	g.shots.append([a.pos.x, a.pos.y, a.pos.x + 3.0, a.pos.y, 0.08])
+	var near_fx := g.events_for(a.id, false).has("fx") and g.events_for(b.id, false).has("fx")
+	var far_fx := g.events_for(far.id, false).has("fx")
+	var near_sh := g.state_for(b.id).has("sh")
+	var far_sh := g.state_for(far.id).has("sh")
+	check("Сеть: эффекты и выстрелы получают те, кто рядом, и только они", near_fx and near_sh and not far_fx and not far_sh,
+		"рядом: эффект %s, выстрел %s; далеко (%.0f клеток): эффект %s, выстрел %s" % [near_fx, near_sh, far.pos.distance_to(a.pos), far_fx, far_sh])
+
+## Скорость по сети зависит от выносливости; бег тратит выносливость по пройденному пути, а не по словам клиента
+func _net_run(lie: bool, honest_client: bool, seconds: float) -> Array:
+	var g := GameState.new_game(1)
+	g.players.clear()
+	var f := g.join_player("uid-run-%s%s" % [lie, honest_client], "R")
+	f.pos = Vector2(2.5, 1.5)       # ряд 1 — асфальт через всю карту
+	g.push_player(f, f.pos)
+	var rb := 0
+	var moved := 0.0
+	var moved_last := 0.0          # за последние 5 секунд — когда выносливость уже кончилась
+	var dir := 1.0
+	var steps := int(seconds / 0.05)
+	for k in steps:
+		f.last_in_ms = Time.get_ticks_msec() - 50
+		# честный телефон бежит со скоростью, которую ему разрешает его выносливость (её присылает сервер)
+		var sp := 3.9
+		if honest_client:
+			sp = 3.9 if f.stamina > 1.0 else 2.3
+			if f.stamina < 10.0:
+				sp *= 0.8
+		var np := f.pos + Vector2(sp * 0.05 * dir, 0)
+		if np.x > 97.0 or np.x < 2.0:
+			dir = -dir
+			np = f.pos
+		var fs := f.force_seq
+		var old := f.pos
+		g.remote_input(f, {"mx": 0.0 if lie else dir, "my": 0.0, "run": not lie, "fs": f.force_seq, "fx": dir, "fy": 0.0, "x": np.x, "y": np.y})
+		if f.force_seq != fs:
+			rb += 1
+		moved += f.pos.distance_to(old)
+		if k >= steps - 100:
+			moved_last += f.pos.distance_to(old)
+		g.update(0.05)
+	return [moved, f.stamina, rb, moved_last]
+
+func test_stamina_net() -> void:
+	var cheat := _net_run(true, false, 20.0)
+	# без выносливости разрешён шаг (2.3 × 0.8 при усталости) с запасом 1.25 — не больше ~2.9 клетки/с
+	check("Сеть: «стою», а сам бегу — выносливость тратится, без неё скорость не выше шага (последние 5 с: %.1f клетки)" % cheat[3],
+		cheat[1] < 30.0 and cheat[1] >= 0.0 and cheat[3] < 5.0 * 2.3 * 1.25 * 1.1, "выносливость %.0f, за последние 5 с %.1f клетки, откатов %d" % [cheat[1], cheat[3], cheat[2]])
+	var honest := _net_run(false, true, 40.0)
+	check("Сеть: честный бег до усталости и дальше — без откатов", honest[2] == 0, "откатов %d, выносливость %.0f" % [honest[2], honest[1]])
 
 ## Карточка игрока: постоянный ID из базы, деньги и вещи остаются за ним
 func test_player_card() -> void:

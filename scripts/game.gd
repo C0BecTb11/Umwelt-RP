@@ -39,6 +39,11 @@ class Player:
 	var force_seq := 0         # хост сдвинул игрока сам — клиент должен принять позицию
 	var move_budget := 1.0     # сколько клеток друг может пройти до следующего пакета
 	var last_in_ms := 0
+	# бег по сети считается по пройденному пути за полсекунды, а не по словам клиента (С2); не сохраняется
+	var win_d := 0.0
+	var win_t := 0.0
+	var net_running := false
+	var net_mag := 0.0
 	var atk_seq := 0           # номер удара: по нему второй телефон запускает анимацию ровно один раз
 	var atk_kind := 0          # 0 — оружие/кулак, 1 — добивание ногой
 	var respawn_t := 0.0       # без сознания: через сколько секунд очнётся в больнице
@@ -414,16 +419,25 @@ func _update_player(p: Player, dt: float) -> void:
 	var running := false
 	var mag := 0.0
 	if p.remote:
-		# позицию прислал телефон друга; здесь только последствия движения
-		mag = p.move.length()
-		running = move_speed(p, mag)[1] if mag > 0.1 else false
+		# позицию прислал телефон друга; бежит ли он — решаем по пройденному пути за полсекунды:
+		# флагам «бегу/стою» из пакета не верим, иначе бег не тратит выносливость
+		move_speed(p, p.move.length())          # только присед для анимации
+		p.win_t += dt
+		if p.win_t >= 0.5:
+			var v := p.win_d / p.win_t
+			p.net_running = v > 2.3 * 1.1
+			p.net_mag = 1.0 if v > 0.3 else 0.0
+			p.win_d = 0.0
+			p.win_t = 0.0
+		mag = p.net_mag
+		running = p.net_running
 	else:
 		var r := move_player(p, dt, true)
 		running = r[0]
 		mag = r[1]
 	if mag > 0.1:
 		if running:
-			p.stamina -= dt * 12.0
+			p.stamina = maxf(0.0, p.stamina - dt * 12.0)
 		if p.ta_act != null:
 			p.ta_act = null
 			msg(p.id, "Прервано")
@@ -460,7 +474,7 @@ func remote_input(p: Player, o: Dictionary) -> void:
 	var now := Time.get_ticks_msec()
 	var dt_in := 0.1 if p.last_in_ms == 0 else clampf((now - p.last_in_ms) / 1000.0, 0.0, 1.0)
 	p.last_in_ms = now
-	p.move_budget = minf(p.move_budget + dt_in * 3.9 * 1.25, 2.5)
+	p.move_budget = minf(p.move_budget + dt_in * max_speed(p) * 1.25, 2.5)
 	if int(o.get("fs", -1)) != p.force_seq:
 		return    # друг ещё не получил наш принудительный сдвиг
 	var np := Vector2(nx, ny)
@@ -472,7 +486,18 @@ func remote_input(p: Player, o: Dictionary) -> void:
 		push_player(p, p.pos)       # подделка или рассинхрон — вернуть друга туда, где он был
 		return
 	p.move_budget -= d
+	p.win_d += d
 	p.pos = np
+
+## Самая большая скорость, которую персонаж может себе позволить сейчас (как move_speed с бегом):
+## без выносливости — шаг, усталость и перегруз замедляют. По ней сервер даёт запас хода (С2)
+func max_speed(p: Player) -> float:
+	var sp := 3.9 if p.stamina > 1.0 else 2.3
+	if p.weight() > p.max_weight():
+		sp *= 0.6
+	if p.stamina < 10.0:
+		sp *= 0.8
+	return sp
 
 ## Можно ли пройти от a до b, не проходя сквозь стены и закрытые двери.
 ## Телефон двигает игрока по осям (сначала X, потом Y, кадр за кадром), поэтому у угла дома его путь — «лесенка»,
@@ -967,8 +992,13 @@ func state_for(pid: int) -> Dictionary:
 			continue
 		ps.append_array([p.id, p.pos.x, p.pos.y, p.face.x, p.face.y, float(p.atk_seq * 2 + p.atk_kind), 1.0 if p.sneaking else 0.0, p.force_seq, p.hp if p.id == pid else 0.0, p.stamina if p.id == pid else 0.0])
 	var o := {"t": "st", "time": time, "ts": Time.get_ticks_msec(), "p": ps}
-	if shots.size() > 0:
-		o["sh"] = shots.duplicate(true)
+	# выстрелы — только те, что рядом (начало или конец в радиусе видимости)
+	var sh := []
+	for s in shots:
+		if (absf(s[0] - c.x) <= VIEW_R and absf(s[1] - c.y) <= VIEW_R) or (absf(s[2] - c.x) <= VIEW_R and absf(s[3] - c.y) <= VIEW_R):
+			sh.append(s.duplicate())
+	if sh.size() > 0:
+		o["sh"] = sh
 	return o
 
 ## Редкий надёжный снимок: изменения мира, полные данные игроков, сообщения, эффекты
@@ -984,15 +1014,21 @@ func events_for(pid: int, full_players: bool) -> Dictionary:
 			elif p.connected and absf(p.pos.x - c.x) <= VIEW_R and absf(p.pos.y - c.y) <= VIEW_R:
 				ps.append(player_public(p))        # другим — только внешность
 		o["p"] = ps
-	if fx_net.size() > 0:
-		o["fx"] = fx_net.duplicate(true)
-		fx_net.clear()
+	# общие списки здесь НЕ очищаются: функцию вызывают для каждого игрока по очереди, а очищает их
+	# сервер после рассылки всем (BF-027). Эффекты — только тем, кто рядом
+	var cme := player(pid)
+	var cc: Vector2 = cme.pos if cme != null else spawn
+	var fxs := []
+	for f in fx_net:
+		if absf(f[1] - cc.x) <= VIEW_R and absf(f[2] - cc.y) <= VIEW_R:
+			fxs.append(f.duplicate())
+	if fxs.size() > 0:
+		o["fx"] = fxs
 	if world.dirty_tiles.size() > 0:
 		var a := []
 		for i in world.dirty_tiles:
 			a.append([i, world.t_at(i)])
 		o["tc"] = a
-		world.dirty_tiles.clear()
 	var m := pop_messages(pid)
 	if m.size() > 0:
 		o["m"] = m
