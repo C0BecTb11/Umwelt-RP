@@ -15,11 +15,16 @@ func check(name: String, ok: bool, details: String = "") -> void:
 		fails += 1
 		print("ОШИБКА  ", name, "  —  ", details)
 
+const SEED := 20261104     # случайные маршруты в тестах — одни и те же при каждом запуске
+
 func _ready() -> void:
+	seed(SEED)
+	print("зерно случайности тестов: %d" % SEED)
 	test_walls()
 	test_corner()
 	test_stuck_escape()
 	test_remote_teleport()
+	test_bad_input()
 	test_remote_wall()
 	test_remote_actions()
 	test_saves()
@@ -137,6 +142,53 @@ func test_remote_teleport() -> void:
 		g.remote_input(f, o)
 	check("Сеть: игрок не может телепортироваться (10 пакетов по 3.9 клетки)", f.pos.distance_to(start) < 3.0, "сдвинулся на %.1f клеток мгновенно" % f.pos.distance_to(start))
 
+## Некорректные числа и типы в пакете движения: сервер их отбрасывает, мир и сохранение остаются целыми (BF-028)
+func test_bad_input() -> void:
+	var g := _game()
+	var f := g.join_player("bad-input", "Друг")
+	var spot := _open_spot(g)
+	var bads := [NAN, INF, -INF, 1e30, -1e30, "12", null, [1.0], {}]
+	var broken := 0
+	var jumped := 0
+	var cases := 0
+	for k in ["x", "y", "mx", "my", "fx", "fy"]:
+		for v in bads:
+			cases += 1
+			g.push_player(f, spot)
+			f.last_in_ms = Time.get_ticks_msec() - 50
+			f.move_budget = 2.5
+			var o := {"mx": 0.0, "my": 0.0, "run": false, "fs": f.force_seq, "fx": 1.0, "fy": 0.0, "x": spot.x + 0.1, "y": spot.y}
+			o[k] = v
+			g.remote_input(f, o)
+			if not (is_finite(f.pos.x) and is_finite(f.pos.y) and is_finite(f.face.x) and is_finite(f.face.y) and is_finite(f.move.x) and is_finite(f.move.y)):
+				broken += 1
+			# следующий пакет с дальней точкой не должен пройти, что бы ни было до него
+			f.last_in_ms = Time.get_ticks_msec() - 50
+			g.remote_input(f, {"mx": 0.0, "my": 0.0, "run": false, "fs": f.force_seq, "fx": 1.0, "fy": 0.0, "x": spot.x + 30.0, "y": spot.y})
+			if is_finite(f.pos.x) and f.pos.distance_to(spot) > 3.0:
+				jumped += 1
+	check("Сеть: некорректные числа в пакете движения отбрасываются (%d случаев)" % cases, broken == 0 and jumped == 0,
+		"испорчено %d, прыжков после этого %d" % [broken, jumped])
+	f.last_in_ms = Time.get_ticks_msec() - 50
+	g.remote_input(f, {"mx": NAN, "my": 0.0, "run": false, "fs": f.force_seq, "fx": NAN, "fy": 0.0, "x": NAN, "y": NAN})
+	g.actions.append([f.id, {"a": "interact", "c": NAN}])
+	g.actions.append([f.id, {"a": "interact", "c": INF}])
+	g.update(0.016)
+	var back = JSON.parse_string(JSON.stringify(g.to_data()))
+	check("Сохранение: после плохих пакетов мир сохраняется и читается обратно", back is Dictionary and GameState.valid_save(back))
+	# даже если позиция всё же испортилась — нечитаемый мир не записывается поверх рабочего файла
+	Saves.delete()
+	Saves.save(g)
+	var good := GameState.save_text(g.to_data())
+	var keep := f.pos
+	f.pos = Vector2(NAN, NAN)
+	var bad_text := GameState.save_text(g.to_data())
+	Saves.save(g)
+	f.pos = keep
+	var loaded := Saves.load_game()
+	check("Сохранение: испорченный мир не затирает рабочий файл", good != "" and bad_text == "" and loaded != null and loaded.player(f.id) != null and loaded.player(f.id).pos.is_finite())
+	Saves.delete()
+
 func test_remote_wall() -> void:
 	var g := _game()
 	var wc := _find_wall(g)
@@ -214,7 +266,12 @@ func test_saves() -> void:
 	var d := g.to_data()
 	var g2 := GameState.new(0)
 	g2.load_data(JSON.parse_string(JSON.stringify(d)))
-	check("Сохранение: мир и игроки восстанавливаются", g2.players.size() == g.players.size() and g2.world.tiles == g.world.tiles)
+	var same := g2.players.size() == g.players.size()
+	for p: GameState.Player in g.players:
+		var q := g2.player(p.id)
+		if q == null or JSON.stringify(g2.player_data(q)) != JSON.stringify(g.player_data(p)):
+			same = false
+	check("Сохранение: мир и игроки восстанавливаются (все поля карточки)", same and g2.world.tiles == g.world.tiles)
 	var partial := d.duplicate(true)
 	partial.erase("time")
 	var g3 := GameState.new(0)
@@ -230,8 +287,8 @@ func test_saves() -> void:
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	f.store_string("{\"v\": 2, \"time\": 5, \"tiles\": \"AAAA\", \"p\": [")   # обрезанный файл
 	f.close()
-	var loaded := Saves.load_game()
-	check("Сохранение: повреждённый файл не роняет игру", loaded == null or loaded is GameState)
+	var broken := Saves.load_game()
+	check("Сохранение: повреждённый файл без резервной копии не загружается и не роняет игру", broken == null)
 	Saves.save(g)
 	Saves.save(g)
 	f = FileAccess.open(path, FileAccess.WRITE)

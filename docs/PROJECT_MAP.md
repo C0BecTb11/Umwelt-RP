@@ -109,8 +109,8 @@ Umwelt-RP/
 | `scripts/mesher.gd` | `Mesher` | Треугольники, коробки, трубы, эллипсоиды с цветом вершин; альфа цвета = «вид» (стена/свечение) |
 | `scripts/saves.gd` | `Saves` | Офлайн-сохранение: временный файл → основной, резервная копия, проверка формата |
 | `scripts/demo.gd` | `Demo` | Демо-сцены (`--demo=editor` открывает редактор карты — main.gd): `inside`, `inv`, `night`, `evening`, `gear`, `outfit`, `crowd`, `knocked`, `armed`, `catalog` (своё время, `real_clock = false`) |
-| `scripts/server_only/server.gd` | без class_name, `load()` | Ключи `--port`, `--max`, `--noauth`; клиенты (`Client`), «привет» и проверка сборки, вход через Supabase (`_verify` → `_enter`), выдача снимков (`_send_to`), автосохранение раз в 60 с, лог статистики |
-| `scripts/server_only/audit_test.gd` | без class_name | 66 проверок (стены, сеть, сохранения и их миграции, карта из файла, объекты, редактор карты, одежда, внешность, время и др.), выход с кодом 1 при ошибке |
+| `scripts/server_only/server.gd` | без class_name, `load()` | Ключи `--port`, `--max`, `--noauth`; клиенты (`Client`), «привет» и проверка сборки, вход через Supabase (`_verify` → `_enter`), выдача снимков (`_send_to`), автосохранение раз в 15 с (`AUTOSAVE`) с проверкой «читается обратно», `.bak` и часовые копии `SAVE_HOURLY`, загрузка по цепочке (`_load_world`), лог статистики |
+| `scripts/server_only/audit_test.gd` | без class_name | 69 проверок (стены, сеть, некорректные пакеты, сохранения и их миграции, карта из файла, объекты, редактор карты, одежда, внешность, время и др.), выход с кодом 1 при ошибке |
 | `scripts/server_only/nettest.gd` | без class_name | Клиент-бот: подключается, ходит, считает «откаты» и видимых игроков; переменная `NT_HOST` — внешний сервер |
 | `scripts/server_only/authtest.gd` | без class_name | Вход ботом через `account.gd` и проверка, что сервер впустил |
 | `shaders/world.gdshader` | шейдер | Параметры `player_pos`, `cam_back`, `cut`, `night` (задаёт `world_view.gd`) |
@@ -173,7 +173,7 @@ Umwelt-RP/
 | `user://editor.cfg` (может ли аккаунт отправлять карты) | account (`check_admin`) |
 | `user://map_draft.json` (черновик карты) | map_editor |
 | `user://save.json`, `save.bak.json` | saves (офлайн) |
-| `user://server_world.json`, `server_world.bak.json` | server (на Hetzner: `/srv/umwelt/data/godot/app_userdata/Umwelt RP/`) |
+| `user://server_world.json`, `server_world.bak.json`, `server_world.h00…h23.json` (часовые копии) | server (на Hetzner: `/srv/umwelt/data/godot/app_userdata/Umwelt RP/`) |
 
 ---
 
@@ -201,7 +201,7 @@ CI:     godot --headless -- --audit | --nettest=… | --authtest=…  (main.gd �
 
 `server.gd` держит единственный настоящий `GameState`, вызывает `update()` каждый кадр, раздаёт каждому
 свой снимок раз в 50 мс в радиусе `VIEW_R` = 40 клеток (`state_for`), события по готовности и полные данные
-игроков раз в 0.25 с (`events_for`), сохраняет мир раз в 60 с и при выходе игрока. Кто вошёл —
+игроков раз в 0.25 с (`events_for`), сохраняет мир раз в 15 с и при выходе игрока (не при остановке службы — BF-029). Кто вошёл —
 решает Supabase: токен из «привет» проверяется запросом `/auth/v1/user`, затем `characters?select=id,name,gender`.
 Ключ аккаунта в мире — `sb:<user_id>` в `GameState.uids`, ID игрока = `characters.id`.
 Карта сервера — только `maps/city.json` из его сборки; из сохранения берутся лишь состояния дверей (`load_data`).

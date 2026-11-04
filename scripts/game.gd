@@ -436,9 +436,25 @@ func _update_player(p: Player, dt: float) -> void:
 	_finish_player(p, dt, running, mag)
 
 ## Ввод с телефона друга: позиция и взгляд. Всё проверяется — подделку хост откатывает
+## Число из сетевого пакета: только int/float, иначе NAN — такой пакет отбрасывается целиком (BF-028)
+static func net_num(o: Dictionary, k: String, def: float) -> float:
+	var v = o.get(k, def)
+	if not (v is float or v is int):
+		return NAN
+	return float(v)
+
 func remote_input(p: Player, o: Dictionary) -> void:
-	p.move = Vector2(float(o.get("mx", 0.0)), float(o.get("my", 0.0))).limit_length(1.0)
-	p.run = bool(o.get("run", false))
+	var mx := net_num(o, "mx", 0.0)
+	var my := net_num(o, "my", 0.0)
+	var nx := net_num(o, "x", p.pos.x)
+	var ny := net_num(o, "y", p.pos.y)
+	var fx := net_num(o, "fx", p.face.x)
+	var fy := net_num(o, "fy", p.face.y)
+	for v in [mx, my, nx, ny, fx, fy]:
+		if not is_finite(v):
+			return    # NaN, бесконечность, строка, null — пакет целиком не принимаем
+	p.move = Vector2(mx, my).limit_length(1.0)
+	p.run = o.get("run", false) == true
 	if p.dead:
 		return
 	var now := Time.get_ticks_msec()
@@ -447,8 +463,8 @@ func remote_input(p: Player, o: Dictionary) -> void:
 	p.move_budget = minf(p.move_budget + dt_in * 3.9 * 1.25, 2.5)
 	if int(o.get("fs", -1)) != p.force_seq:
 		return    # друг ещё не получил наш принудительный сдвиг
-	var np := Vector2(float(o.get("x", p.pos.x)), float(o.get("y", p.pos.y)))
-	var fc := Vector2(float(o.get("fx", p.face.x)), float(o.get("fy", p.face.y)))
+	var np := Vector2(nx, ny)
+	var fc := Vector2(fx, fy)
 	if fc.length() > 0.01:
 		p.face = fc.normalized()
 	var d := np.distance_to(p.pos)
@@ -463,6 +479,8 @@ func remote_input(p: Player, o: Dictionary) -> void:
 ## а не прямая. Принимаем прямую или одну из двух «ступенек» (сначала X или сначала Y). Каждый путь проверяется
 ## точками через 0.05 клетки — сквозь целую клетку стены или двери так не пройти (см. BF-024).
 func _path_free(a: Vector2, b: Vector2) -> bool:
+	if not (a.is_finite() and b.is_finite()):
+		return false
 	var r := PLAYER_R - 0.05
 	if _segment_free(a, b, r):
 		return true
@@ -556,7 +574,7 @@ static func valid_action(a) -> bool:
 		"attack":
 			return true
 		"interact":
-			return a.get("c") is int or a.get("c") is float
+			return a.get("c") is int or (a.get("c") is float and is_finite(a["c"]))
 		"use", "drop", "wear":
 			return a.get("id") is String and Items.DEFS.has(a["id"])
 		"unwear":
@@ -864,6 +882,13 @@ const SAVE_VERSION := 3
 static func valid_save(o) -> bool:
 	return o is Dictionary and o.get("tiles") is String
 
+## Текст сохранения, который точно читается обратно; "" — записывать нельзя, данные испорчены (BF-028).
+## Так сервер и телефон не затирают рабочий файл и резервную копию нечитаемым.
+static func save_text(o: Dictionary) -> String:
+	var text := JSON.stringify(o)
+	var back = JSON.parse_string(text)
+	return text if valid_save(back) else ""
+
 ## Перевод старых сохранений на текущий формат. Новое поле — новая версия и шаг здесь
 static func migrate(o: Dictionary) -> Dictionary:
 	if not o.has("uids"):
@@ -919,6 +944,8 @@ func load_data(o: Dictionary) -> void:
 	for e in o.get("p", []):
 		var p := Player.new(int(e["id"]))
 		player_from(e, p)
+		if not p.pos.is_finite():
+			p.pos = unstick(spawn, PLAYER_R)      # испорченная позиция — к точке появления
 		if not is_replica and not p.dead and world.circle_blocked(p.pos.x, p.pos.y, PLAYER_R):
 			# карту поменяли, и на месте игрока теперь стена или объект — ставим рядом или к точке появления
 			var np := unstick(p.pos, PLAYER_R)

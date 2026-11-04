@@ -102,6 +102,8 @@ jobs:
           set -o pipefail
           timeout 300 ~/godot/godot --headless --path . -- --audit 2>&1 | grep -vE "JSON|json.cpp" | tee audit.log
           grep -q "ИТОГО: .* 0 ошибок" audit.log
+          # ошибка выполнения внутри теста молча обрывает его остаток — такая сборка не выпускается
+          if grep -q "SCRIPT ERROR" audit.log; then echo "ОШИБКА: в автотестах ошибка выполнения (SCRIPT ERROR)"; exit 1; fi
 
       - name: Export game pack, server, APK
         run: |

@@ -5,13 +5,16 @@ extends Node
 
 const SAVE_PATH := "user://server_world.json"
 const SAVE_BAK := "user://server_world.bak.json"
+const SAVE_HOURLY := "user://server_world.h%02d.json"   # копия раз в час, 24 штуки по кругу (BF-028)
 const WORLD_SEED := 1990
 
 var game: GameState
 var port := Net.DEFAULT_PORT
 var max_clients := 64
 var by_peer := {}            # id подключения → Client
-var autosave_t := 60.0
+const AUTOSAVE := 15.0       # сек. Остановка службы (systemctl stop при обновлении) не даёт сохраниться — теряется
+                            # не больше этого времени (BF-029)
+var autosave_t := AUTOSAVE
 var stat_t := 10.0
 var started_ms := 0
 var noauth := false
@@ -70,7 +73,7 @@ func _process(dt: float) -> void:
 			game.messages.erase(pid)
 	autosave_t -= dt
 	if autosave_t <= 0.0:
-		autosave_t = 60.0
+		autosave_t = AUTOSAVE
 		save_world()
 	stat_t -= dt
 	if stat_t <= 0.0:
@@ -141,8 +144,8 @@ func _handle_net(dt: float) -> void:
 				var pl := game.player(c.pid)
 				if pl != null:
 					game.remote_input(pl, o)
-					if o.has("ts"):
-						var ts := float(o["ts"])
+					var ts := GameState.net_num(o, "ts", NAN)
+					if is_finite(ts):
 						c.clock.sample(ts, Time.get_ticks_msec())
 						GameState.push_snap(pl, ts, pl.pos, pl.face)
 			"act":
@@ -229,7 +232,11 @@ func _enter(c: Client, key: String, pname: String, legacy: String, static_id: in
 
 # ================== сохранение мира ==================
 func save_world() -> void:
-	var text := JSON.stringify(game.to_data())
+	var text := GameState.save_text(game.to_data())
+	if text == "":
+		# мир в памяти не превращается в читаемый файл — старые файлы не трогаем, иначе потеряем и их
+		_log("ОШИБКА: мир не прошёл проверку перед записью — файл и резервная копия не перезаписаны")
+		return
 	var tmp := SAVE_PATH + ".tmp"
 	var f := FileAccess.open(tmp, FileAccess.WRITE)
 	if f == null:
@@ -240,12 +247,27 @@ func save_world() -> void:
 	if FileAccess.get_file_as_string(tmp).length() != text.length():
 		_log("ОШИБКА: запись мира оборвалась")
 		return
-	if FileAccess.file_exists(SAVE_PATH):
+	# в резервную копию — только прежний файл, который сам читается (испорченный копией не становится)
+	if FileAccess.file_exists(SAVE_PATH) and GameState.valid_save(JSON.parse_string(FileAccess.get_file_as_string(SAVE_PATH))):
 		DirAccess.copy_absolute(ProjectSettings.globalize_path(SAVE_PATH), ProjectSettings.globalize_path(SAVE_BAK))
 	DirAccess.rename_absolute(ProjectSettings.globalize_path(tmp), ProjectSettings.globalize_path(SAVE_PATH))
+	# раз в час — отдельная копия на этот час суток: можно вернуться на несколько часов назад
+	var hp := SAVE_HOURLY % int(Time.get_datetime_dict_from_system()["hour"])
+	if not FileAccess.file_exists(hp) or Time.get_unix_time_from_system() - FileAccess.get_modified_time(hp) > 3000:
+		DirAccess.copy_absolute(ProjectSettings.globalize_path(SAVE_PATH), ProjectSettings.globalize_path(hp))
 
+## Мир: основной файл, резервная копия, затем часовые копии от свежей к старой
 func _load_world() -> GameState:
-	for path in [SAVE_PATH, SAVE_BAK]:
+	var hourly := []
+	for h in 24:
+		var hp := SAVE_HOURLY % h
+		if FileAccess.file_exists(hp):
+			hourly.append([FileAccess.get_modified_time(hp), hp])
+	hourly.sort_custom(func(a, b): return a[0] > b[0])
+	var paths := [SAVE_PATH, SAVE_BAK]
+	for e in hourly:
+		paths.append(e[1])
+	for path in paths:
 		if not FileAccess.file_exists(path):
 			continue
 		var d = JSON.parse_string(FileAccess.get_file_as_string(path))

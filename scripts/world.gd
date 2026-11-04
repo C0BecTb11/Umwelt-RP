@@ -79,6 +79,8 @@ func opaque(x: int, y: int) -> bool:
 	return tt == WALL or tt == DOOR or (is_furniture(tt) and tt != COUNTER)
 
 func circle_blocked(cx: float, cy: float, r: float) -> bool:
+	if not (is_finite(cx) and is_finite(cy)):
+		return true          # нечисловая точка — «занято»: иначе все сравнения ниже ложны и пропускают (BF-028)
 	var x0 := floori(cx - r)
 	var x1 := floori(cx + r)
 	var y0 := floori(cy - r)

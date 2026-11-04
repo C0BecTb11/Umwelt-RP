@@ -11,7 +11,9 @@ static func exists() -> bool:
 	return FileAccess.file_exists(PATH) or FileAccess.file_exists(BACKUP)
 
 static func save(g: GameState) -> void:
-	var text := JSON.stringify(g.to_data())
+	var text := GameState.save_text(g.to_data())
+	if text == "":
+		return            # данные не читаются обратно — рабочий файл не трогаем (BF-028)
 	var tmp := PATH + ".tmp"
 	var f := FileAccess.open(tmp, FileAccess.WRITE)
 	if f == null:
