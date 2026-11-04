@@ -585,3 +585,6 @@
 - Дополнение (2026-11-04): владелец включил «Require approval for all external contributors» для запусков из
   форков (было «first-time contributors»; до изменения видно на его скриншоте, после — с его слов, отсюда
   настройка не читается).
+- Дополнение (2026-11-04): владелец удалил временный токен `perenos-sekretov` и секрет `SECRETS_PAT` (с его слов).
+  В секретах остались `ANDROID_KEYSTORE_B64`, `ANDROID_KEYSTORE_PASS`, `BOT_PASSWORD`. Разовую сборку
+  `migrate-secrets.yml` повторно запустить нельзя (нет токена) — она и не нужна.
