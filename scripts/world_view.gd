@@ -13,6 +13,12 @@ var mesher := Mesher.new()
 
 var chunk_nodes: Array = []
 var chunk_dirty := PackedByteArray()
+## Построенными держим только куски графики вокруг игрока (BF-052): на карте 500×500 весь город — ~19 млн вершин,
+## телефону не по силам. stream_r — радиус в кусках (кусок 10×10 клеток; экран — до ~17 клеток от игрока);
+## дальше stream_r + 1 — освобождаем, при возвращении строим заново. Редактор при отдалении ставит больше
+var stream_r := 4
+var built := {}                # номер куска → true, если у него сейчас есть меш
+var stream_center := Vector2i(-1, -1)
 var roof_nodes: Array = []
 var door_nodes := {}          # клетка → MeshInstance3D
 var door_angle := {}
@@ -245,20 +251,30 @@ func update(dt: float, g: GameState, me: GameState.Player, local_pid: int) -> vo
 	var pcx := clampi(floori(me.rpos.x) / WorldMesh.CHUNK, 0, wm.chunks_x - 1)
 	var pcy := clampi(floori(me.rpos.y) / WorldMesh.CHUNK, 0, wm.chunks_y - 1)
 	var order: Array = []
-	for ci in chunk_dirty.size():
-		if chunk_dirty[ci] == 1:
-			var d := maxi(absi(ci % wm.chunks_x - pcx), absi(ci / wm.chunks_x - pcy))
-			order.append([d, ci])
+	for cy in range(maxi(0, pcy - stream_r), mini(wm.chunks_y, pcy + stream_r + 1)):
+		for cx in range(maxi(0, pcx - stream_r), mini(wm.chunks_x, pcx + stream_r + 1)):
+			var ci := cy * wm.chunks_x + cx
+			if chunk_dirty[ci] == 1:
+				order.append([maxi(absi(cx - pcx), absi(cy - pcy)), ci])
 	order.sort_custom(func(a, b): return a[0] < b[0])
-	var built := 0
+	var n_built := 0
 	for o in order:
-		if o[0] > 1 and built >= 2:
+		if o[0] > 1 and n_built >= 2:
 			break
 		var ci2: int = o[1]
 		wm.build_chunk(mesher, ci2 % wm.chunks_x, ci2 / wm.chunks_x)
 		chunk_nodes[ci2].mesh = mesher.commit()
 		chunk_dirty[ci2] = 0
-		built += 1
+		built[ci2] = true
+		n_built += 1
+	# дальние куски — освобождаем, когда игрок перешёл в другой кусок
+	if Vector2i(pcx, pcy) != stream_center:
+		stream_center = Vector2i(pcx, pcy)
+		for ci3 in built.keys():
+			if maxi(absi(ci3 % wm.chunks_x - pcx), absi(ci3 / wm.chunks_x - pcy)) > stream_r + 1:
+				chunk_nodes[ci3].mesh = null
+				chunk_dirty[ci3] = 1
+				built.erase(ci3)
 	# двери
 	for k in door_angle.keys():
 		var tt := world.t_at(k)

@@ -49,6 +49,7 @@ func _ready() -> void:
 	test_grid()
 	test_pub_cache()
 	test_map_pack()
+	await test_big_map()
 	test_stamina_net()
 	test_server_guards()
 	test_dtls()
@@ -991,6 +992,62 @@ func test_map_pack() -> void:
 		err == "" and (bp[0] as PackedByteArray).size() < bp[1] / 3 and (t1 - t0) < 500000 and (t2 - t1) < 500000,
 		"ошибка «%s»; %d КБ из %d КБ; сжатие %d мс, распаковка %d мс" % [err, (bp[0] as PackedByteArray).size() / 1024, int(bp[1]) / 1024, (t1 - t0) / 1000, (t2 - t1) / 1000])
 	check("Карта при входе: испорченные данные не роняют игру", GameState.unpack_map(PackedByteArray([1, 2, 3]), 100) == null and GameState.unpack_map(PackedByteArray(), 999999999) == null)
+
+## Город 500×500 из нынешнего 100×100, уложенного 5×5 (реальная плотность домов и объектов)
+func _big_city(k: int) -> Dictionary:
+	var src: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://maps/city.json"))
+	var sw: int = src["w"]
+	var sh: int = src["h"]
+	var rows := []
+	var props := []
+	for ty in k:
+		for y in sh:
+			rows.append(str(src["rows"][y]).repeat(k))
+	for ty in k:
+		for tx in k:
+			for e in src["props"]:
+				props.append([e[0], float(e[1]) + tx * sw, float(e[2]) + ty * sh, e[3]])
+	return {"v": 1, "w": sw * k, "h": sh * k, "spawn": [sw * k / 2.0, sh * k / 2.0], "rows": rows, "props": props}
+
+## BF-052: карта 500×500 — грузится, а телефон держит построенной только округу игрока (иначе ~19 млн вершин)
+func test_big_map() -> void:
+	var md := _big_city(5)
+	var g := GameState.new_game(1)
+	var err := g.world.load_map(md)
+	check("Большая карта: 500×500 (предел MAX_SIDE) грузится", err == "" and g.world.w == 500 and GameWorld.MAX_SIDE >= 500
+		and GameWorld.PROP_CHUNK == WorldMesh.CHUNK, err)
+	g.players.clear()
+	var me := g.join_player("uid-big-xxxxxxxxxxxx", "Big_One")
+	me.pos = Vector2(15.5, 15.5)
+	me.rpos = me.pos
+	var view := WorldView.new()
+	add_child(view)
+	view.setup(g.world)
+	var built_max := 0
+	var verts_max := 0
+	for f in 120:
+		view.update(1.0 / 60.0, g, me, me.id)
+		built_max = maxi(built_max, view.built.size())
+		if f % 20 == 0:
+			await get_tree().process_frame
+	var near_ok := view.chunk_nodes[1 * view.wm.chunks_x + 1].mesh != null
+	var far_none := view.chunk_nodes[40 * view.wm.chunks_x + 40].mesh == null
+	# идём в другой конец карты: позади всё освобождается, впереди строится
+	var freed_ok := true
+	for step in 90:
+		me.pos = me.pos.move_toward(Vector2(480.5, 480.5), 8.0)
+		me.rpos = me.pos
+		for f in 6:
+			view.update(1.0 / 60.0, g, me, me.id)
+		built_max = maxi(built_max, view.built.size())
+	var start_freed := view.chunk_nodes[1 * view.wm.chunks_x + 1].mesh == null
+	var end_built := view.chunk_nodes[48 * view.wm.chunks_x + 48].mesh != null
+	var r := view.stream_r
+	check("Большая карта: построена только округа игрока — не больше %d кусков из %d (BF-052)" % [(2 * r + 3) * (2 * r + 3), view.chunk_nodes.size()],
+		near_ok and far_none and built_max <= (2 * r + 3) * (2 * r + 3), "рядом построен: %s, далеко пусто: %s, максимум построенных %d" % [near_ok, far_none, built_max])
+	check("Большая карта: ушёл в другой конец — позади освобождено, впереди построено", start_freed and end_built,
+		"старт освобождён: %s, конец построен: %s" % [start_freed, end_built])
+	view.queue_free()
 
 ## BF-046: место появления — рядом с точкой появления и не сквозь стену в соседний дом
 func test_spawn_spot() -> void:

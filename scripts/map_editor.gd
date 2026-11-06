@@ -476,6 +476,7 @@ func _process(dt: float) -> void:
 	me.pos = focus
 	me.face = Vector2.ZERO
 	view.cam_d = zoom
+	view.stream_r = clampi(ceili(zoom * 1.2 / 10.0) + 1, 4, 10)   # отдалился — держим построенным больше города
 	view.cam_x = focus.x
 	view.cam_z = focus.y
 	view.update(dt, g, me, -1)

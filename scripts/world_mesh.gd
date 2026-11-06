@@ -63,12 +63,11 @@ func build_chunk(m: Mesher, cx: int, cy: int) -> void:
 	for y in range(cy * CHUNK, mini(w.h, (cy + 1) * CHUNK)):
 		for x in range(cx * CHUNK, mini(w.w, (cx + 1) * CHUNK)):
 			_tile(m, x, y)
-	for e in w.props:
-		if int(e[1]) / CHUNK == cx and int(e[2]) / CHUNK == cy:
-			m.identity()
-			m.translate(Vector3(e[1], ground_h(w.t(int(e[1]), int(e[2]))), e[2]))
-			m.rot_y(e[3])
-			Props.build(m, e[0])
+	for e in w.props_chunk.get(Vector2i(cx, cy), []):
+		m.identity()
+		m.translate(Vector3(e[1], ground_h(w.t(int(e[1]), int(e[2]))), e[2]))
+		m.rot_y(e[3])
+		Props.build(m, e[0])
 	m.identity()
 
 func _tile(m: Mesher, x: int, y: int) -> void:

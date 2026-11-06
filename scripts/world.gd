@@ -185,7 +185,8 @@ func along_y(x: int, y: int) -> bool:
 ## Клетки хранятся строками символов: одна строка — один ряд карты, так изменения видны в истории коммитов.
 const MAP_PATH := "res://maps/city.json"
 const MAP_CHARS := ".=-wt#DdO?T!FCWSMLRcvx"   # символ = номер клетки (9 и 11 — старые, на карте недопустимы)
-const MAX_SIDE := 400
+const MAX_SIDE := 500           # клеток по стороне (1 клетка ≈ 1 м); 500×500 проверено тестом test_big_map
+const PROP_CHUNK := 10          # = WorldMesh.CHUNK: объекты разложены по кускам графики (props_chunk)
 const MAX_PROPS := 20000
 const Props = preload("res://scripts/props.gd")
 
@@ -270,9 +271,17 @@ static func map_text(d: Dictionary) -> String:
 	return out + "]}\n"
 
 ## Круги столкновений объектов разложить по клеткам (после загрузки карты и правок в редакторе)
+var props_chunk := {}          # Vector2i(кусок) → объекты в нём: кусок графики не перебирает все объекты карты (BF-052)
+
 func index_props() -> void:
 	prop_cols.clear()
+	props_chunk.clear()
 	for e in props:
+		var ck := Vector2i(int(e[1]) / PROP_CHUNK, int(e[2]) / PROP_CHUNK)
+		if props_chunk.has(ck):
+			props_chunk[ck].append(e)
+		else:
+			props_chunk[ck] = [e]
 		for c: Vector3 in Props.colliders(e):
 			for y in range(floori(c.y - c.z), floori(c.y + c.z) + 1):
 				for x in range(floori(c.x - c.z), floori(c.x + c.z) + 1):
