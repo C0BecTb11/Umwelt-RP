@@ -44,6 +44,8 @@ var undo_stack: Array = []
 var act = null                 # текущая правка: {"t": {клетка: было}, "props": копия или null, "spawn": было или null}
 var unsaved := false
 var reset_t := 0.0
+var size_t := 0.0              # окно подтверждения «Размер»
+var size_btn: Button
 var autosave_t := 30.0
 var touches := {}              # палец → позиция
 var one_id := -1
@@ -290,21 +292,52 @@ func _mark_e(e: Array) -> void:
 	if view != null:
 		view.mark_point(e[1], e[2])
 
+## Увеличить карту до nw×nh (BF-053). Нынешний город остаётся в левом верхнем углу — координаты, двери, объекты
+## и точка появления не сдвигаются (сохранения игроков остаются верными); новое место — трава. Только больше:
+## уменьшение срезало бы построенное. Отмена до этого шага больше не действует. "" — получилось, иначе причина
+func resize_map(nw: int, nh: int) -> String:
+	if nw < w.w or nh < w.h:
+		return "Уменьшать карту нельзя — пропадёт построенное"
+	if nw > GameWorld.MAX_SIDE or nh > GameWorld.MAX_SIDE:
+		return "Больше %d×%d нельзя" % [GameWorld.MAX_SIDE, GameWorld.MAX_SIDE]
+	if nw == w.w and nh == w.h:
+		return "Карта уже такого размера"
+	var md := w.map_data()
+	var rows: Array = md["rows"]
+	var out := []
+	for y in nh:
+		out.append((str(rows[y]) + ".".repeat(nw - w.w)) if y < rows.size() else ".".repeat(nw))
+	md["w"] = nw
+	md["h"] = nh
+	md["rows"] = out
+	var err := w.load_map(md)
+	if err != "":
+		return err
+	undo_stack.clear()
+	sel = -1
+	_remake_view()
+	unsaved = true
+	return ""
+
+func _remake_view() -> void:
+	if view == null:
+		return
+	view.queue_free()
+	view = WorldView.new()
+	add_child(view)
+	move_child(view, 0)
+	view.setup(w)
+	view.cam_pitch = 62.0
+	view.hide_roofs = roofs_btn == null or not roofs_btn.button_pressed
+	view.env.fog_enabled = false
+	_make_markers()
+
 ## Вернуть карту из игры (черновик пропадает)
 func reset_to_official() -> void:
 	g.load_official_map()
 	undo_stack.clear()
 	sel = -1
-	if view != null:
-		view.queue_free()
-		view = WorldView.new()
-		add_child(view)
-		move_child(view, 0)
-		view.setup(w)
-		view.cam_pitch = 62.0
-		view.hide_roofs = roofs_btn == null or not roofs_btn.button_pressed
-		view.env.fog_enabled = false
-		_make_markers()
+	_remake_view()
 	unsaved = true
 
 # ================== КАСАНИЯ ==================
@@ -467,6 +500,7 @@ func _process(dt: float) -> void:
 	if view == null:
 		return
 	reset_t = maxf(0.0, reset_t - dt)
+	size_t = maxf(0.0, size_t - dt)
 	autosave_t -= dt
 	if autosave_t <= 0.0:
 		autosave_t = 30.0
@@ -572,11 +606,13 @@ func _make_ui() -> void:
 	ui.add_child(top)
 	top.add_child(_btn("Выйти", _on_exit, Color(0.42, 0.22, 0.22)))
 	top.add_child(_btn("Отменить", _on_undo))
-	top.add_child(_btn("Повернуть вид", func(): view.cam_yaw = fposmod(view.cam_yaw + 90.0, 360.0)))
+	top.add_child(_btn("Поворот", func(): view.cam_yaw = fposmod(view.cam_yaw + 90.0, 360.0)))
 	roofs_btn = _btn("Крыши", func(): view.hide_roofs = not roofs_btn.button_pressed)
 	roofs_btn.toggle_mode = true
 	top.add_child(roofs_btn)
 	top.add_child(_btn("Из игры", _on_reset))
+	size_btn = _btn("%d×%d" % [w.w, w.h], _on_size)
+	top.add_child(size_btn)
 	status = Label.new()
 	status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -586,6 +622,7 @@ func _make_ui() -> void:
 	status.add_theme_constant_override("shadow_offset_x", 1)
 	status.add_theme_constant_override("shadow_offset_y", 1)
 	status.custom_minimum_size = Vector2(120, 0)
+	status.max_lines_visible = 3     # длинная подсказка не раздувает верхнюю строку кнопок
 	top.add_child(status)
 	top.add_child(_btn("Сохранить", _on_save, Color(0.2, 0.36, 0.24)))
 	top.add_child(_btn("Пройтись", _on_walk, Color(0.2, 0.3, 0.42)))
@@ -708,6 +745,30 @@ func _on_save() -> void:
 	save_draft()
 	_say("Черновик сохранён в телефоне")
 
+## Кнопка размера («100×100»): следующий шаг 200, 300, 400, 500 по большей стороне; двойное нажатие — подтверждение
+func _on_size() -> void:
+	var cur := maxi(w.w, w.h)
+	var nxt := 0
+	for s in [200, 300, 400, 500]:
+		if s > cur and s <= GameWorld.MAX_SIDE:
+			nxt = s
+			break
+	if nxt == 0:
+		_say("Карта уже наибольшего размера: %d×%d" % [w.w, w.h])
+		return
+	if size_t <= 0.0:
+		size_t = 3.0
+		_say("Ещё раз — станет %d×%d. Новое место справа и снизу; не отменить" % [nxt, nxt])
+		return
+	size_t = 0.0
+	var err := resize_map(nxt, nxt)
+	if err != "":
+		_say(err)
+		return
+	save_draft()
+	size_btn.text = "%d×%d" % [w.w, w.h]
+	_say("Карта %d×%d: новое место справа и снизу" % [w.w, w.h])
+
 func _on_reset() -> void:
 	if reset_t <= 0.0:
 		reset_t = 3.0
@@ -716,6 +777,8 @@ func _on_reset() -> void:
 	reset_t = 0.0
 	reset_to_official()
 	save_draft()
+	if size_btn != null:
+		size_btn.text = "%d×%d" % [w.w, w.h]
 	_say("Загружена карта из игры")
 
 func _on_exit() -> void:

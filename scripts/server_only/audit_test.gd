@@ -31,6 +31,7 @@ func _ready() -> void:
 	test_world_gen()
 	test_map()
 	test_editor()
+	test_editor_resize()
 	test_remote_door()
 	test_bullet_window()
 	test_remote_no_false_rollback()
@@ -449,6 +450,39 @@ func test_map() -> void:
 	check("Сохранение: игрока на месте новой стены переставляет на свободное место", f2 != null and not g2.world.circle_blocked(f2.pos.x, f2.pos.y, GameState.PLAYER_R), "позиция %s" % (f2.pos if f2 else Vector2.ZERO))
 
 ## Редактор карты: правки, отмена, машины в 2 клетки, объекты; результат всегда — правильная карта
+## Размер карты в редакторе (BF-053): только больше, город остаётся на месте (левый верхний угол), новое — трава
+func test_editor_resize() -> void:
+	var ed = load("res://scripts/map_editor.gd").new()
+	ed.headless = true
+	ed.use_draft = false
+	add_child(ed)
+	var w: GameWorld = ed.w
+	var ow := w.w
+	var oh := w.h
+	var old_tiles := w.tiles.duplicate()
+	var old_props := JSON.stringify(w.props)
+	var old_spawn := w.spawn
+	var no_shrink: String = ed.resize_map(ow - 10, oh)
+	var no_huge: String = ed.resize_map(GameWorld.MAX_SIDE + 1, GameWorld.MAX_SIDE + 1)
+	var err: String = ed.resize_map(300, 250)
+	var w2: GameWorld = ed.w
+	var same := true
+	for y in oh:
+		for x in ow:
+			if w2.t(x, y) != old_tiles[y * ow + x]:
+				same = false
+	var grass := w2.t(299, 249) == W.GRASS and w2.t(ow + 5, 3) == W.GRASS and w2.t(3, oh + 5) == W.GRASS
+	check("Редактор: размер карты — только больше, до %d; город на месте, новое место — трава (BF-053)" % GameWorld.MAX_SIDE,
+		no_shrink != "" and no_huge != "" and err == "" and w2.w == 300 and w2.h == 250 and same and grass
+		and JSON.stringify(w2.props) == old_props and w2.spawn == old_spawn,
+		"«%s» / «%s» / «%s», %d×%d, город на месте: %s, трава: %s" % [no_shrink, no_huge, err, w2.w, w2.h, same, grass])
+	var back := GameWorld.new()
+	check("Редактор: увеличенная карта проходит формат файла (map_text → load_map)", back.load_map(JSON.parse_string(_map_json(w2))) == "" and back.w == 300)
+	ed.queue_free()
+
+func _map_json(w: GameWorld) -> String:
+	return JSON.stringify(w.map_data())
+
 func test_editor() -> void:
 	var ed = load("res://scripts/map_editor.gd").new()
 	ed.headless = true
