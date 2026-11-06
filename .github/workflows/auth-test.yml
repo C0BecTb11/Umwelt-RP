@@ -32,7 +32,8 @@ jobs:
           BOT_PASSWORD: ${{ secrets.BOT_PASSWORD }}
         run: |
           if [ -z "$BOT_PASSWORD" ]; then echo "ОШИБКА: нет секрета BOT_PASSWORD"; exit 1; fi
-          ~/godot/godot --headless --path . --import > /dev/null 2>&1 || true
+          ~/godot/godot --headless --path . --import > import.log 2>&1 || { tail -30 import.log; exit 1; }
+          if grep -a "ERROR" import.log; then echo "ОШИБКА: импорт ресурсов не прошёл"; exit 1; fi
           XDG_DATA_HOME=$PWD/d1 timeout 60 ~/godot/godot --headless --path . -- --server --port=7795 > server.log 2>&1 &
           sleep 4
           set +e

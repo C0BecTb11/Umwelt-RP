@@ -1,0 +1,53 @@
+name: Load test
+
+# Нагрузочный тест: сервер + 50 лёгких ботов в одном процессе (scripts/server_only/loadbots.gd), 60 секунд.
+# Выпуск не останавливает — это замер. Сводка: кадр сервера, трафик, снимки и трафик на бота (руководство, раздел 5).
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'scripts/game.gd'
+      - 'scripts/world.gd'
+      - 'scripts/net.gd'
+      - 'scripts/server_only/server.gd'
+      - 'scripts/server_only/loadbots.gd'
+      - 'maps/**'
+      - '.github/workflows/load-test.yml'
+  workflow_dispatch:
+
+env:
+  GODOT_VERSION: 4.4.1
+  BOTS: 50
+  SECONDS_MEASURE: 60
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache Godot
+        id: godot-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/godot
+          key: godot-${{ env.GODOT_VERSION }}-editor-only
+      - name: Download Godot
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/godot && cd ~/godot
+          wget -q https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip
+          unzip -q Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip && mv Godot_v${GODOT_VERSION}-stable_linux.x86_64 godot && rm *.zip
+      - name: Server + bots
+        run: |
+          echo "машина: $(nproc) ядер, $(free -m | awk '/Mem:/{print $2}') МБ памяти"
+          ~/godot/godot --headless --path . --import > import.log 2>&1 || { tail -30 import.log; exit 1; }
+          XDG_DATA_HOME=$PWD/srv timeout 240 ~/godot/godot --headless --path . -- --server --port=7799 --noauth --stat=10 > server.log 2>&1 &
+          sleep 4
+          set +e
+          XDG_DATA_HOME=$PWD/bots timeout 200 ~/godot/godot --headless --path . -- --no-update --loadbots=$BOTS,7799,$SECONDS_MEASURE > bots.log 2>&1
+          code=$?
+          set -e
+          echo "--- сервер (раз в 10 с)"; grep -a "кадр\|отклонено" server.log | sed 's/^\[[^]]*\] //'
+          echo "--- боты"; grep -a "\[нагрузка\]\|SCRIPT ERROR" bots.log
+          if grep -aq "SCRIPT ERROR" bots.log server.log; then echo "ОШИБКА: SCRIPT ERROR"; exit 1; fi
+          exit $code

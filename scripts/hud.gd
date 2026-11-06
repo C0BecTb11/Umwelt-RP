@@ -317,6 +317,8 @@ func _draw() -> void:
 		var st := Net.I.status if Net.I.status != "" else "Загрузка…"
 		if screen.lost:
 			st = (Net.I.status if Net.I.status != "" else "Соединение потеряно") + " — коснись экрана"
+		if screen.retry_note != "":
+			st = screen.retry_note + " Коснись — выйти в меню"
 		_text(vr.get_center(), st, 18, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER)
 		if not screen.lost:
 			cancel_btn = Rect2(vr.get_center() + Vector2(-90, 30), Vector2(180, 46))
@@ -336,7 +338,7 @@ func _draw() -> void:
 		_draw_dead(g, me, vr)
 	if screen.lost:
 		draw_rect(vr, Color(0, 0, 0, 0.8))
-		_text(vr.get_center(), "Соединение с сервером потеряно", 20, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER)
+		_text(vr.get_center(), screen.retry_note if screen.retry_note != "" else "Соединение с сервером потеряно", 20, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER)
 		_text(vr.get_center() + Vector2(0, 30), "Коснись, чтобы выйти в меню", 14, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER)
 
 func _overlays(g: GameState, me: GameState.Player, vr: Rect2) -> void:

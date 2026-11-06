@@ -83,8 +83,13 @@ func serve(port: int, max_c: int, tls: TLSOptions) -> bool:
 	status = "Сервер слушает порт %d" % port
 	return true
 
+var last_ip := ""             # куда подключались в последний раз — для переподключения
+var last_port := 0
+
 func join(ip: String, port: int) -> void:
 	close()
+	last_ip = ip
+	last_port = port
 	var p := ENetMultiplayerPeer.new()
 	var err := p.create_client(ip, port, 2)
 	if err == OK:

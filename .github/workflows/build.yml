@@ -103,8 +103,13 @@ jobs:
           echo "min=$MIN" >> $GITHUB_OUTPUT
           echo "hash=$HASH" >> $GITHUB_OUTPUT
 
+      # Импорт ресурсов: Godot при испорченном файле пишет «ERROR: …», но выходит с кодом 0 — проверяем вывод сами
       - name: Import
-        run: ~/godot/godot --headless --path . --import 2>&1 | tail -3 || true
+        run: |
+          ~/godot/godot --headless --path . --import > import.log 2>&1 || { tail -30 import.log; echo "ОШИБКА: импорт завершился с ошибкой"; exit 1; }
+          tail -3 import.log
+          if grep -a "ERROR" import.log; then echo "ОШИБКА: импорт ресурсов не прошёл (строки выше)"; exit 1; fi
+          echo "импорт без ошибок"
 
       - name: Tests
         run: |
@@ -134,10 +139,25 @@ jobs:
           wait $SRV; echo "сервер остановлен, код $?"
           grep -a "остановка по запросу службы: мир сохранён" nt_server.log
           python3 -c "import json,sys; o=json.load(open('nt/srv/godot/app_userdata/Umwelt RP/server_world.json')); n=len(o['p']); print('игроков в сохранённом мире:', n); sys.exit(0 if n == 3 else 1)"
+          # BF-047: перезапуск сервера посреди игры — бот переподключается сам (без выхода в меню)
+          XDG_DATA_HOME=$PWD/nt/srv timeout 60 ~/godot/godot --headless --path . -- --server --port=7790 --noauth > nt_server2.log 2>&1 &
+          SRV=$!
+          sleep 4
+          XDG_DATA_HOME=$PWD/nt/c4 timeout 90 ~/godot/godot --headless --path . -- --nettest=Бот4,7790,0,reconnect > nt_c4.log 2>&1 &
+          BOT=$!
+          sleep 14
+          touch "$PWD/nt/srv/godot/app_userdata/Umwelt RP/stop.request"
+          wait $SRV || true
+          sleep 2
+          XDG_DATA_HOME=$PWD/nt/srv timeout 60 ~/godot/godot --headless --path . -- --server --port=7790 --noauth > nt_server3.log 2>&1 &
+          SRV=$!
+          wait $BOT && echo "переподключение: OK" || { grep -a "^\[Бот4" nt_c4.log; echo "ОШИБКА: бот не переподключился"; exit 1; }
+          grep -a "^\[Бот4" nt_c4.log
+          touch "$PWD/nt/srv/godot/app_userdata/Umwelt RP/stop.request"; wait $SRV || true
           grep -ah "ИТОГ\|прошёл" nt_c*.log
           echo "--- сервер"; grep -a "^\[" nt_server.log | head -20
           if grep -aq "SCRIPT ERROR" nt_c*.log nt_server.log; then echo "ОШИБКА: SCRIPT ERROR в сетевом тесте"; exit 1; fi
-          test "$(grep -al "ИТОГ: OK" nt_c*.log | wc -l)" = "3"
+          test "$(grep -al "ИТОГ: OK" nt_c1.log nt_c2.log nt_c3.log | wc -l)" = "3"
 
       # Боевой сервер предъявляет тот сертификат, что вшит в игру (иначе телефоны не подключатся, BF-038)
       - name: Server certificate

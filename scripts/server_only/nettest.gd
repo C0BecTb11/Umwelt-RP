@@ -27,9 +27,14 @@ func _ready() -> void:
 		port = int(parts[1])
 	if parts.size() > 2:
 		expect = int(parts[2])
+	reconnect = parts.size() > 3 and parts[3] == "reconnect"
 	Profile.load_profile()
 	Profile.nick = nick
 	Profile.uid = ("test-" + nick + "-0000000000").left(24)
+
+var reconnect := false         # 4-й параметр «reconnect»: после проверки ждём обрыва и переподключения (BF-047)
+var first_screen: GameScreen
+var saw_lost := false
 
 func L(s: String) -> void:
 	print("[%s %.1f] %s" % [nick, t, s])
@@ -71,8 +76,26 @@ func _process(dt: float) -> void:
 				var need := minf(free_len, 4.6) * 0.6
 				var ok := saw_max >= expect and rollbacks == 0 and not scr.lost and moved >= need and frozen <= frames * 0.05
 				L("прошёл %.2f клетки (нужно ≥ %.2f), откатов %d, видел других: %d (ожидалось %d), кадров с другими %d, из них без движения у бегущих %d" % [moved, need, rollbacks, saw_max, expect, frames, frozen])
+				if reconnect and ok:
+					L("жду обрыва связи и переподключения")
+					first_screen = scr
+					step = 4
+					t = 0.0
+					return
 				L("ИТОГ: %s" % ("OK" if ok else "ОШИБКА"))
 				get_tree().quit(0 if ok else 1)
+		4:
+			if is_instance_valid(first_screen) and first_screen.lost and not saw_lost:
+				saw_lost = true
+				L("связь потеряна (%s), %s" % [Net.I.status, first_screen.retry_note])
+			if scr != null and scr != first_screen and scr.game != null and scr.me() != null:
+				var same := scr.me().pos.distance_to(start_pos) < 30.0
+				L("переподключился сам: персонаж %d на %s" % [scr.local_pid, scr.me().pos.snapped(Vector2(0.01, 0.01))])
+				L("ИТОГ: %s" % ("OK" if saw_lost and same else "ОШИБКА"))
+				get_tree().quit(0 if saw_lost and same else 1)
+			elif t > 75.0:
+				L("ИТОГ: ОШИБКА — не переподключился за 75 с (%s)" % Net.I.status)
+				get_tree().quit(1)
 
 ## Направление, где дальше всего свободно по улице (из четырёх), чтобы бот не упёрся в стену сразу и не зашёл в дом
 func _free_dir(scr: GameScreen) -> Vector2:

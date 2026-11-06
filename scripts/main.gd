@@ -51,6 +51,12 @@ func _ready() -> void:
 			at.main = self
 			add_child(at)
 			return
+		if a.begins_with("--loadbots="):
+			var lb = load("res://scripts/server_only/loadbots.gd").new()
+			lb.role = a.substr(11)
+			lb.main = self
+			add_child(lb)
+			return
 		if a.begins_with("--nettest="):
 			var nt = load("res://scripts/server_only/nettest.gd").new()
 			nt.role = a.substr(10)
@@ -67,7 +73,54 @@ func _ready() -> void:
 	else:
 		_start_from_launcher()
 
-func _process(_dt: float) -> void:
+## Переподключение (BF-047): связь оборвалась сама — до RETRY_MAX попыток через RETRY_WAIT с, с новым токеном.
+## Персонаж всё это время на сервере (сохраняется при выходе); тот же аккаунт с нового подключения сервер впускает,
+## а старое, «повисшее», закрывает сам. Счётчик сбрасывается, когда снова вошли в мир
+const RETRY_MAX := 5
+const RETRY_WAIT := 3.0
+var retry_n := 0
+var retry_t := 0.0
+var retrying := false
+
+func _retry_tick(dt: float) -> void:
+	if screen == null or screen.mode != GameScreen.Mode.CLIENT or screen.demo != "" or retrying:
+		return
+	if not screen.lost:
+		if screen.game != null:
+			retry_n = 0
+			retry_t = RETRY_WAIT       # после обрыва — пауза, прежде чем стучаться (сервер может перезапускаться)
+		return
+	if not screen.can_retry or retry_n >= RETRY_MAX:
+		screen.retry_note = ""
+		return
+	retry_t -= dt
+	screen.retry_note = "Связь потеряна — переподключаюсь (%d из %d)…" % [retry_n + 1, RETRY_MAX]
+	if retry_t > 0.0:
+		return
+	retrying = true
+	retry_n += 1
+	var token := ""
+	if acc != null and acc.has_session():
+		if not await acc.refresh():
+			# токен не обновить (нет интернета) — попробуем ещё раз позже
+			retrying = false
+			retry_t = RETRY_WAIT
+			return
+		token = acc.access_token
+	if screen == null or not screen.lost:
+		retrying = false
+		return                       # игрок успел выйти в меню
+	screen.exited.disconnect(_on_exit)
+	screen.queue_free()
+	screen = null
+	Net.I.join(Net.I.last_ip, Net.I.last_port)
+	_start(GameScreen.Mode.CLIENT, null)
+	screen.auth_token = token
+	retry_t = RETRY_WAIT
+	retrying = false
+
+func _process(dt: float) -> void:
+	_retry_tick(dt)
 	if shot != "":
 		shot_frames += 1
 		if not is_nan(demo_yaw) and screen != null and screen.view != null:

@@ -19,6 +19,11 @@ const AUTOSAVE := 15.0       # сек. Остановка службы (systemct
                             # не больше этого времени (BF-029)
 var autosave_t := AUTOSAVE
 var stat_t := 10.0
+var stat_every := 60.0         # сек. между строками статистики в журнале (--stat=N — для нагрузочного теста)
+var stat_frames := 0           # за промежуток: кадров, сумма и худшее время кадра (с), сколько времени прошло
+var stat_sum := 0.0
+var stat_max := 0.0
+var stat_time := 0.0
 var started_ms := 0
 var noauth := false
 var deleted_t := 2.0           # проверка удалённых аккаунтов (BF-044): через 2 с после запуска, потом раз в DELETED_EVERY
@@ -88,6 +93,9 @@ func _ready() -> void:
 			port = int(a.substr(7))
 		elif a.begins_with("--max="):
 			max_clients = clampi(int(a.substr(6)), 1, 4000)
+		elif a.begins_with("--stat="):
+			stat_every = clampf(float(a.substr(7)), 1.0, 3600.0)
+			stat_t = stat_every
 		elif a == "--noauth":
 			noauth = true          # только для локальных тестов: вход по uid телефона без аккаунта
 	started_ms = Time.get_ticks_msec()
@@ -205,10 +213,19 @@ func _process(dt: float) -> void:
 	if autosave_t <= 0.0:
 		autosave_t = AUTOSAVE
 		save_world()
+	var ft := Performance.get_monitor(Performance.TIME_PROCESS)
+	stat_frames += 1
+	stat_sum += ft
+	stat_max = maxf(stat_max, ft)
+	stat_time += dt
 	stat_t -= dt
 	if stat_t <= 0.0:
-		stat_t = 60.0
-		_log("онлайн %d, кадр %.1f мс" % [_online(), Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0])
+		stat_t = stat_every
+		_log(stat_line())
+		stat_frames = 0
+		stat_sum = 0.0
+		stat_max = 0.0
+		stat_time = 0.0
 		if refused_ip > 0:
 			_log("отклонено лишних подключений без входа с одного адреса: %d" % refused_ip)
 			refused_ip = 0
@@ -222,6 +239,17 @@ func _process(dt: float) -> void:
 		stop_t = 0.25
 		if FileAccess.file_exists(STOP_FILE):
 			_stop()
+
+## Строка статистики за промежуток: онлайн, кадр (средний и худший), кадров в секунду, исходящий трафик, память
+func stat_line() -> String:
+	var sent := 0.0
+	var mp := multiplayer.multiplayer_peer
+	if mp is ENetMultiplayerPeer and (mp as ENetMultiplayerPeer).host != null:
+		sent = (mp as ENetMultiplayerPeer).host.pop_statistic(ENetConnection.HOST_TOTAL_SENT_DATA)
+	var span := maxf(stat_time, 0.001)
+	return "онлайн %d, кадр %.1f мс (худший %.1f), %d кадров/с, отправлено %.1f КБ/с, память %d МБ" % [_online(),
+		stat_sum / maxi(stat_frames, 1) * 1000.0, stat_max * 1000.0, roundi(stat_frames / span), sent / 1024.0 / span,
+		roundi(OS.get_static_memory_usage() / 1048576.0)]
 
 ## Остановка по запросу службы: всем «до встречи», мир — на диск, файл-запрос убираем, выходим сами
 func _stop() -> void:

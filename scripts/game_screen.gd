@@ -16,6 +16,10 @@ var snap_t := 0.0
 var input_t := 0.0
 var autosave_t := 60.0
 var lost := false
+var can_retry := false            # связь оборвалась сама (не «до свидания» от сервера) — main.gd переподключит
+var retry_note := ""              # что показать, пока ждём переподключения
+var last_st_ms := 0               # когда пришёл последний снимок: 6 с тишины — связь считаем потерянной
+const SILENCE_MS := 6000
 var demo := ""
 var debug_move := Vector2.ZERO   # для автотестов
 var next := ""                   # куда после выхода: "editor" — в редактор карты (main.gd)
@@ -119,6 +123,13 @@ func _process(dt: float) -> void:
 				Net.I.status = "Сервер не отвечает. Проверь интернет"
 			Net.I.close()
 			lost = true
+			can_retry = true
+	if game != null and mode == Mode.CLIENT and not lost and last_st_ms > 0 and Time.get_ticks_msec() - last_st_ms > SILENCE_MS:
+		# ENet замечает обрыв только через 5–30 с; снимки идут 20 раз в секунду — 6 с без них значит, связи нет
+		Net.I.status = "Нет связи с сервером"
+		Net.I.close()
+		lost = true
+		can_retry = true
 	if game == null:
 		hud.queue_redraw()
 		return
@@ -219,6 +230,7 @@ func _handle_net() -> void:
 				if view == null:
 					_make_view()
 			"st":
+				last_st_ms = Time.get_ticks_msec()
 				if game != null:
 					clock_sample(float(o.get("ts", 0)))
 					game.apply_state(o, local_pid)
@@ -231,5 +243,10 @@ func _handle_net() -> void:
 				Net.I.status = str(o.get("why", "Сервер закрыл соединение"))
 				Net.I.close()
 				lost = true
+				# «до свидания» с причиной не повторяем (аккаунт удалён, вход с другого устройства, нужна новая
+				# версия); перезапуск сервера — повторяем: через несколько секунд он снова примет
+				can_retry = Net.I.status.begins_with("Сервер перезапускается")
 			"disconnect":
+				if not lost:
+					can_retry = true
 				lost = true
