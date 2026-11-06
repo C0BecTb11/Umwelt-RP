@@ -46,6 +46,9 @@ func _ready() -> void:
 	test_events_all()
 	test_visibility()
 	test_spawn_spot()
+	test_grid()
+	test_pub_cache()
+	test_map_pack()
 	test_stamina_net()
 	test_server_guards()
 	test_dtls()
@@ -854,6 +857,141 @@ func test_events_all() -> void:
 	check("Сеть: эффекты и выстрелы получают те, кто рядом, и только они", near_fx and near_sh and not far_fx and not far_sh,
 		"рядом: эффект %s, выстрел %s; далеко (%.0f клеток): эффект %s, выстрел %s" % [near_fx, near_sh, far.pos.distance_to(a.pos), far_fx, far_sh])
 
+func _ids(a: Array) -> Array:
+	var r := []
+	for p in a:
+		r.append(p.id)
+	r.sort()
+	return r
+
+func _ids_st(o: Dictionary) -> Array:
+	var r := []
+	var ps: PackedFloat32Array = o["p"]
+	var i := 0
+	while i + 9 < ps.size():
+		r.append(int(ps[i]))
+		i += 10
+	r.sort()
+	return r
+
+func _ids_list(a: Array) -> Array:
+	var r := []
+	for e in a:
+		r.append(int(e["id"]))
+	r.sort()
+	return r
+
+## BF-049: сетка по районам даёт ровно тех же видимых, что и перебор всех со всеми
+func test_grid() -> void:
+	var g := GameState.new_game(1)
+	g.players.clear()
+	var w := g.world
+	var all: Array = []
+	for i in 400:
+		var p := g.join_player("uid-grid-%05d-xxxxxxxx" % i, "G%d" % i)
+		# по всей карте, гуще у точки появления; часть — в домах, часть вне сети
+		var c := g.spawn + Vector2(randf_range(-30, 30), randf_range(-30, 30)) if i % 2 == 0 else Vector2(randf_range(1, w.w - 1), randf_range(1, w.h - 1))
+		p.pos = c
+		if i % 9 == 0:
+			g.leave_player(p.id)
+		all.append(p)
+	var bad := 0
+	var checked := 0
+	var bad_msg := ""
+	for p in all:
+		if not p.connected:
+			continue
+		g.grid_on = false
+		var plain := _ids(g.visible_to(p.id))
+		var st_plain := _ids_st(g.state_for(p.id))
+		var ev_plain := _ids_list(g.events_for(p.id, true, true).get("p", []))
+		var in_plain := _ids_list(g.to_data_for(p.id)["p"])
+		g.index_players()
+		var grid := _ids(g.visible_to(p.id))
+		var st_grid := _ids_st(g.state_for(p.id))
+		var ev_grid := _ids_list(g.events_for(p.id, true, true).get("p", []))
+		var in_grid := _ids_list(g.to_data_for(p.id)["p"])
+		g.grid_on = false
+		checked += 1
+		if plain != grid or st_plain != st_grid or ev_plain != ev_grid or in_plain != in_grid:
+			bad += 1
+			if bad_msg == "":
+				bad_msg = "игрок %d: перебор %s, сетка %s" % [p.id, plain, grid]
+	check("Видимость: сетка по районам = перебор всех (400 игроков, все пакеты, BF-049)", bad == 0 and checked > 300,
+		"не совпало у %d из %d; %s" % [bad, checked, bad_msg])
+	# на краях районов: игрок ровно на границе клеток сетки и в 19.9 клетки от соседа
+	var h := GameState.new_game(1)
+	h.players.clear()
+	var a := h.join_player("uid-edge-aaaaaaaaaaaa", "EA")
+	var b := h.join_player("uid-edge-bbbbbbbbbbbb", "EB")
+	a.pos = Vector2(GameState.SEE_R * 2.0 - 0.05, 60.5)
+	b.pos = a.pos + Vector2(19.9, 0.0)
+	var vis_plain := _ids(h.visible_to(a.id))
+	h.index_players()
+	var vis_grid := _ids(h.visible_to(a.id))
+	h.grid_on = false
+	check("Видимость: на границе районов сетки сосед в 19.9 клетки виден так же", vis_plain == vis_grid,
+		"перебор %s, сетка %s (в домах: %d, %d)" % [vis_plain, vis_grid, h.building_at(a.pos), h.building_at(b.pos)])
+
+## BF-050: внешность и одежду других сервер шлёт только новым в поле зрения или изменившимся
+func test_pub_cache() -> void:
+	var g := GameState.new_game(1)
+	g.players.clear()
+	var a := g.join_player("uid-pub-aaaaaaaaaaaa", "PA")
+	var b := g.join_player("uid-pub-bbbbbbbbbbbb", "PB")
+	var c := g.join_player("uid-pub-cccccccccccc", "PC")
+	for p: GameState.Player in [a, b, c]:
+		p.pos = g.spawn + Vector2(randf_range(-1, 1), randf_range(-1, 1))
+	g.forget_sent(a.id)
+	var first := _ids_list(g.events_for(a.id, true).get("p", []))
+	var second := _ids_list(g.events_for(a.id, true).get("p", []))
+	b.wear["head"] = "hard_hat"
+	var third := _ids_list(g.events_for(a.id, true).get("p", []))
+	b.pos += Vector2(0.5, 0)      # движение — не повод слать внешность (оно идёт снимками)
+	var fourth := _ids_list(g.events_for(a.id, true).get("p", []))
+	g.forget_sent(a.id)            # вход заново — всё снова
+	var fifth := _ids_list(g.events_for(a.id, true).get("p", []))
+	check("Трафик: чужая внешность — при первом показе и при изменении, своё — всегда (BF-050)",
+		first == [a.id, b.id, c.id] and second == [a.id] and third == [a.id, b.id] and fourth == [a.id] and fifth == [a.id, b.id, c.id],
+		"1: %s, 2: %s, 3: %s, 4: %s, 5: %s" % [first, second, third, fourth, fifth])
+	# телефон: игрок, о котором в этот раз ничего не пришло, не теряет внешность
+	var r := GameState.new_game(1)
+	r.is_replica = true
+	r.players.clear()
+	r.apply_events({"t": "ev", "p": [g.player_public(b)]}, a.id)
+	r.apply_events({"t": "ev", "p": []}, a.id)
+	check("Трафик: на телефоне внешность игрока сохраняется, пока не пришла новая", r.player(b.id) != null and r.player(b.id).wear.get("head", "") == "hard_hat")
+
+## BF-051: карта при входе — сжатая и только из кэша; большая карта проходит туда-обратно без потерь
+func test_map_pack() -> void:
+	var g := GameState.new_game(1)
+	var md := g.world.map_data()
+	var pk: Array = GameState.pack_map(md)
+	var back = GameState.unpack_map(pk[0], pk[1])
+	check("Карта при входе: сжатие и распаковка дают ту же карту", back is Dictionary and JSON.stringify(back) == JSON.stringify(md),
+		"сжато %d байт из %d" % [(pk[0] as PackedByteArray).size(), pk[1]])
+	# карта 400×400 (предел размера) с объектами — размер сообщения и время
+	var big := {"v": 1, "w": 400, "h": 400, "spawn": [200.5, 200.5], "rows": [], "props": []}
+	var chars := ".=-wt#Dd"
+	for y in 400:
+		var row := ""
+		for x in 400:
+			row += chars[(x / 7 + y / 5 + (x * y) % 3) % chars.length()] if (x % 20 < 14) else "="
+		big["rows"].append(row)
+	for i in 2000:
+		big["props"].append(["lamp", 1.0 + i % 390, 1.0 + i / 6 % 390, 0])
+	var t0 := Time.get_ticks_usec()
+	var bp: Array = GameState.pack_map(big)
+	var t1 := Time.get_ticks_usec()
+	var bb = GameState.unpack_map(bp[0], bp[1])
+	var t2 := Time.get_ticks_usec()
+	var ww := GameWorld.new()
+	var err: String = ww.load_map(bb) if bb is Dictionary else "не распаковалась"
+	check("Карта при входе: 400×400 и 2000 объектов — без потерь, сжато, быстро",
+		err == "" and (bp[0] as PackedByteArray).size() < bp[1] / 3 and (t1 - t0) < 500000 and (t2 - t1) < 500000,
+		"ошибка «%s»; %d КБ из %d КБ; сжатие %d мс, распаковка %d мс" % [err, (bp[0] as PackedByteArray).size() / 1024, int(bp[1]) / 1024, (t1 - t0) / 1000, (t2 - t1) / 1000])
+	check("Карта при входе: испорченные данные не роняют игру", GameState.unpack_map(PackedByteArray([1, 2, 3]), 100) == null and GameState.unpack_map(PackedByteArray(), 999999999) == null)
+
 ## BF-046: место появления — рядом с точкой появления и не сквозь стену в соседний дом
 func test_spawn_spot() -> void:
 	var g := GameState.new_game(1)
@@ -890,7 +1028,7 @@ func _seen_in(g: GameState, viewer: int, target: int) -> Array:
 		if int(ps[i]) == target:
 			r[0] += 1
 		i += 10
-	for e in g.events_for(viewer, true).get("p", []):
+	for e in g.events_for(viewer, true, true).get("p", []):   # все видимые, без учёта «уже отправлено» (BF-050)
 		if int(e["id"]) == target:
 			r[1] += 1
 	for e in g.to_data_for(viewer)["p"]:

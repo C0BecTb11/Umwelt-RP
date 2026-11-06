@@ -148,7 +148,7 @@ func _tick(b: Bot, dt: float) -> void:
 
 func _finish(err: String) -> void:
 	done = true
-	var span := maxf(t - measure_t, 0.001) if measure_t >= 0.0 else 0.001
+	var span := maxf(t - measure_t, 0.001) if measure_t >= 0.0 else 0.0
 	var alive := 0
 	var st_min := 1e9
 	var st_sum := 0.0
@@ -162,6 +162,12 @@ func _finish(err: String) -> void:
 		st_sum += b.st
 		st_min = minf(st_min, b.st)
 		rb += b.rollbacks
+	if span <= 0.0:
+		# замер не начался (вошли не все) — снимки и трафик не считаем
+		span = 1.0
+		st_sum = 0.0
+		st_min = 0.0
+		bytes_in = 0.0
 	var st_avg := st_sum / maxi(n, 1) / span
 	print("[нагрузка] в игре до конца: %d из %d%s" % [alive, n, ("; отключены: %s" % whys) if not whys.is_empty() else ""])
 	print("[нагрузка] снимков на бота: в среднем %.1f/с, у худшего %.1f/с (сервер шлёт 20/с)" % [st_avg, st_min / span])

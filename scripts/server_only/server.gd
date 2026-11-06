@@ -30,6 +30,9 @@ var deleted_t := 2.0           # проверка удалённых аккау�
 var deleted_state := ""        # последний итог проверки удалённых аккаунтов — в журнал только при смене
 var refused_ip := 0            # отказано подключениям сверх MAX_PENDING_IP (в журнал раз в минуту)
 var stop_t := 0.0
+var sig_t := 0.0
+var map_z := PackedByteArray() # карта для входящих, сжатая (BF-051); пустая — пересобрать
+var map_n := 0
 
 const MAX_MSG := 8192          # байт: больше честный клиент не шлёт (токен в «привете» — до ~2 КБ)
 const HELLO_WAIT := 5.0        # сек. ждём «привет» от нового подключения (пока идёт проверка в Supabase — 25)
@@ -199,9 +202,16 @@ func _process(dt: float) -> void:
 	dt = minf(dt, 0.1)
 	_handle_net(dt)
 	game.update(dt)
+	sig_t -= dt
+	game.index_players(sig_t <= 0.0)   # сетка по районам на время рассылки (BF-049); подписи внешности — раз в 0.2 с
+	if sig_t <= 0.0:
+		sig_t = 0.2
 	for c: Client in by_peer.values():
 		if c.pid >= 0:
 			_send_to(c, dt)
+	game.grid_on = false
+	if not game.world.dirty_tiles.is_empty():
+		map_z.clear()              # двери изменились — карту для входящих пересобрать
 	game.world.dirty_tiles.clear()
 	game.fx_net.clear()
 	# сообщения тем, кого нет, не копим
@@ -271,13 +281,18 @@ func _online() -> int:
 ## Каждому — свой снимок: позиции рядом с ним 20 раз в секунду, события по готовности
 func _send_to(c: Client, dt: float) -> void:
 	c.state_t -= dt
-	if c.state_t <= 0.0:
+	c.full_t -= dt
+	var snap := c.state_t <= 0.0
+	if snap:
 		c.state_t = 0.05
 		Net.I.send_fast(game.state_for(c.pid), c.peer)
-	c.full_t -= dt
-	var full := c.full_t <= 0.0
+	# полные данные — в том же кадре, что снимок: список видимых уже найден (vis_cache, BF-049)
+	var full := snap and c.full_t <= 0.0
 	if full:
 		c.full_t = 0.25
+	# между полными — только если есть что слать (эффекты, двери, сообщения); иначе не собираем пакет каждый кадр
+	if not full and game.fx_net.is_empty() and game.world.dirty_tiles.is_empty() and not game.messages.has(c.pid):
+		return
 	var ev := game.events_for(c.pid, full)
 	if ev.size() > 1:
 		Net.I.send(ev, c.peer)
@@ -412,7 +427,11 @@ func _enter(c: Client, key: String, pname: String, static_id: int = -1, gender: 
 	var p := game.join_player(key, pname if pname != "" else "Гражданин", static_id, gender)
 	c.pid = p.id
 	c.full_t = 0.0
-	Net.I.send({"t": "init", "pid": p.id, "seed": game.seed, "world": game.to_data_for(p.id)}, c.peer)
+	if map_z.is_empty():
+		var pk: Array = GameState.pack_map(game.world.map_data())
+		map_z = pk[0]
+		map_n = pk[1]
+	Net.I.send({"t": "init", "pid": p.id, "seed": game.seed, "world": game.to_data_for(p.id, false), "mapz": map_z, "mapn": map_n}, c.peer)
 	_log("вошёл %s (%d), подключение %d, онлайн %d" % [p.name, p.id, c.peer, _online()])
 	for other: Client in by_peer.values():
 		if other.pid >= 0 and other.pid != p.id:

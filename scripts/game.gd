@@ -302,6 +302,7 @@ func leave_player(pid: int) -> void:
 	p.connected = false
 	p.move = Vector2.ZERO
 	p.ta_act = null
+	sent_pub.erase(pid)
 
 # ================== СИМУЛЯЦИЯ ==================
 func update(dt: float) -> void:
@@ -909,6 +910,87 @@ func building_at(pos: Vector2) -> int:
 	var b: int = world.building_of[world.idx(x, y)]
 	return b if b >= 0 and world.t(x, y) != GameWorld.WALL else -1
 
+## Сетка по районам (BF-049): подключённые игроки разложены по клеткам SEE_R×SEE_R — тому, кто в клетке k, видны
+## только игроки из k и восьми соседних (дальше SEE_R всё равно не видно). Строит сервер перед рассылкой
+## (index_players) и выключает после (grid_on = false): позиции между этим меняться не должны. Без сетки — перебор
+## Запись сетки: [игрок, здание под ним (building_at), строка снимка st без здоровья] — считается раз за кадр,
+## а не для каждого получателя заново
+var grid := {}
+var grid_on := false
+var sig_cache := {}            # id → pub_sig на время сетки; чистится index_players(true) (сервер — раз в 0.2 с)
+
+var vis_cache := {}            # pid → записи видимых в этом кадре рассылки (снимок и полные данные — один поиск)
+
+func index_players(refresh_sigs := true) -> void:
+	grid.clear()
+	vis_cache.clear()
+	if refresh_sigs:
+		sig_cache.clear()
+	for p: Player in players:
+		if p.connected and p.pos.is_finite():
+			var k := Vector2i(floori(p.pos.x / SEE_R), floori(p.pos.y / SEE_R))
+			var e := [p, building_at(p.pos), _st_row(p, false)]
+			if grid.has(k):
+				grid[k].append(e)
+			else:
+				grid[k] = [e]
+	grid_on = true
+
+## Строка снимка st: id, x, y, взгляд, удар, крадётся, номер толчка, здоровье и выносливость (только себе)
+func _st_row(p: Player, own: bool) -> PackedFloat32Array:
+	return PackedFloat32Array([p.id, p.pos.x, p.pos.y, p.face.x, p.face.y, float(p.atk_seq * 2 + p.atk_kind),
+		1.0 if p.sneaking else 0.0, p.force_seq, p.hp if own else 0.0, p.stamina if own else 0.0])
+
+## Записи сетки тех, кого видит pid (без него самого); то же правило, что sees(): ближе SEE_R и не под чужой крышей
+func _visible_entries(pid: int, c: Vector2, cb: int) -> Array:
+	if vis_cache.has(pid):
+		return vis_cache[pid]
+	var out := []
+	var k := Vector2i(floori(c.x / SEE_R), floori(c.y / SEE_R))
+	var r2 := SEE_R * SEE_R
+	for dy in range(-1, 2):
+		for dx in range(-1, 2):
+			for e in grid.get(k + Vector2i(dx, dy), []):
+				var p: Player = e[0]
+				if p.id != pid and p.pos.distance_squared_to(c) <= r2 and (e[1] < 0 or e[1] == cb):
+					out.append(e)
+	vis_cache[pid] = out
+	return out
+
+## Другие игроки (без него самого), которых видит pid — по сетке, если она построена, иначе перебором
+func visible_to(pid: int) -> Array:
+	var me := player(pid)
+	var c: Vector2 = me.pos if me != null else spawn
+	var cb := building_at(c)
+	var out := []
+	if grid_on and c.is_finite():
+		for e in _visible_entries(pid, c, cb):
+			out.append(e[0])
+	else:
+		for p: Player in players:
+			if p.id != pid and p.connected and sees(c, cb, p):
+				out.append(p)
+	return out
+
+## Подпись внешности: при сетке — одна на кадр рассылки (кэш), без сетки — заново
+func sig_of(p: Player) -> int:
+	if not grid_on:
+		return pub_sig(p)
+	if not sig_cache.has(p.id):
+		sig_cache[p.id] = pub_sig(p)
+	return sig_cache[p.id]
+
+## Что из внешности другого игрока надо знать телефону: подпись меняется, только когда меняется что-то из этого
+## (не позиция — она идёт снимками). По ней сервер решает, слать ли player_public снова (BF-050)
+func pub_sig(p: Player) -> int:
+	return hash([p.dead, p.eq, p.name, p.wear, p.look])
+
+## Кому что уже отправлено: получатель → {id игрока → подпись}. Сбрасывается при входе получателя (forget_sent)
+var sent_pub := {}
+
+func forget_sent(pid: int) -> void:
+	sent_pub.erase(pid)
+
 ## Видит ли тот, кто стоит в c (в здании cb), игрока p: рядом (экран с запасом) и не под чужой крышей.
 ## Остальных телефон не получает вовсе — подсмотреть их положение нельзя (аудит, В3)
 func sees(c: Vector2, cb: int, p: Player) -> bool:
@@ -919,19 +1001,38 @@ func sees(c: Vector2, cb: int, p: Player) -> bool:
 
 ## Мир для нового клиента: карта, время; из игроков — он сам полностью, остальные только внешне.
 ## Карту аккаунтов (uids) не отдаём никогда: uid — это ключ от чужого персонажа
-func to_data_for(pid: int) -> Dictionary:
+## with_map = false — без карты: сервер шлёт её отдельно, сжатой и из кэша (pack_map, BF-051)
+func to_data_for(pid: int, with_map := true) -> Dictionary:
 	var me := player(pid)
-	var c: Vector2 = me.pos if me != null else spawn
-	var cb := building_at(c)
 	var ps := []
-	for p: Player in players:
-		if p.id == pid:
-			ps.append(player_data(p))
-		elif p.connected and sees(c, cb, p):
-			var pub := player_public(p)
-			pub["con"] = true
-			ps.append(pub)
-	return {"v": SAVE_VERSION, "seed": seed, "time": time, "map": world.map_data(), "p": ps}
+	if me != null:
+		ps.append(player_data(me))
+	var known := {}
+	for p: Player in visible_to(pid):
+		var pub := player_public(p)
+		pub["con"] = true
+		ps.append(pub)
+		known[p.id] = sig_of(p)
+	sent_pub[pid] = known               # вход: телефон знает ровно тех, кто в этом пакете
+	var o := {"v": SAVE_VERSION, "seed": seed, "time": time, "p": ps}
+	if with_map:
+		o["map"] = world.map_data()
+	return o
+
+## Карта для отправки: var_to_bytes + zstd. Возвращает [сжатые байты, размер до сжатия]
+static func pack_map(md: Dictionary) -> Array:
+	var raw := var_to_bytes(md)
+	return [raw.compress(FileAccess.COMPRESSION_ZSTD), raw.size()]
+
+## Обратно; null — данные испорчены или размер вне разумного (карта 400×400 с объектами — меньше 1 МБ)
+static func unpack_map(z: PackedByteArray, n: int):
+	if z.is_empty() or n <= 0 or n > 16 * 1024 * 1024:
+		return null
+	var raw := z.decompress(n, FileAccess.COMPRESSION_ZSTD)
+	if raw.size() != n:
+		return null
+	var d = bytes_to_var(raw)
+	return d if d is Dictionary else null
 
 const SAVE_VERSION := 3
 
@@ -1015,15 +1116,16 @@ func load_data(o: Dictionary) -> void:
 func state_for(pid: int) -> Dictionary:
 	var me := player(pid)
 	var c: Vector2 = me.pos if me != null else spawn
-	var cb := building_at(c)
 	var ps := PackedFloat32Array()
-	for p in players:
-		if not p.connected:
-			continue
-		# только те, кого видно: при сотнях игроков пакет не растёт, а чужие дома не просматриваются
-		if p.id != pid and not sees(c, cb, p):
-			continue
-		ps.append_array([p.id, p.pos.x, p.pos.y, p.face.x, p.face.y, float(p.atk_seq * 2 + p.atk_kind), 1.0 if p.sneaking else 0.0, p.force_seq, p.hp if p.id == pid else 0.0, p.stamina if p.id == pid else 0.0])
+	if me != null and me.connected:
+		ps.append_array(_st_row(me, true))
+	# только те, кого видно: при сотнях игроков пакет не растёт, а чужие дома не просматриваются
+	if grid_on and c.is_finite():
+		for e in _visible_entries(pid, c, building_at(c)):
+			ps.append_array(e[2])
+	else:
+		for p: Player in visible_to(pid):
+			ps.append_array(_st_row(p, false))
 	var o := {"t": "st", "time": time, "ts": Time.get_ticks_msec(), "p": ps}
 	# выстрелы — только те, что рядом (начало или конец в радиусе видимости)
 	var sh := []
@@ -1035,18 +1137,21 @@ func state_for(pid: int) -> Dictionary:
 	return o
 
 ## Редкий надёжный снимок: изменения мира, полные данные игроков, сообщения, эффекты
-func events_for(pid: int, full_players: bool) -> Dictionary:
+func events_for(pid: int, full_players: bool, all_pub := false) -> Dictionary:
 	var o := {"t": "ev"}
 	if full_players:
 		var me := player(pid)
-		var c: Vector2 = me.pos if me != null else spawn
-		var cb := building_at(c)
 		var ps := []
-		for p in players:
-			if p.id == pid:
-				ps.append(player_data(p))          # себе — всё
-			elif p.connected and sees(c, cb, p):
-				ps.append(player_public(p))        # другим — только внешность
+		if me != null:
+			ps.append(player_data(me))             # себе — всё
+		# другим — только внешность, и только если телефон её ещё не знает (BF-050); all_pub — всем (тесты)
+		var known: Dictionary = sent_pub.get(pid, {})
+		for p: Player in visible_to(pid):
+			var sig := sig_of(p)
+			if all_pub or int(known.get(p.id, 0)) != sig or not known.has(p.id):
+				ps.append(player_public(p))
+				known[p.id] = sig
+		sent_pub[pid] = known
 		o["p"] = ps
 	# общие списки здесь НЕ очищаются: функцию вызывают для каждого игрока по очереди, а очищает их
 	# сервер после рассылки всем (BF-027). Эффекты — только тем, кто рядом

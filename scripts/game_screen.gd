@@ -222,7 +222,17 @@ func _handle_net() -> void:
 					continue
 				var g := GameState.new(int(o["seed"]))
 				g.is_replica = true
-				g.load_data(o["world"])
+				var wd: Dictionary = o["world"]
+				if not wd.has("map") and o.get("mapz") is PackedByteArray:
+					# карта приходит сжатой отдельно (с 0.34, BF-051)
+					var md = GameState.unpack_map(o["mapz"], int(o.get("mapn", 0)))
+					if md == null:
+						Net.I.status = "Карта от сервера пришла испорченной"
+						Net.I.close()
+						lost = true
+						continue
+					wd["map"] = md
+				g.load_data(wd)
 				local_pid = int(o["pid"])
 				for pl in g.players:
 					pl.connected = pl.id == local_pid or pl.connected
