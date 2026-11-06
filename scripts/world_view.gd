@@ -426,6 +426,7 @@ func _place_scene(g: GameState, me: GameState.Player, dt: float) -> void:
 		var el := maxf(0.0, sin(az))
 		sd = Vector3(-cos(az) * 0.85, -(0.3 + 0.7 * el), -0.45)
 	sd = sd.normalized()
+	mat_world.set_shader_parameter("sun_dir", -sd)
 	sun.look_at_from_position(t - sd * 40.0, t, Vector3.UP if absf(sd.y) < 0.99 else Vector3.FORWARD)
 	var day_c := Color(1.0, 0.95, 0.86)
 	var dusk_c := Color(1.0, 0.6, 0.36)

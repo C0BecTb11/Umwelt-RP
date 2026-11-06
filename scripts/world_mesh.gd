@@ -100,8 +100,12 @@ func _tile(m: Mesher, x: int, y: int) -> void:
 		var mx_f := maxf(maxf(wf[0], wf[1]), maxf(wf[2], wf[3]))
 		var mn_f := minf(minf(wf[0], wf[1]), minf(wf[2], wf[3]))
 		if mn_f > 0.5:
+			var dc := w.water_depth_corners(x, y)
+			var cl := [_depth_col(dc[0]), _depth_col(dc[1]), _depth_col(dc[2]), _depth_col(dc[3])]
+			var P := [Vector3(x, WATER_Y, y), Vector3(x + 1, WATER_Y, y), Vector3(x + 1, WATER_Y, y + 1), Vector3(x, WATER_Y, y + 1)]
 			m.mat = Mesher.M_WATER
-			m.flat(x, y, x + 1, y + 1, WATER_Y, c(WATER_COL))
+			m.tri3(P[0], P[3], P[2], cl[0], cl[3], cl[2])
+			m.tri3(P[0], P[2], P[1], cl[0], cl[2], cl[1])
 			m.mat = Mesher.M_NONE
 			return
 		if mx_f > 0.5:
@@ -668,6 +672,16 @@ func _line_seg(m: Mesher, r: Array) -> void:
 const WATER_Y := -0.6           # гладь воды ниже земли: виден берег, мост над ней
 const BANK_Y := -0.9            # низ берега (под гладью)
 const WATER_COL := 0x2E5866
+const SHALLOW_COL := 0x4E8A84     # вода у берега (мелко)
+const DEEP_COL := 0x1A4254        # вода вдали от берега (глубоко)
+const SAND_COL := 0x8C7D5C        # откос берега
+const FOAM_COL := 0x9EC6C0
+const SLOPE_W := 0.45             # откос берега: на столько уходит в воду (до гладь − 0.1)
+
+## Цвет воды по глубине (клеток до берега)
+static func _depth_col(d: float) -> Color:
+	var t := clampf((d - 0.5) / 4.0, 0.0, 1.0)
+	return c(SHALLOW_COL).lerp(c(DEEP_COL), t * t * (3.0 - 2.0 * t))
 const BANK_COL := 0x5A4C3C
 const SHORE_SUB := 4            # клетка у берега делится на 4×4 — берег плавный (поле воды билинейное)
 
@@ -675,7 +689,12 @@ const SHORE_SUB := 4            # клетка у берега делится н
 func _shore(m: Mesher, x: int, y: int, wf: PackedFloat32Array) -> void:
 	var hv := hash2(x, y)
 	var gcol := jit(c([0x4C6A38, 0x50703C, 0x4A6636, 0x527039][hv % 4]), hv, 0.02)
-	var wcol := c(WATER_COL)
+	var dc := w.water_depth_corners(x, y)
+	# наклон поля в углах (по соседним углам) — внутри клетки билинейно: у соседних клеток на общей стороне
+	# направление то же, откос и пена без щелей
+	var gc := []
+	for q in [Vector2i(x, y), Vector2i(x + 1, y), Vector2i(x + 1, y + 1), Vector2i(x, y + 1)]:
+		gc.append(Vector2(w.water_corner(q.x + 1, q.y) - w.water_corner(q.x - 1, q.y), w.water_corner(q.x, q.y + 1) - w.water_corner(q.x, q.y - 1)))
 	var st := 1.0 / SHORE_SUB
 	for j in SHORE_SUB:
 		for i in SHORE_SUB:
@@ -706,7 +725,7 @@ func _shore(m: Mesher, x: int, y: int, wf: PackedFloat32Array) -> void:
 					dry.append(q)
 			var o := Vector2(x, y)
 			m.mat = Mesher.M_WATER
-			_fan(m, wet, o, WATER_Y, wcol)
+			_fan_depth(m, wet, o, dc)
 			m.mat = Mesher.M_DIRT
 			_fan(m, dry, o, 0.0, gcol)
 			m.mat = Mesher.M_NONE
@@ -721,6 +740,60 @@ func _shore(m: Mesher, x: int, y: int, wf: PackedFloat32Array) -> void:
 					var p2: Vector2 = wet[cut[k + 1]]
 					if p1.distance_squared_to(p2) > 1e-8:
 						_bank_seg(m, o + p1, o + p2, 0.0, o + cen)
+						# откос к воде и пена по кромке; направление в воду — по наклону поля (общее у соседних кусков)
+						var g1 := _water_dir(gc, p1, cen)
+						var g2 := _water_dir(gc, p2, cen)
+						_slope(m, o + p1, o + p2, g1, g2)
+
+## Направление в воду в точке клетки: наклон поля (из углов [лв, пв, пн, лн], билинейно)
+static func _water_dir(gc: Array, p: Vector2, toward: Vector2) -> Vector2:
+	var g: Vector2 = (gc[0] as Vector2).lerp(gc[1], p.x).lerp((gc[3] as Vector2).lerp(gc[2], p.x), p.y)
+	if g.length_squared() < 1e-6:
+		g = toward - p
+	return g.normalized()
+
+## Откос берега: от кромки суши (y 0) вниз под воду + полоска пены там, где откос входит в воду
+static func _slope(m: Mesher, a: Vector2, b: Vector2, ga: Vector2, gb: Vector2) -> void:
+	var y1 := WATER_Y - 0.1
+	var A0 := Vector3(a.x, 0.0, a.y)
+	var B0 := Vector3(b.x, 0.0, b.y)
+	var A1 := Vector3(a.x + ga.x * SLOPE_W, y1, a.y + ga.y * SLOPE_W)
+	var B1 := Vector3(b.x + gb.x * SLOPE_W, y1, b.y + gb.y * SLOPE_W)
+	m.mat = Mesher.M_DIRT
+	var sand := c(SAND_COL)
+	if (B0 - A0).cross(A1 - A0).y > 0.0:
+		m.quad(A0, B0, B1, A1, sand)
+	else:
+		m.quad(B0, A0, A1, B1, sand)
+	# пена: от линии, где откос уходит под воду, чуть дальше в воду
+	var k0 := SLOPE_W * WATER_Y / y1 - 0.04
+	var k1 := k0 + 0.12
+	var fa := a + ga * k0
+	var fb := b + gb * k0
+	var fa2 := a + ga * k1
+	var fb2 := b + gb * k1
+	m.mat = Mesher.M_FOAM
+	_up_quad(m, fa, fb, fb2, fa2, WATER_Y + 0.004, c(FOAM_COL))
+	m.mat = Mesher.M_NONE
+
+## Гладь у берега: цвет в каждой вершине — по глубине (билинейно)
+func _fan_depth(m: Mesher, poly: PackedVector2Array, o: Vector2, dc: PackedFloat32Array) -> void:
+	for k in range(1, poly.size() - 1):
+		var a := poly[0]
+		var b := poly[k]
+		var cc := poly[k + 1]
+		if (b - a).cross(cc - a) == 0.0:
+			continue
+		var A := Vector3(o.x + a.x, WATER_Y, o.y + a.y)
+		var B := Vector3(o.x + b.x, WATER_Y, o.y + b.y)
+		var C := Vector3(o.x + cc.x, WATER_Y, o.y + cc.y)
+		var ca := _depth_col(GameWorld.bilerp(dc, a.x, a.y))
+		var cb := _depth_col(GameWorld.bilerp(dc, b.x, b.y))
+		var ccol := _depth_col(GameWorld.bilerp(dc, cc.x, cc.y))
+		if (B - A).cross(C - A).y < 0.0:
+			m.tri3(A, C, B, ca, ccol, cb)
+		else:
+			m.tri3(A, B, C, ca, cb, ccol)
 
 ## Веер треугольников многоугольника (выпуклого) лицом вверх
 static func _fan(m: Mesher, poly: PackedVector2Array, o: Vector2, y: float, col: Color) -> void:

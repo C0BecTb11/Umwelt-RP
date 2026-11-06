@@ -147,6 +147,7 @@ func end() -> bool:
 		unsaved = true
 		if act["t"].size() > 0:
 			w.compute_buildings()
+			w.compute_water_depth()
 			if view != null:
 				view.rebuild_static()
 		if act["props"] != null:
@@ -347,6 +348,7 @@ func undo() -> bool:
 		w.vis_dirty[i] = true
 	if a["t"].size() > 0:
 		w.has_water = w.tiles.has(W.WATER)
+		w.compute_water_depth()
 	if a["props"] != null:
 		for e in w.props:
 			_mark_e(e)

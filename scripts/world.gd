@@ -270,6 +270,7 @@ func load_map(d: Dictionary) -> String:
 	index_props()
 	index_lines()
 	has_water = tiles.has(WATER)
+	compute_water_depth()
 	dirty_tiles.clear()
 	vis_dirty.clear()
 	events.clear()
@@ -380,6 +381,11 @@ func index_lines() -> void:
 		var path := line_path(e)
 		if path.size() < 2:
 			continue
+		# концы чуть дальше точек (0.3 м): у двух дорог, сходящихся под углом, на стыке не видно щели с травой
+		var t0 := (path[0] - path[1]).normalized()
+		var t1 := (path[path.size() - 1] - path[path.size() - 2]).normalized()
+		path.insert(0, path[0] + t0 * 0.3)
+		path.append(path[path.size() - 1] + t1 * 0.3)
 		var nrm := PackedVector2Array()
 		for i in path.size():
 			var d := path[mini(i + 1, path.size() - 1)] - path[maxi(i - 1, 0)]
@@ -486,3 +492,54 @@ func _water_blocks(cx: float, cy: float, r: float) -> bool:
 			any = true
 			break
 	return any and not on_bridge(c, r)
+
+## Глубина воды (только для вида): у каждой клетки воды — сколько клеток до ближайшей суши (8 соседей, до 10).
+## Цвет воды от неё: у берега светлее, вдали темнее
+var water_dist := PackedByteArray()
+
+func compute_water_depth() -> void:
+	water_dist = PackedByteArray()
+	if not has_water:
+		return
+	water_dist.resize(w * h)
+	var q := PackedInt32Array()
+	for i in w * h:
+		if tiles[i] == WATER:
+			water_dist[i] = 255
+		else:
+			water_dist[i] = 0
+			q.append(i)
+	var head := 0
+	while head < q.size():
+		var i: int = q[head]
+		head += 1
+		var d: int = water_dist[i]
+		if d >= 10:
+			continue
+		var x := i % w
+		var y := i / w
+		for dy in range(-1, 2):
+			for dx in range(-1, 2):
+				var nx := x + dx
+				var ny := y + dy
+				if inside(nx, ny):
+					var ni := ny * w + nx
+					if water_dist[ni] > d + 1:
+						water_dist[ni] = d + 1
+						q.append(ni)
+	for i in w * h:
+		if water_dist[i] == 255:
+			water_dist[i] = 10
+
+## Глубина в углах клетки [лв, пв, пн, лн] — среднее по 4 клеткам у угла (суша — 0)
+func water_depth_corners(x: int, y: int) -> PackedFloat32Array:
+	var out := PackedFloat32Array()
+	for c in [Vector2i(x, y), Vector2i(x + 1, y), Vector2i(x + 1, y + 1), Vector2i(x, y + 1)]:
+		var sum := 0.0
+		for d in [Vector2i(-1, -1), Vector2i(0, -1), Vector2i(-1, 0), Vector2i(0, 0)]:
+			var px: int = c.x + d.x
+			var py: int = c.y + d.y
+			if inside(px, py) and water_dist.size() == w * h:
+				sum += water_dist[py * w + px]
+		out.append(sum / 4.0)
+	return out

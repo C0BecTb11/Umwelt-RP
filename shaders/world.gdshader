@@ -5,6 +5,7 @@ uniform vec3 player_pos = vec3(50.0, 0.0, 50.0);
 uniform vec2 cam_back = vec2(0.0, 1.0);
 uniform float cut = 1.0;
 uniform float night = 0.0;
+uniform vec3 sun_dir = vec3(0.3, 0.85, 0.4);   // к солнцу (мировые оси), задаёт world_view.gd — блики на воде
 // текстуры мира: слои 512×512 (assets/tex/world_albedo.png, сборка — docs/tools/build_textures.py)
 // без source_color: в режиме совместимости (телефон) массив не переводится в линейный цвет сам — переводим ниже,
 // одинаково на всех устройствах
@@ -49,9 +50,26 @@ void fragment() {
 	// (по плоскости, к которой ближе нормаль) — развёртка мешу не нужна
 	int L = int(mat + 0.5) - 1;
 	if (L == 8) {
-		// вода (Mesher.M_WATER): рябь — медленные волны яркости по мировым координатам
-		float r = sin(wpos.x * 1.7 + TIME * 0.9) * sin(wpos.z * 1.3 - TIME * 0.7) + 0.5 * sin((wpos.x + wpos.z) * 3.1 + TIME * 1.6);
-		c = c * (0.9 + 0.1 * r);
+		// вода (Mesher.M_WATER). Цвет вершин уже несёт глубину (у берега светлее, вдали темнее — WorldMesh).
+		// Рябь: две бегущие волны; нормаль наклоняется по ним — свет и тень на воде движутся, плюс блик солнца
+		float a1 = wpos.x * 1.7 + TIME * 0.9;
+		float a2 = wpos.z * 1.3 - TIME * 0.7;
+		float a3 = (wpos.x + wpos.z) * 3.1 + TIME * 1.6;
+		float a4 = (wpos.x * 0.6 - wpos.z * 1.1) * 2.3 - TIME * 1.1;
+		float r = sin(a1) * sin(a2) + 0.5 * sin(a3) + 0.35 * sin(a4);
+		float gx = 1.7 * cos(a1) * sin(a2) + 0.5 * 3.1 * cos(a3) + 0.35 * 0.6 * 2.3 * cos(a4);
+		float gz = 1.3 * sin(a1) * cos(a2) + 0.5 * 3.1 * cos(a3) - 0.35 * 1.1 * 2.3 * cos(a4);
+		vec3 n = normalize(vec3(-gx * 0.05, 1.0, -gz * 0.05));
+		NORMAL = normalize((VIEW_MATRIX * vec4(n, 0.0)).xyz);
+		c = c * (0.93 + 0.07 * r);
+		vec3 vdir = normalize(CAMERA_POSITION_WORLD - wpos);
+		float spec = pow(max(dot(reflect(-vdir, n), normalize(sun_dir)), 0.0), 60.0);
+		float fres = pow(1.0 - max(dot(vdir, n), 0.0), 3.0);
+		EMISSION = vec3(1.0, 0.95, 0.85) * spec * 0.9 * (1.0 - night) + vec3(0.35, 0.45, 0.55) * fres * 0.25 * (1.0 - night);
+	} else if (L == 9) {
+		// пена у берега (Mesher.M_FOAM): то ярче, то слабее, волной вдоль берега
+		float f = 0.5 + 0.5 * sin((wpos.x + wpos.z) * 1.9 - TIME * 1.4);
+		c = mix(c * 0.7, c, f);
 	} else if (L >= 0) {
 		vec3 an = abs(wnrm);
 		vec2 p;

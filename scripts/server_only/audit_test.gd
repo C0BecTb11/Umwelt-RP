@@ -1261,6 +1261,16 @@ func test_water() -> void:
 	var dry := not w.circle_blocked(110.0, 70.0, GameState.PLAYER_R)
 	var lone := not w.water_at(Vector2(115.5, 90.5)) and not w.circle_blocked(115.5, 90.5, GameState.PLAYER_R)
 	check("Вода: в озере не пройти, на траве можно; одинокая клетка воды — не вода", deep and dry and lone, "%s %s %s" % [deep, dry, lone])
+	# глубина (0.41): у берега 1, в середине озера — далеко до берега; цвет у берега светлее
+	var dc := w.water_depth_corners(128, 40)
+	var shore_cell := -1
+	for x in range(100, 140):
+		if shore_cell < 0 and w.t(x, 40) == W.WATER:
+			shore_cell = w.water_dist[40 * w.w + x]
+	var lum0 := WorldMesh._depth_col(0.5).get_luminance()
+	var lum1 := WorldMesh._depth_col(6.0).get_luminance()
+	check("Вода: глубина — у берега мелко (1), в середине озера глубже; цвет у берега светлее", shore_cell == 1 and dc[0] >= 5.0 and lum0 > lum1 + 0.1,
+		"у берега %d, в середине %.1f, яркость %.2f / %.2f" % [shore_cell, dc[0], lum0, lum1])
 	# на дорогу и в дома вода не заходит: у клеток не-травы поле не больше 0.5
 	var intrude := 0
 	for y in w.h:

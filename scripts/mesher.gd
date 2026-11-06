@@ -17,6 +17,7 @@ const M_ROOM_LIT := 6
 const M_ROOM_DARK := 7
 const M_DIRT := 8
 const M_WATER := 9               # не слой текстуры: шейдер рисует рябь сам
+const M_FOAM := 10               # пена у берега: шейдер её «дышит»
 
 var verts := PackedVector3Array()
 var norms := PackedVector3Array()
@@ -85,6 +86,16 @@ func tri(a: Vector3, b: Vector3, c: Vector3, col: Color) -> void:
 	_put(a, n, col)
 	_put(c, n, col)
 	_put(b, n, col)
+
+## Треугольник с цветом в каждой вершине (плавный переход цвета, например глубина воды)
+func tri3(a: Vector3, b: Vector3, c: Vector3, ca: Color, cb: Color, cc: Color) -> void:
+	var n := (b - a).cross(c - a)
+	if n.length_squared() < 1e-12:
+		return
+	n = n.normalized()
+	_put(a, n, ca)
+	_put(c, n, cc)
+	_put(b, n, cb)
 
 func quad(a: Vector3, b: Vector3, c: Vector3, d: Vector3, col: Color) -> void:
 	tri(a, b, c, col)
