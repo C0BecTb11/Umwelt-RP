@@ -51,6 +51,7 @@ func _ready() -> void:
 	test_pub_cache()
 	test_map_pack()
 	test_world_textures()
+	test_road_lines()
 	await test_big_map()
 	test_stamina_net()
 	test_server_guards()
@@ -1103,6 +1104,117 @@ func test_world_textures() -> void:
 	m.clear()
 	wm.build_chunk(m, 5, 5)
 	check("Текстуры: после чанка материал и грани сброшены", m.mat == Mesher.M_NONE and m.face_mat.is_empty())
+
+## Дороги-линии (0.38): формат карты, сглаживание, перекрёсток, редактор, по дороге можно ходить
+func _road_world() -> GameWorld:
+	var md: Dictionary = GameWorld.read_map_file()
+	var rows: Array = []
+	for r in md["rows"]:
+		rows.append(r + ".".repeat(80))
+	md["rows"] = rows
+	md["w"] = int(md["w"]) + 80
+	md["lines"] = [["street", 110.0, 20.0, 130.0, 20.0, 150.0, 30.0, 160.0, 50.0], ["highway", 140.0, 5.0, 142.0, 60.0, 150.0, 95.0]]
+	var w := GameWorld.new()
+	var err := w.load_map(md)
+	return w if err == "" else null
+
+func test_road_lines() -> void:
+	var w := _road_world()
+	check("Дороги: карта с дорогами-линиями грузится", w != null and w.lines.size() == 2)
+	if w == null:
+		return
+	# туда-обратно через текст файла
+	var back := GameWorld.new()
+	var txt := GameWorld.map_text(w.map_data())
+	var err := back.load_map(JSON.parse_string(txt))
+	check("Дороги: туда-обратно через файл без потерь", err == "" and JSON.stringify(back.lines) == JSON.stringify(w.lines), err)
+	var city := GameWorld.new()
+	city.load_map(GameWorld.read_map_file())
+	check("Дороги: карта без дорог пишется как раньше (без поля lines)", not GameWorld.map_text(city.map_data()).contains("lines"))
+	# плохие дороги — отказ, мир не меняется
+	var bad := [[["river", 1, 1, 5, 5]], [["street", 1, 1]], [["street", 1, 1, 5]], [["street", 1, 1, 9999, 5]],
+		[["street", 1, 1, NAN, 5]], [["street", -1, 1, 5, 5]], ["street"], "x"]
+	var long := ["street"]
+	for k in GameWorld.MAX_LINE_PTS + 1:
+		long.append(1.0 + k)
+		long.append(1.0)
+	bad.append([long])
+	var rejected := 0
+	for b in bad:
+		var md := w.map_data()
+		md["lines"] = b
+		var t := GameWorld.new()
+		if t.load_map(md) != "":
+			rejected += 1
+	check("Дороги: неверные дороги в файле — отказ (%d видов)" % bad.size(), rejected == bad.size(), "отказано %d" % rejected)
+	# кривая проходит через точки и идёт мелкими шагами
+	var path := GameWorld.line_path(w.lines[0])
+	var through := true
+	for k in range(1, w.lines[0].size() - 1, 2):
+		var p := Vector2(w.lines[0][k], w.lines[0][k + 1])
+		var near := false
+		for q in path:
+			if q.distance_to(p) < 0.01:
+				near = true
+		through = through and near
+	var max_step := 0.0
+	for i in path.size() - 1:
+		max_step = maxf(max_step, path[i].distance_to(path[i + 1]))
+	check("Дороги: кривая проходит через точки, шаг не больше %.1f м" % GameWorld.LINE_STEP, through and max_step <= GameWorld.LINE_STEP + 0.05, "шаг %.2f" % max_step)
+	check("Дороги: асфальт и обочина находятся по точке", w.on_line_road(Vector2(120, 20), -1) and not w.on_line_road(Vector2(120, 24), -1)
+		and w.on_line_road(Vector2(120, 24), -1, true) and not w.on_line_road(Vector2(120, 30), -1, true))
+	check("Дороги: по дороге-линии можно ходить (она не стена)", not w.circle_blocked(120.0, 20.0, GameState.PLAYER_R))
+	# перекрёсток улицы и трассы: тротуар улицы не ложится на асфальт трассы
+	var wm := WorldMesh.new(w)
+	var m := Mesher.new()
+	var crossing := -1
+	var on_other := 0
+	var asphalt := 0
+	for ck in w.lines_chunk:
+		m.clear()
+		wm.build_chunk(m, ck.x, ck.y)
+		for i in range(0, m.verts.size(), 3):
+			var c3: Vector3 = (m.verts[i] + m.verts[i + 1] + m.verts[i + 2]) / 3.0
+			var mt := int(m.uvs[i].x)
+			if mt == Mesher.M_ASPHALT and c3.y > 0.015:
+				asphalt += 1
+			if mt == Mesher.M_CONCRETE and absf(c3.y - WorldMesh.LINE_SIDE_Y) < 0.02:
+				var c2 := Vector2(c3.x, c3.z)
+				# тротуар улицы (линия 0) поверх трассы (линия 1), с запасом 0.5 м от края
+				if Geometry2D.get_closest_point_to_segment(c2, Vector2(140, 5), Vector2(142, 60)).distance_to(c2) < GameWorld.LINE_ROAD_HW["highway"] - 0.5:
+					on_other += 1
+	check("Дороги: асфальт строится, на перекрёстке тротуар не лежит поперёк другой дороги", asphalt > 100 and on_other == 0,
+		"асфальт %d, тротуара на трассе %d" % [asphalt, on_other])
+	# редактор: точки, вид, отмена, удаление
+	var ed = load("res://scripts/map_editor.gd").new()
+	ed.headless = true
+	ed.use_draft = false
+	add_child(ed)
+	var ew: GameWorld = ed.w
+	var n0 := ew.lines.size()
+	for p in [Vector2(10, 95), Vector2(30, 92), Vector2(50, 96)]:
+		ed.begin()
+		ed.road_point(p)
+		ed.end()
+	var made: bool = ew.lines.size() == n0 + 1 and ew.lines[n0].size() == 7
+	ed.set_road_kind("highway")
+	var kind_ok: bool = ew.lines[n0][0] == "highway"
+	ed.undo()
+	var undo_kind: bool = ew.lines[n0][0] == "street"
+	ed.undo()
+	var undo_pt: bool = ew.lines[n0].size() == 5
+	ed.road_line = -1
+	ed.begin()
+	ed.road_point(Vector2(5, 5))
+	ed.end()
+	var one_skipped: bool = ew.map_data()["lines"].size() == n0 + 1
+	ed.begin()
+	ed.delete_road(ed.road_at(Vector2(20, 93.5)))
+	ed.end()
+	check("Редактор: дорога по точкам, смена вида, отмена по шагу, удаление; дорога из одной точки не идёт в файл",
+		made and kind_ok and undo_kind and undo_pt and one_skipped and ew.lines.size() == n0 + 1 and ew.lines[n0].size() == 3,
+		"%s %s %s %s %s, дорог %d" % [made, kind_ok, undo_kind, undo_pt, one_skipped, ew.lines.size()])
+	ed.queue_free()
 
 func test_big_map() -> void:
 	var md := _big_city(5)

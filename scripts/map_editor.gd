@@ -12,8 +12,9 @@ const Props = preload("res://scripts/props.gd")
 const AccountApi = preload("res://scripts/account.gd")
 const W = preload("res://scripts/world.gd")
 
-enum Tool { HAND, BRUSH, RECT, FRAME, PROP, SELECT, SPAWN }
-const TOOL_NAMES := ["Рука", "Кисть", "Прямоуг.", "Рамка", "Объект", "Выбор", "Спавн"]
+enum Tool { HAND, BRUSH, RECT, FRAME, PROP, SELECT, SPAWN, ROAD }
+const TOOL_NAMES := ["Рука", "Кисть", "Прямоуг.", "Рамка", "Объект", "Выбор", "Спавн", "Дорога"]
+const ROAD_KINDS := [["street", "Улица"], ["highway", "Трасса"]]
 const CAR_H := 100     # «машина вдоль», занимает 2 клетки
 const CAR_V2 := 101    # «машина поперёк»
 ## Палитра клеток: [номер, название, цвет кнопки]
@@ -41,7 +42,11 @@ var sel := -1                  # выбранный объект (номер в 
 var focus := Vector2(50, 50)   # куда смотрит камера
 var zoom := 24.0
 var undo_stack: Array = []
-var act = null                 # текущая правка: {"t": {клетка: было}, "props": копия или null, "spawn": было или null}
+var act = null                 # текущая правка: {"t": {клетка: было}, "props": копия или null, "spawn": было или null, "lines": копия или null}
+var road_kind := "street"      # вид новой дороги-линии
+var road_line := -1            # номер дороги в w.lines, которую сейчас рисуют (-1 — следующее касание начнёт новую)
+var road_del := false          # следующее касание удаляет дорогу под пальцем
+var road_marks: Array = []     # метки точек рисуемой дороги
 var unsaved := false
 var reset_t := 0.0
 var size_t := 0.0              # окно подтверждения «Размер»
@@ -120,17 +125,21 @@ func save_draft() -> void:
 
 # ================== ПРАВКИ (их же проверяют автотесты) ==================
 func begin() -> void:
-	act = {"t": {}, "props": null, "spawn": null}
+	act = {"t": {}, "props": null, "spawn": null, "lines": null}
 
 func _remember_props() -> void:
 	if act != null and act["props"] == null:
 		act["props"] = w.props.duplicate(true)
 
+func _remember_lines() -> void:
+	if act != null and act["lines"] == null:
+		act["lines"] = w.lines.duplicate(true)
+
 ## Закончить правку; true — что-то поменялось (правка легла в «Отменить»)
 func end() -> bool:
 	if act == null:
 		return false
-	var changed: bool = act["t"].size() > 0 or act["props"] != null or act["spawn"] != null
+	var changed: bool = act["t"].size() > 0 or act["props"] != null or act["spawn"] != null or act["lines"] != null
 	if changed:
 		undo_stack.append(act)
 		if undo_stack.size() > 60:
@@ -144,6 +153,8 @@ func end() -> bool:
 			w.index_props()
 			if view != null:
 				view.wm.refresh_lamps()
+		if act["lines"] != null:
+			w.index_lines()
 	act = null
 	return changed
 
@@ -251,6 +262,72 @@ func delete_prop(i: int) -> void:
 	_mark(i)
 	w.props.remove_at(i)
 
+# ---------- дороги-линии ----------
+## Добавить точку к рисуемой дороге (или начать новую). Номер дороги или -1
+func road_point(at: Vector2) -> int:
+	if at.x < 0.0 or at.y < 0.0 or at.x > w.w or at.y > w.h:
+		return -1
+	_remember_lines()
+	if road_line >= 0 and road_line < w.lines.size():
+		var e: Array = w.lines[road_line]
+		if (e.size() - 1) / 2 >= GameWorld.MAX_LINE_PTS:
+			return -1
+		_mark_line(e)
+		e.append(snappedf(at.x, 0.5))
+		e.append(snappedf(at.y, 0.5))
+	else:
+		if w.lines.size() >= GameWorld.MAX_LINES:
+			return -1
+		w.lines.append([road_kind, snappedf(at.x, 0.5), snappedf(at.y, 0.5)])
+		road_line = w.lines.size() - 1
+	_mark_line(w.lines[road_line])
+	return road_line
+
+## Ближайшая дорога к точке (в пределах её ширины), -1 — нет
+func road_at(at: Vector2) -> int:
+	var best := -1
+	var bd := INF
+	for i in w.lines.size():
+		var path := GameWorld.line_path(w.lines[i])
+		var hw: float = GameWorld.LINE_OUTER_HW[w.lines[i][0]]
+		for k in path.size() - 1:
+			var d := Geometry2D.get_closest_point_to_segment(at, path[k], path[k + 1]).distance_to(at)
+			if d < hw and d < bd:
+				bd = d
+				best = i
+	return best
+
+func delete_road(i: int) -> void:
+	if i < 0 or i >= w.lines.size():
+		return
+	_remember_lines()
+	_mark_line(w.lines[i])
+	w.lines.remove_at(i)
+	if road_line == i:
+		road_line = -1
+	elif road_line > i:
+		road_line -= 1
+
+func set_road_kind(k: String) -> void:
+	road_kind = k
+	if road_line >= 0 and road_line < w.lines.size() and w.lines[road_line][0] != k:
+		begin()
+		_remember_lines()
+		w.lines[road_line][0] = k
+		_mark_line(w.lines[road_line])
+		end()
+
+## Куски графики вдоль дороги (и соседние: у соседей меняются перекрёстки и камешки на траве)
+func _mark_line(e: Array) -> void:
+	if view == null:
+		return
+	var pts := GameWorld.line_path(e)
+	if pts.is_empty() and e.size() >= 3:
+		pts.append(Vector2(e[1], e[2]))
+	for p in pts:
+		for o in [Vector2.ZERO, Vector2(8, 0), Vector2(-8, 0), Vector2(0, 8), Vector2(0, -8)]:
+			view.mark_point(p.x + o.x, p.y + o.y)
+
 func set_spawn(at: Vector2) -> bool:
 	if w.circle_blocked(at.x, at.y, GameState.PLAYER_R):
 		return false
@@ -275,6 +352,15 @@ func undo() -> bool:
 		w.index_props()
 	if a["spawn"] != null:
 		w.spawn = a["spawn"]
+	if a.get("lines") != null:
+		for e in w.lines:
+			_mark_line(e)
+		w.lines = a["lines"]
+		for e in w.lines:
+			_mark_line(e)
+		w.index_lines()
+		if road_line >= w.lines.size():
+			road_line = -1
 	if a["t"].size() > 0:
 		w.compute_buildings()
 		if view != null:
@@ -434,7 +520,7 @@ func _one_move(p: Vector2) -> void:
 		one_moved = true
 	var c := _cell(p)
 	match tool:
-		Tool.HAND, Tool.PROP, Tool.SPAWN:
+		Tool.HAND, Tool.PROP, Tool.SPAWN, Tool.ROAD:
 			if one_moved:
 				focus += view.ground_point(_prev_p) - view.ground_point(p)
 				_clamp_focus()
@@ -477,6 +563,22 @@ func _one_up(p: Vector2) -> void:
 					_say("Поставлено: %s. «Выбор» — сдвинуть или повернуть" % Props.DEFS[prop_id]["name"])
 		Tool.SELECT:
 			end()
+		Tool.ROAD:
+			if not one_moved:
+				var gp := view.ground_point(p)
+				begin()
+				if road_del:
+					var ri := road_at(gp)
+					delete_road(ri)
+					road_del = false
+					_say("Дорога удалена" if ri >= 0 else "Здесь нет дороги")
+				elif road_point(gp) >= 0:
+					var np: int = (w.lines[road_line].size() - 1) / 2
+					_say("Точек: %d. Касайся дальше — дорога продолжится; «Новая дорога» — закончить" % np if np > 1 else "Начало дороги. Коснись следующей точки")
+				else:
+					_say("Дальше нельзя: край карты или в дороге уже %d точек" % GameWorld.MAX_LINE_PTS)
+				end()
+				_update_road_marks()
 		Tool.SPAWN:
 			if not one_moved:
 				begin()
@@ -550,6 +652,31 @@ func _make_markers() -> void:
 	marker_spawn.material_override = _mat(Color(0.3, 1.0, 0.4, 0.55))
 	marker_spawn.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	view.add_child(marker_spawn)
+
+## Метки точек рисуемой дороги
+func _update_road_marks() -> void:
+	if view == null:
+		return
+	var pts := []
+	if road_line >= 0 and road_line < w.lines.size():
+		var e: Array = w.lines[road_line]
+		for k in range(1, e.size() - 1, 2):
+			pts.append(Vector3(e[k], 0.3, e[k + 1]))
+	while road_marks.size() < pts.size():
+		var mi := MeshInstance3D.new()
+		var cm := CylinderMesh.new()
+		cm.top_radius = 0.45
+		cm.bottom_radius = 0.45
+		cm.height = 0.1
+		mi.mesh = cm
+		mi.material_override = _mat(Color(1.0, 0.5, 0.1, 0.75))
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		view.add_child(mi)
+		road_marks.append(mi)
+	for i in road_marks.size():
+		road_marks[i].visible = i < pts.size()
+		if i < pts.size():
+			road_marks[i].position = pts[i]
 
 func _update_markers() -> void:
 	marker_rect.visible = rect_a.x >= 0
@@ -673,6 +800,11 @@ func _set_tool(k: int) -> void:
 		Tool.PROP: _say("Объект: выбери внизу и коснись места на карте")
 		Tool.SELECT: _say("Выбор: коснись объекта, тяни — сдвинуть; кнопки внизу — повернуть, удалить")
 		Tool.SPAWN: _say("Спавн: коснись места, где игроки появляются и приходят в себя")
+		Tool.ROAD: _say("Дорога: касайся карты — точки дороги, игра сгладит их в кривую. Вид — внизу")
+	if tool != Tool.ROAD:
+		road_line = -1
+		road_del = false
+	_update_road_marks()
 
 func _fill_palette() -> void:
 	if palette == null:
@@ -697,6 +829,24 @@ func _fill_palette() -> void:
 				b2.button_group = grp2
 				b2.set_pressed_no_signal(id == prop_id)
 				palette.add_child(b2)
+		Tool.ROAD:
+			var grp3 := ButtonGroup.new()
+			for rk in ROAD_KINDS:
+				var b3 := _btn(rk[1], func(): set_road_kind(rk[0]); _fill_palette())
+				b3.toggle_mode = true
+				b3.button_group = grp3
+				b3.set_pressed_no_signal(rk[0] == road_kind)
+				palette.add_child(b3)
+			palette.add_child(_btn("Новая дорога", func():
+				road_line = -1
+				road_del = false
+				_update_road_marks()
+				_say("Следующее касание начнёт новую дорогу"), Color(0.22, 0.34, 0.26)))
+			palette.add_child(_btn("Удалить дорогу", func():
+				road_line = -1
+				road_del = true
+				_update_road_marks()
+				_say("Коснись дороги, которую удалить"), Color(0.42, 0.22, 0.22)))
 		Tool.SELECT:
 			if sel >= 0 and sel < w.props.size():
 				var nm: String = Props.DEFS[w.props[sel][0]]["name"]
@@ -740,6 +890,7 @@ func _sel_do(what: String) -> void:
 func _on_undo() -> void:
 	_say("Отменено" if undo() else "Отменять нечего")
 	_fill_palette()
+	_update_road_marks()
 
 func _on_save() -> void:
 	save_draft()

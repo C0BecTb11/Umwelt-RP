@@ -87,6 +87,9 @@ func build_chunk(m: Mesher, cx: int, cy: int) -> void:
 		m.rot_y(e[3])
 		Props.build(m, e[0])
 	m.identity()
+	for r in w.lines_chunk.get(Vector2i(cx, cy), []):
+		_line_seg(m, r)
+	m.mat = Mesher.M_NONE
 
 func _tile(m: Mesher, x: int, y: int) -> void:
 	m.mat = Mesher.M_NONE
@@ -141,11 +144,12 @@ func _ground(m: Mesher, t: int, x: int, y: int, x0: float, z0: float, x1: float,
 		m.flat(x0, mz, mx, z1, 0, jit(base, hv * 5, 0.02))
 		m.flat(mx, mz, x1, z1, 0, jit(base, hv * 7, 0.02))
 		m.mat = Mesher.M_NONE
-		if x1 - x0 > 0.9 and hv % 37 == 0:
+		var bare := (hv % 37 == 0 or hv % 23 == 1) and not w.lines_chunk.is_empty() and w.on_line_road(Vector2(mx, mz), -1, true)
+		if x1 - x0 > 0.9 and hv % 37 == 0 and not bare:
 			var ox := x0 + 0.3 + (hv % 5) * 0.08
 			var oz := z0 + 0.3 + (hv % 7) * 0.06
 			m.aabb(ox, 0, oz, ox + 0.22, 0.12, oz + 0.16, c(0x7E7E78))
-		if x1 - x0 > 0.9 and hv % 23 == 1:
+		if x1 - x0 > 0.9 and hv % 23 == 1 and not bare:
 			m.identity()
 			m.translate(Vector3(x0 + 0.5, 0, z0 + 0.5))
 			m.rot_y(hv % 90)
@@ -556,3 +560,83 @@ static func build_door(m: Mesher) -> void:
 		m.box(Vector3(0.42, 0.52, z), Vector3(0.6, 0.62, 0.01), d)
 	m.box(Vector3(0.72, 1.0, 0.05), Vector3(0.05, 0.05, 0.06), c(0xE0C050, 0))
 	m.box(Vector3(0.72, 1.0, -0.05), Vector3(0.05, 0.05, 0.06), c(0xE0C050, 0))
+
+# ================== ДОРОГИ-ЛИНИИ ==================
+const LINE_ROAD_Y := 0.02      # асфальт линии чуть выше травы и клеточной дороги
+const LINE_SIDE_Y := 0.07      # тротуар линии
+const LINE_MARK_Y := 0.027     # разметка
+
+## Плоский четырёхугольник лицом вверх (порядок точек любой, по кругу)
+static func _up_quad(m: Mesher, a: Vector2, b: Vector2, c: Vector2, d: Vector2, y: float, col: Color) -> void:
+	var A := Vector3(a.x, y, a.y)
+	var B := Vector3(b.x, y, b.y)
+	var C := Vector3(c.x, y, c.y)
+	var D := Vector3(d.x, y, d.y)
+	if (B - A).cross(C - A).y < 0.0:
+		m.quad(A, D, C, B, col)
+	else:
+		m.quad(A, B, C, D, col)
+
+## Полоса вдоль куска кривой между смещениями o1..o2 от оси (м, со знаком)
+static func _band(m: Mesher, r: Array, o1: float, o2: float, y: float, col: Color) -> void:
+	var a: Vector2 = r[1]
+	var b: Vector2 = r[2]
+	var na: Vector2 = r[3]
+	var nb: Vector2 = r[4]
+	_up_quad(m, a + na * o1, a + na * o2, b + nb * o2, b + nb * o1, y, col)
+
+## Один кусок (~1 м) дороги-линии: асфальт, края, разметка. На чужом асфальте (перекрёсток) края и разметку
+## не рисуем — иначе тротуар одной дороги лёг бы поперёк другой
+func _line_seg(m: Mesher, r: Array) -> void:
+	var kind: String = r[0]
+	var hw: float = GameWorld.LINE_ROAD_HW[kind]
+	var ow: float = GameWorld.LINE_OUTER_HW[kind]
+	var a: Vector2 = r[1]
+	var b: Vector2 = r[2]
+	var mid := (a + b) * 0.5
+	var nm: Vector2 = ((r[3] as Vector2) + (r[4] as Vector2)).normalized()
+	var li: int = r[7]
+	var s_mid: float = (float(r[5]) + float(r[6])) * 0.5
+	m.mat = Mesher.M_ASPHALT
+	_band(m, r, -hw, hw, LINE_ROAD_Y, c(0x3C3D40))
+	var free_mid := not w.on_line_road(mid, li)
+	for side in [-1.0, 1.0]:
+		var edge_free := not w.on_line_road(mid + nm * side * (hw + 1.0), li)
+		if not edge_free:
+			continue
+		if kind == "street":
+			m.mat = Mesher.M_CONCRETE
+			_band(m, r, side * hw, side * (hw + 0.18), LINE_SIDE_Y + 0.005, c(0x7C7C76))
+			_band(m, r, side * (hw + 0.18), side * ow, LINE_SIDE_Y, c(0x9C9C96))
+			# бордюр: стенка от асфальта до тротуара
+			var pa: Vector2 = a + (r[3] as Vector2) * side * hw
+			var pb: Vector2 = b + (r[4] as Vector2) * side * hw
+			var A0 := Vector3(pa.x, LINE_ROAD_Y, pa.y)
+			var B0 := Vector3(pb.x, LINE_ROAD_Y, pb.y)
+			var A1 := Vector3(pa.x, LINE_SIDE_Y + 0.005, pa.y)
+			var B1 := Vector3(pb.x, LINE_SIDE_Y + 0.005, pb.y)
+			var face := (B0 - A0).cross(A1 - A0)
+			var toward := Vector3(-nm.x * side, 0.0, -nm.y * side)
+			if face.dot(toward) >= 0.0:
+				m.quad(A0, B0, B1, A1, c(0x6E6E68))
+			else:
+				m.quad(B0, A0, A1, B1, c(0x6E6E68))
+		else:
+			m.mat = Mesher.M_ASPHALT
+			_band(m, r, side * hw, side * ow, LINE_ROAD_Y + 0.002, c(0x5E5E58))
+		m.mat = Mesher.M_NONE
+		if kind == "highway" and free_mid:
+			_band(m, r, side * (hw - 0.45), side * (hw - 0.3), LINE_MARK_Y, c(0xD8D8D0))
+	m.mat = Mesher.M_NONE
+	if not free_mid:
+		return
+	var yel := c(0xC8A83A)
+	if kind == "street":
+		if fmod(s_mid, 3.0) < 1.5:
+			_band(m, r, -0.06, 0.06, LINE_MARK_Y, yel)
+	else:
+		_band(m, r, -0.25, -0.12, LINE_MARK_Y, yel)
+		_band(m, r, 0.12, 0.25, LINE_MARK_Y, yel)
+		if fmod(s_mid, 9.0) < 3.0:
+			_band(m, r, -3.07, -2.93, LINE_MARK_Y, c(0xD8D8D0))
+			_band(m, r, 2.93, 3.07, LINE_MARK_Y, c(0xD8D8D0))

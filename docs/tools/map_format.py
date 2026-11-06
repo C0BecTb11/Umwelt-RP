@@ -29,6 +29,10 @@ def main():
     out = '{"v": 1, "w": %d, "h": %d, "spawn": %s,\n"rows": [\n' % (w, h, json.dumps([num(x) for x in d["spawn"]]))
     out += ",\n".join(json.dumps(r) for r in rows) + "\n],\n\"props\": [\n"
     out += ",\n".join(json.dumps([p[0], num(p[1]), num(p[2]), int(round(float(p[3])))], ensure_ascii=False) for p in d["props"])
+    lines = [l for l in d.get("lines", []) if len(l) >= 5]
+    if lines:                         # дороги-линии (с 0.38): вид и точки, по одной дороге на строку
+        out += "\n],\n\"lines\": [\n"
+        out += ",\n".join(json.dumps([l[0]] + [num(v) for v in l[1:]]) for l in lines)
     out += "\n]}\n"
     sys.stdout.write(out)
 
