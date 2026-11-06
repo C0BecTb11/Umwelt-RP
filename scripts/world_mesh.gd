@@ -144,7 +144,8 @@ func _ground(m: Mesher, t: int, x: int, y: int, x0: float, z0: float, x1: float,
 		m.flat(x0, mz, mx, z1, 0, jit(base, hv * 5, 0.02))
 		m.flat(mx, mz, x1, z1, 0, jit(base, hv * 7, 0.02))
 		m.mat = Mesher.M_NONE
-		var bare := (hv % 37 == 0 or hv % 23 == 1) and not w.lines_chunk.is_empty() and w.on_line_road(Vector2(mx, mz), -1, true)
+		# камешки и травинки — только не под дорогой-линией (с запасом на их размер)
+		var bare := (hv % 37 == 0 or hv % 23 == 1) and not w.lines_chunk.is_empty() and w.on_line_road(Vector2(mx, mz), -1, true, 0.6)
 		if x1 - x0 > 0.9 and hv % 37 == 0 and not bare:
 			var ox := x0 + 0.3 + (hv % 5) * 0.08
 			var oz := z0 + 0.3 + (hv % 7) * 0.06

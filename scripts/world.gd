@@ -394,15 +394,15 @@ func index_lines() -> void:
 			s += ds
 
 ## Точка на асфальте другой линии (кроме номера skip): там не рисуются тротуары и разметка — перекрёсток.
-## outer — вместе с тротуарами/обочинами (там не рисуются камешки и травинки клетки под дорогой)
-func on_line_road(p: Vector2, skip: int, outer: bool = false) -> bool:
+## outer — вместе с тротуарами/обочинами (там не рисуются камешки и травинки клетки под дорогой); pad — запас, м
+func on_line_road(p: Vector2, skip: int, outer: bool = false, pad: float = 0.0) -> bool:
 	var ck := Vector2i(floori(p.x) / PROP_CHUNK, floori(p.y) / PROP_CHUNK)
 	for dy in range(-1, 2):
 		for dx in range(-1, 2):
 			for r in lines_chunk.get(ck + Vector2i(dx, dy), []):
 				if r[7] == skip:
 					continue
-				var hw: float = LINE_OUTER_HW[r[0]] if outer else LINE_ROAD_HW[r[0]]
+				var hw: float = (LINE_OUTER_HW[r[0]] if outer else LINE_ROAD_HW[r[0]]) + pad
 				if Geometry2D.get_closest_point_to_segment(p, r[1], r[2]).distance_squared_to(p) < hw * hw:
 					return true
 	return false

@@ -1185,6 +1185,16 @@ func test_road_lines() -> void:
 					on_other += 1
 	check("Дороги: асфальт строится, на перекрёстке тротуар не лежит поперёк другой дороги", asphalt > 100 and on_other == 0,
 		"асфальт %d, тротуара на трассе %d" % [asphalt, on_other])
+	# камешки и травинки клеток под дорогой не торчат из асфальта и тротуара (были в первой сборке 0.38)
+	var poke := 0
+	for ck in w.lines_chunk:
+		m.clear()
+		wm.build_chunk(m, ck.x, ck.y)
+		for i in range(0, m.verts.size(), 3):
+			var c3: Vector3 = (m.verts[i] + m.verts[i + 1] + m.verts[i + 2]) / 3.0
+			if int(m.uvs[i].x) == Mesher.M_NONE and c3.y > 0.03 and c3.y < 0.4 and w.on_line_road(Vector2(c3.x, c3.z), -1, true):
+				poke += 1
+	check("Дороги: камешки и травинки не торчат из дороги", poke == 0, "треугольников на дороге: %d" % poke)
 	# редактор: точки, вид, отмена, удаление
 	var ed = load("res://scripts/map_editor.gd").new()
 	ed.headless = true
