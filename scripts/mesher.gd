@@ -110,18 +110,23 @@ func aabb(x0: float, y0: float, z0: float, x1: float, y1: float, z1: float, col:
 	var per := face_mat.size() == 5
 	if per: mat = face_mat[0]
 	flat(x0, z0, x1, z1, y1, top if top != null else col)
-	if per: mat = face_mat[1]
-	quad(Vector3(x0, y0, z1), Vector3(x1, y0, z1), Vector3(x1, y1, z1), Vector3(x0, y1, z1), _fc(1, col))
-	if per: mat = face_mat[2]
-	quad(Vector3(x1, y0, z0), Vector3(x0, y0, z0), Vector3(x0, y1, z0), Vector3(x1, y1, z0), _fc(2, col))
-	if per: mat = face_mat[3]
-	quad(Vector3(x1, y0, z1), Vector3(x1, y0, z0), Vector3(x1, y1, z0), Vector3(x1, y1, z1), _fc(3, col))
-	if per: mat = face_mat[4]
-	quad(Vector3(x0, y0, z0), Vector3(x0, y0, z1), Vector3(x0, y1, z1), Vector3(x0, y1, z0), _fc(4, col))
+	if not per:
+		quad(Vector3(x0, y0, z1), Vector3(x1, y0, z1), Vector3(x1, y1, z1), Vector3(x0, y1, z1), col)
+		quad(Vector3(x1, y0, z0), Vector3(x0, y0, z0), Vector3(x0, y1, z0), Vector3(x1, y1, z0), col)
+		quad(Vector3(x1, y0, z1), Vector3(x1, y0, z0), Vector3(x1, y1, z0), Vector3(x1, y1, z1), col)
+		quad(Vector3(x0, y0, z0), Vector3(x0, y0, z1), Vector3(x0, y1, z1), Vector3(x0, y1, z0), col)
+		return
+	var fcs := face_col.size() == 5
+	mat = face_mat[1]
+	quad(Vector3(x0, y0, z1), Vector3(x1, y0, z1), Vector3(x1, y1, z1), Vector3(x0, y1, z1), face_col[1] if fcs and face_col[1] != null else col)
+	mat = face_mat[2]
+	quad(Vector3(x1, y0, z0), Vector3(x0, y0, z0), Vector3(x0, y1, z0), Vector3(x1, y1, z0), face_col[2] if fcs and face_col[2] != null else col)
+	mat = face_mat[3]
+	quad(Vector3(x1, y0, z1), Vector3(x1, y0, z0), Vector3(x1, y1, z0), Vector3(x1, y1, z1), face_col[3] if fcs and face_col[3] != null else col)
+	mat = face_mat[4]
+	quad(Vector3(x0, y0, z0), Vector3(x0, y0, z1), Vector3(x0, y1, z1), Vector3(x0, y1, z0), face_col[4] if fcs and face_col[4] != null else col)
 	mat = m0
 
-func _fc(i: int, col: Color) -> Color:
-	return face_col[i] if face_col.size() == 5 and face_col[i] != null else col
 
 ## Ящик с центром и размерами в локальных координатах текущего преобразования
 func box(c: Vector3, s: Vector3, col: Color, bottom: bool = false) -> void:

@@ -53,6 +53,7 @@ func _ready() -> void:
 	test_world_textures()
 	test_road_lines()
 	test_water()
+	test_editor_speed_roads()
 	await test_big_map()
 	test_stamina_net()
 	test_server_guards()
@@ -1340,6 +1341,86 @@ func test_water() -> void:
 	var painted: bool = ew.has_water and ew.t(10, 95) == W.WATER
 	ed.undo()
 	check("Редактор: кисть «Вода» и отмена", not had and painted and not ew.has_water and ew.t(10, 95) != W.WATER)
+	ed.queue_free()
+
+## Редактор (0.42, BF-055): кисть по земле не пересчитывает дома; вид дома не зависит от номера; дороги соединяются
+func test_editor_speed_roads() -> void:
+	var ed = load("res://scripts/map_editor.gd").new()
+	ed.headless = true
+	ed.use_draft = false
+	add_child(ed)
+	var w: GameWorld = ed.w
+	# 10 клеток травы подряд, не у дома
+	var gp := Vector2i(-1, -1)
+	for y in range(2, w.h - 2):
+		for x in range(2, w.w - 12):
+			if gp.x >= 0:
+				break
+			var ok := true
+			for k in 10:
+				for dy in range(-1, 2):
+					if w.t(x + k, y + dy) != W.GRASS:
+						ok = false
+			if ok:
+				gp = Vector2i(x, y)
+	var runs := w.buildings_runs
+	ed.begin()
+	for k in 10:
+		ed.paint(gp + Vector2i(k, 0), W.SIDEWALK)
+	ed.end()
+	var ground_fast := w.buildings_runs == runs
+	ed.begin()
+	ed.paint(gp + Vector2i(0, 1), W.WALL)
+	ed.end()
+	check("Редактор: кисть по земле не пересчитывает дома, стена — пересчитывает", gp.x >= 0 and ground_fast and w.buildings_runs == runs + 1,
+		"пересчётов: %d → %d" % [runs, w.buildings_runs])
+	# вид дома не меняется, когда выше на карте появился новый дом (номера домов сдвинулись)
+	var wm := WorldMesh.new(w)
+	var sample := []
+	for bi in range(0, w.buildings.size(), 3):
+		var b: Array = w.buildings[bi]
+		sample.append([b[0], b[1], wm.wall_mat(bi), wm.wall_tint(bi)])
+	ed.begin()
+	ed.rect(Vector2i(1, 1), Vector2i(3, 3), W.WALL, true)
+	ed.end()
+	var same := true
+	for e in sample:
+		var bi2: int = w.building_of[w.idx(e[0], e[1])]
+		if bi2 < 0 or wm.wall_mat(bi2) != e[2] or wm.wall_tint(bi2) != e[3]:
+			same = false
+	check("Редактор: новый дом не перекрашивает остальные (вид — по углу дома, не по номеру)", same and w.buildings[0][0] == 1)
+	# дороги: продолжить от конца, присоединить к середине другой
+	var n0 := w.lines.size()
+	ed.road_line = -1
+	for p in [Vector2(20, 96), Vector2(40, 96), Vector2(60, 96)]:
+		ed.begin()
+		ed.road_tap(p)
+		ed.end()
+	ed.road_line = -1                                   # «Готово»
+	ed.begin()
+	ed.road_tap(Vector2(61.5, 97))                      # у конца — продолжить ту же
+	ed.end()
+	var cont: bool = ed.road_line == n0
+	ed.begin()
+	ed.road_tap(Vector2(75, 96))
+	ed.end()
+	var longer: bool = w.lines.size() == n0 + 1 and (w.lines[n0].size() - 1) / 2 == 4
+	ed.road_line = -1
+	ed.begin()
+	ed.road_tap(Vector2(19.0, 95.0))                    # у начала — дорога разворачивается и продолжается
+	ed.end()
+	var rev: bool = ed.road_line == n0 and Vector2(w.lines[n0][w.lines[n0].size() - 2], w.lines[n0][w.lines[n0].size() - 1]) == Vector2(20, 96)
+	ed.road_line = -1
+	for p in [Vector2(30, 80), Vector2(31, 94)]:        # новая дорога, вторая точка — на асфальте первой
+		ed.begin()
+		ed.road_tap(p)
+		ed.end()
+	var e2: Array = w.lines[w.lines.size() - 1]
+	var joint := Vector2(e2[e2.size() - 2], e2[e2.size() - 1])
+	var on_axis := absf(joint.y - 96.0) <= 0.5
+	check("Редактор: дорога продолжается от конца (и от начала), присоединяется к другой и заканчивается сама",
+		cont and longer and rev and on_axis and ed.road_line == -1 and w.lines.size() == n0 + 2,
+		"%s %s %s, стык %s, дорог %d" % [cont, longer, rev, joint, w.lines.size() - n0])
 	ed.queue_free()
 
 func test_big_map() -> void:

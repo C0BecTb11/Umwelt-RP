@@ -135,13 +135,23 @@ func los(ax: float, ay: float, bx: float, by: float, shot: bool = false) -> bool
 func _is_building_tile(tt: int) -> bool:
 	return tt == WALL or is_floor(tt) or is_door_like(tt) or is_window_like(tt) or is_furniture(tt)
 
+var buildings_runs := 0          # сколько раз пересчитаны дома (проверка: кисть по земле их не пересчитывает)
+
 func compute_buildings() -> void:
+	buildings_runs += 1
+	# быстро: таблица «клетка дома» вместо вызова функции на каждую клетку, соседи — по номеру клетки
+	# (на 500×500 в редакторе это считается после каждой правки стен; BF-055)
+	var bt := PackedByteArray()
+	bt.resize(256)
+	for k in 256:
+		bt[k] = 1 if _is_building_tile(k) else 0
 	buildings.clear()
 	building_of.fill(-1)
 	var q := PackedInt32Array()
 	q.resize(w * h)
-	for start in range(w * h):
-		if building_of[start] >= 0 or not _is_building_tile(tiles[start]):
+	var n := w * h
+	for start in n:
+		if bt[tiles[start]] == 0 or building_of[start] >= 0:
 			continue
 		var id := buildings.size()
 		var x0 := w
@@ -149,29 +159,34 @@ func compute_buildings() -> void:
 		var x1 := 0
 		var y1 := 0
 		var head := 0
-		var tail := 0
-		q[tail] = start
-		tail += 1
+		var tail := 1
+		q[0] = start
 		building_of[start] = id
 		while head < tail:
 			var i: int = q[head]
 			head += 1
 			var x := i % w
 			var y := i / w
-			x0 = mini(x0, x)
-			y0 = mini(y0, y)
-			x1 = maxi(x1, x)
-			y1 = maxi(y1, y)
-			for k in 4:
-				var nx: int = x + DX4[k]
-				var ny: int = y + DY4[k]
-				if not inside(nx, ny):
-					continue
-				var ni := idx(nx, ny)
-				if building_of[ni] < 0 and _is_building_tile(tiles[ni]):
-					building_of[ni] = id
-					q[tail] = ni
-					tail += 1
+			if x < x0: x0 = x
+			if x > x1: x1 = x
+			if y < y0: y0 = y
+			if y > y1: y1 = y
+			if x + 1 < w and building_of[i + 1] < 0 and bt[tiles[i + 1]] == 1:
+				building_of[i + 1] = id
+				q[tail] = i + 1
+				tail += 1
+			if x > 0 and building_of[i - 1] < 0 and bt[tiles[i - 1]] == 1:
+				building_of[i - 1] = id
+				q[tail] = i - 1
+				tail += 1
+			if y + 1 < h and building_of[i + w] < 0 and bt[tiles[i + w]] == 1:
+				building_of[i + w] = id
+				q[tail] = i + w
+				tail += 1
+			if y > 0 and building_of[i - w] < 0 and bt[tiles[i - w]] == 1:
+				building_of[i - w] = id
+				q[tail] = i - w
+				tail += 1
 		buildings.append([x0, y0, x1, y1])
 
 ## Проём в горизонтальной стене (дверь открывается и проходится по оси Y)

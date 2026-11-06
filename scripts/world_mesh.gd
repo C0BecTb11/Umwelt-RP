@@ -51,18 +51,36 @@ func refresh_lamps() -> void:
 func building_at_cell(x: int, y: int) -> int:
 	return w.building_of[w.idx(clampi(x, 0, w.w - 1), clampi(y, 0, w.h - 1))]
 
-## Стены дома снаружи: кирпич или штукатурка (пока — по номеру дома)
-static func wall_mat(bi: int) -> int:
-	return Mesher.M_BRICK if hash2(maxi(bi, 0), 7) % 10 < 4 else Mesher.M_CONCRETE
+## Ключ вида дома — по его левому верхнему углу, а не по номеру: номера домов меняются, когда выше на карте
+## появляется или пропадает дом, и тогда перекрашивался бы весь город (BF-055); угол меняется, только если
+## перестроили сам дом
+func _bkey(bi: int) -> int:
+	if bi < 0 or bi >= w.buildings.size():
+		return 0
+	var b: Array = w.buildings[bi]
+	return hash2(b[0], b[1])
+
+## Стены дома снаружи: кирпич или штукатурка (пока — по дому, выбор в редакторе — позже)
+func wall_mat(bi: int) -> int:
+	return Mesher.M_BRICK if hash2(_bkey(bi), 7) % 10 < 4 else Mesher.M_CONCRETE
 
 ## Цвет стены снаружи: у кирпича — оттенок поверх текстуры, у штукатурки — сам цвет
-static func wall_tint(bi: int) -> Color:
+func wall_tint(bi: int) -> Color:
 	if wall_mat(bi) == Mesher.M_BRICK:
-		return c(BRICK_TINTS[hash2(maxi(bi, 0), 11) % BRICK_TINTS.size()], 0.0)
-	return c(WALL_COLS[maxi(bi, 0) % WALL_COLS.size()], 0.0)
+		return c(BRICK_TINTS[hash2(_bkey(bi), 11) % BRICK_TINTS.size()], 0.0)
+	return c(WALL_COLS[hash2(_bkey(bi), 13) % WALL_COLS.size()], 0.0)
 
 func wall_color(x: int, y: int) -> Color:
-	return wall_tint(building_at_cell(x, y))
+	return _style(building_at_cell(x, y))[1]
+
+## Вид дома [материал, цвет] — с запоминанием на время постройки куска (у стены дома спрашивают много раз)
+var _style_cache := {}
+func _style(bi: int) -> Array:
+	var st = _style_cache.get(bi)
+	if st == null:
+		st = [wall_mat(bi), wall_tint(bi)]
+		_style_cache[bi] = st
+	return st
 
 func _inside(x: int, y: int) -> bool:
 	var t := w.t(x, y)
@@ -78,6 +96,7 @@ static func ground_h(t: int) -> float:
 # ================== ЧАНК ==================
 func build_chunk(m: Mesher, cx: int, cy: int) -> void:
 	m.clear()
+	_style_cache.clear()
 	for y in range(cy * CHUNK, mini(w.h, (cy + 1) * CHUNK)):
 		for x in range(cx * CHUNK, mini(w.w, (cx + 1) * CHUNK)):
 			_tile(m, x, y)
@@ -95,7 +114,7 @@ func _tile(m: Mesher, x: int, y: int) -> void:
 	m.mat = Mesher.M_NONE
 	var t := w.t(x, y)
 	# берег и вода: по полю воды (то же поле решает, где не пройти — GameWorld.water_at)
-	var wf := w.water_corners(x, y)
+	var wf := w.water_corners(x, y) if w.has_water else PackedFloat32Array()
 	if not wf.is_empty():
 		var mx_f := maxf(maxf(wf[0], wf[1]), maxf(wf[2], wf[3]))
 		var mn_f := minf(minf(wf[0], wf[1]), minf(wf[2], wf[3]))
@@ -285,7 +304,7 @@ func _walls(m: Mesher, x: int, y: int, t: int) -> void:
 	var d := W.wall_like(w.t(x, y + 1))
 	var horiz := w.along_y(x, y)
 	# грани стены: в сторону комнаты — штукатурка, наружу — материал дома
-	var outm := wall_mat(building_at_cell(x, y))
+	var outm: int = _style(building_at_cell(x, y))[0]
 	var inner := c(INNER_WALL, 0.0) if outm == Mesher.M_BRICK else col
 	var ins := [_inside(x, y + 1), _inside(x, y - 1), _inside(x + 1, y), _inside(x - 1, y)]
 	var fm := PackedInt32Array([Mesher.M_NONE])
@@ -517,7 +536,7 @@ func build_roof(m: Mesher, bi: int) -> void:
 	var X1: float = b[2] + 0.5 + ov
 	var Z0: float = b[1] + 0.5 - ov
 	var Z1: float = b[3] + 0.5 + ov
-	var col := c(ROOF_COLS[bi % ROOF_COLS.size()])
+	var col := c(ROOF_COLS[hash2(_bkey(bi), 17) % ROOF_COLS.size()])
 	var wm := wall_mat(bi)
 	var wall := dk(wall_tint(bi), 0.82)
 	wall.a = 1.0
