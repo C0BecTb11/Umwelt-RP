@@ -14,7 +14,7 @@
 ```
 Umwelt-RP/
 ├── project.godot              Настройки Godot 4.4: первая сцена — лаунчер, GL Compatibility, экран, тени. Без autoload
-├── export_presets.cfg         Экспорт: «Android» (APK/пакет, без scripts/server_only, server, docs, *.md)
+├── export_presets.cfg         Экспорт: «Android» (APK/пакет, без scripts/server_only, server, docs, *.md; процессоры arm64-v8a и armeabi-v7a)
 │                              и «Linux Server» (выделенный сервер, x86_64)
 ├── icon.png (+ .import)       Иконка приложения
 ├── CLAUDE.md                  Короткие обязательные инструкции для ИИ-разработчика
