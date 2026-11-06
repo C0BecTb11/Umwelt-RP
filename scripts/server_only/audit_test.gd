@@ -52,6 +52,7 @@ func _ready() -> void:
 	test_map_pack()
 	test_world_textures()
 	test_road_lines()
+	test_water()
 	await test_big_map()
 	test_stamina_net()
 	test_server_guards()
@@ -1224,6 +1225,111 @@ func test_road_lines() -> void:
 	check("Редактор: дорога по точкам, смена вида, отмена по шагу, удаление; дорога из одной точки не идёт в файл",
 		made and kind_ok and undo_kind and undo_pt and one_skipped and ew.lines.size() == n0 + 1 and ew.lines[n0].size() == 3,
 		"%s %s %s %s %s, дорог %d" % [made, kind_ok, undo_kind, undo_pt, one_skipped, ew.lines.size()])
+	ed.queue_free()
+
+## Вода и мост (0.40): где вода по полю — там и не пройти; одинокая клетка — не вода; на дорогу вода не заходит;
+## по мосту над водой пройти можно, за перила — нет
+func _water_world() -> GameWorld:
+	var md: Dictionary = GameWorld.read_map_file()
+	var rows: Array = []
+	for y in md["rows"].size():
+		var r: String = md["rows"][y] + ".".repeat(80)
+		var chars := r.split("")
+		for x in range(100, 180):
+			var lake := Vector2(x + 0.5, y + 0.5).distance_to(Vector2(128, 40)) < 11.0
+			var river := absf(x + 0.5 - (157.0 + 6.0 * sin(y / 14.0))) < 4.2
+			if lake or river:
+				chars[x] = "~"
+		chars[115] = "~" if y == 90 else chars[115]       # одинокая клетка воды
+		if y == 30:
+			for x in range(110, 146):
+				chars[x] = "="                            # дорога через озеро: вода на неё не заходит
+		rows.append("".join(chars))
+	md["rows"] = rows
+	md["w"] = int(md["w"]) + 80
+	md["lines"] = [["bridge", 146.0, 74.0, 158.0, 72.0, 170.0, 70.0]]
+	var w := GameWorld.new()
+	return w if w.load_map(md) == "" else null
+
+func test_water() -> void:
+	var w := _water_world()
+	check("Вода: карта с водой и мостом грузится, «~» в файле туда-обратно", w != null and w.has_water
+		and GameWorld.new().load_map(JSON.parse_string(GameWorld.map_text(w.map_data()))) == "")
+	if w == null:
+		return
+	var deep := w.circle_blocked(128.0, 40.0, GameState.PLAYER_R)
+	var dry := not w.circle_blocked(110.0, 70.0, GameState.PLAYER_R)
+	var lone := not w.water_at(Vector2(115.5, 90.5)) and not w.circle_blocked(115.5, 90.5, GameState.PLAYER_R)
+	check("Вода: в озере не пройти, на траве можно; одинокая клетка воды — не вода", deep and dry and lone, "%s %s %s" % [deep, dry, lone])
+	# на дорогу и в дома вода не заходит: у клеток не-травы поле не больше 0.5
+	var intrude := 0
+	for y in w.h:
+		for x in w.w:
+			var tt := w.t(x, y)
+			if tt == W.WATER or tt == W.GRASS or tt == W.TREE:
+				continue
+			for k in 5:
+				var p: Vector2 = Vector2(x + 0.5, y + 0.5) + ([Vector2.ZERO, Vector2(-0.45, -0.45), Vector2(0.45, -0.45), Vector2(0.45, 0.45), Vector2(-0.45, 0.45)][k])
+				if w.water_at(p):
+					intrude += 1
+	check("Вода: на дорогу, тротуар и в дома не заходит", intrude == 0, "точек: %d" % intrude)
+	# что нарисовано — то и не пройти: середины треугольников глади — в воде, травы у берега — на суше
+	var wm := WorldMesh.new(w)
+	var m := Mesher.new()
+	var bad_w := 0
+	var bad_l := 0
+	var water_tris := 0
+	for cy in range(0, 10):
+		for cx in range(10, 18):
+			m.clear()
+			wm.build_chunk(m, cx, cy)
+			for i in range(0, m.verts.size(), 3):
+				var c3: Vector3 = (m.verts[i] + m.verts[i + 1] + m.verts[i + 2]) / 3.0
+				var p2 := Vector2(c3.x, c3.z)
+				var mt := int(m.uvs[i].x)
+				if mt == Mesher.M_WATER and absf(c3.y - WorldMesh.WATER_Y) < 0.01:
+					water_tris += 1
+					if not w.water_at(p2):
+						bad_w += 1
+				elif mt == Mesher.M_DIRT and absf(c3.y) < 0.01 and w.water_corners(floori(p2.x), floori(p2.y)).size() > 0:
+					if w.water_at(p2):
+						bad_l += 1
+	check("Вода: нарисованная гладь — там, где не пройти, трава у берега — где можно", water_tris > 500 and bad_w == 0 and bad_l == 0,
+		"глади %d, гладь на суше %d, трава в воде %d" % [water_tris, bad_w, bad_l])
+	# мост: по настилу над рекой — можно, за перилами — нет
+	var path := GameWorld.line_path(w.lines[0])
+	# точка пути над серединой реки (вода под настилом и по обе стороны)
+	var mi := -1
+	for i in range(1, path.size() - 1):
+		var nn := (path[i + 1] - path[i - 1]).orthogonal().normalized()
+		if mi < 0 and w.water_at(path[i]) and w.water_at(path[i] + nn * 5.0) and w.water_at(path[i] - nn * 5.0):
+			mi = i
+	var mid := path[maxi(mi, 1)]
+	var nrm := (path[maxi(mi, 1) + 1] - path[maxi(mi, 1) - 1]).orthogonal().normalized()
+	var on_deck := mi > 0 and not w.circle_blocked(mid.x, mid.y, GameState.PLAYER_R)
+	var edge := mid + nrm * (GameWorld.LINE_OUTER_HW["bridge"] - 0.1)
+	var past := mid + nrm * (GameWorld.LINE_OUTER_HW["bridge"] + 1.0)
+	var cross := true
+	for i in path.size():
+		if w.circle_blocked(path[i].x, path[i].y, GameState.PLAYER_R):
+			cross = false
+	check("Мост: по всему мосту пройти можно (над водой тоже), у перил и за ними над водой — нет",
+		on_deck and cross and w.circle_blocked(edge.x, edge.y, GameState.PLAYER_R) and w.circle_blocked(past.x, past.y, GameState.PLAYER_R),
+		"настил %s, весь путь %s" % [on_deck, cross])
+	# редактор: кисть воды и отмена
+	var ed = load("res://scripts/map_editor.gd").new()
+	ed.headless = true
+	ed.use_draft = false
+	add_child(ed)
+	var ew: GameWorld = ed.w
+	var had: bool = ew.has_water
+	ed.begin()
+	ed.paint(Vector2i(10, 95), W.WATER)
+	ed.paint(Vector2i(11, 95), W.WATER)
+	ed.end()
+	var painted: bool = ew.has_water and ew.t(10, 95) == W.WATER
+	ed.undo()
+	check("Редактор: кисть «Вода» и отмена", not had and painted and not ew.has_water and ew.t(10, 95) != W.WATER)
 	ed.queue_free()
 
 func test_big_map() -> void:

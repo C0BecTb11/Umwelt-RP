@@ -230,7 +230,9 @@ func _make_door(i: int) -> void:
 func _mark_dirty(i: int) -> void:
 	var x := i % world.w
 	var y := i / world.w
-	for d in [Vector2i(0, 0), Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+	# и по диагонали: берег воды зависит от клеток вокруг (поле воды в углах)
+	for d in [Vector2i(0, 0), Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1),
+			Vector2i(1, 1), Vector2i(-1, 1), Vector2i(1, -1), Vector2i(-1, -1)]:
 		var nx: int = x + d.x
 		var ny: int = y + d.y
 		if not world.inside(nx, ny):

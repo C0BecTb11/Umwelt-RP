@@ -94,6 +94,24 @@ func build_chunk(m: Mesher, cx: int, cy: int) -> void:
 func _tile(m: Mesher, x: int, y: int) -> void:
 	m.mat = Mesher.M_NONE
 	var t := w.t(x, y)
+	# берег и вода: по полю воды (то же поле решает, где не пройти — GameWorld.water_at)
+	var wf := w.water_corners(x, y)
+	if not wf.is_empty():
+		var mx_f := maxf(maxf(wf[0], wf[1]), maxf(wf[2], wf[3]))
+		var mn_f := minf(minf(wf[0], wf[1]), minf(wf[2], wf[3]))
+		if mn_f > 0.5:
+			m.mat = Mesher.M_WATER
+			m.flat(x, y, x + 1, y + 1, WATER_Y, c(WATER_COL))
+			m.mat = Mesher.M_NONE
+			return
+		if mx_f > 0.5:
+			_shore(m, x, y, wf)
+			if t == W.TREE:
+				_tree(m, x, y)
+			return
+	if t == W.WATER:
+		_ground(m, W.GRASS, x, y, x, y, x + 1, y + 1)     # одинокая клетка воды (уже меньше 2 клеток) — трава
+		return
 	var hv := hash2(x, y)
 	var fx := float(x)
 	var fz := float(y)
@@ -231,7 +249,7 @@ func _ground_under_wall(m: Mesher, x: int, y: int) -> void:
 	for k in 4:
 		var n := w.t(x + W.DX4[k], y + W.DY4[k])
 		if not W.wall_like(n) and not W.is_floor(n) and not W.is_furniture(n) and not W.is_car(n):
-			out = W.GRASS if n == W.TREE else n
+			out = W.GRASS if n == W.TREE or n == W.WATER else n
 			break
 	for q in 4:
 		var dx := -1 if q % 2 == 0 else 1
@@ -605,7 +623,7 @@ func _line_seg(m: Mesher, r: Array) -> void:
 		var edge_free := not w.on_line_road(mid + nm * side * (hw + 1.0), li)
 		if not edge_free:
 			continue
-		if kind == "street":
+		if kind == "street" or kind == "bridge":
 			m.mat = Mesher.M_CONCRETE
 			_band(m, r, side * hw, side * (hw + 0.18), LINE_SIDE_Y + 0.005, c(0x7C7C76))
 			_band(m, r, side * (hw + 0.18), side * ow, LINE_SIDE_Y, c(0x9C9C96))
@@ -626,13 +644,17 @@ func _line_seg(m: Mesher, r: Array) -> void:
 			m.mat = Mesher.M_ASPHALT
 			_band(m, r, side * hw, side * ow, LINE_ROAD_Y + 0.002, c(0x5E5E58))
 		m.mat = Mesher.M_NONE
+		if kind == "bridge":
+			_bridge_side(m, r, side, ow)
 		if kind == "highway" and free_mid:
 			_band(m, r, side * (hw - 0.45), side * (hw - 0.3), LINE_MARK_Y, c(0xD8D8D0))
 	m.mat = Mesher.M_NONE
 	if not free_mid:
 		return
+	if kind == "bridge":
+		_bridge_pillar(m, r, hw)
 	var yel := c(0xC8A83A)
-	if kind == "street":
+	if kind == "street" or kind == "bridge":
 		if fmod(s_mid, 3.0) < 1.5:
 			_band(m, r, -0.06, 0.06, LINE_MARK_Y, yel)
 	else:
@@ -641,3 +663,146 @@ func _line_seg(m: Mesher, r: Array) -> void:
 		if fmod(s_mid, 9.0) < 3.0:
 			_band(m, r, -3.07, -2.93, LINE_MARK_Y, c(0xD8D8D0))
 			_band(m, r, 2.93, 3.07, LINE_MARK_Y, c(0xD8D8D0))
+
+# ================== ВОДА ==================
+const WATER_Y := -0.6           # гладь воды ниже земли: виден берег, мост над ней
+const BANK_Y := -0.9            # низ берега (под гладью)
+const WATER_COL := 0x2E5866
+const BANK_COL := 0x5A4C3C
+const SHORE_SUB := 4            # клетка у берега делится на 4×4 — берег плавный (поле воды билинейное)
+
+## Клетка у берега: вода (гладь) и земля (трава) по полю воды, между ними — стенка берега
+func _shore(m: Mesher, x: int, y: int, wf: PackedFloat32Array) -> void:
+	var hv := hash2(x, y)
+	var gcol := jit(c([0x4C6A38, 0x50703C, 0x4A6636, 0x527039][hv % 4]), hv, 0.02)
+	var wcol := c(WATER_COL)
+	var st := 1.0 / SHORE_SUB
+	for j in SHORE_SUB:
+		for i in SHORE_SUB:
+			var u0 := i * st
+			var v0 := j * st
+			var pts := [Vector2(u0, v0), Vector2(u0 + st, v0), Vector2(u0 + st, v0 + st), Vector2(u0, v0 + st)]
+			var val := []
+			for q in pts:
+				val.append(GameWorld.bilerp(wf, q.x, q.y))
+			# обход квадрата: углы и точки пересечения с уровнем 0.5
+			var wet := PackedVector2Array()
+			var dry := PackedVector2Array()
+			var cut := []          # номера вершин в wet, которые — точки берега
+			for k in 4:
+				var a: Vector2 = pts[k]
+				var b: Vector2 = pts[(k + 1) % 4]
+				var fa: float = val[k]
+				var fb: float = val[(k + 1) % 4]
+				if fa > 0.5:
+					wet.append(a)
+				else:
+					dry.append(a)
+				if (fa > 0.5) != (fb > 0.5):
+					var tt := clampf((0.5 - fa) / (fb - fa), 0.0, 1.0)
+					var q := a.lerp(b, tt)
+					cut.append(wet.size())
+					wet.append(q)
+					dry.append(q)
+			var o := Vector2(x, y)
+			m.mat = Mesher.M_WATER
+			_fan(m, wet, o, WATER_Y, wcol)
+			m.mat = Mesher.M_DIRT
+			_fan(m, dry, o, 0.0, gcol)
+			m.mat = Mesher.M_NONE
+			# стенка берега между соседними точками берега, лицом к воде
+			if cut.size() >= 2 and wet.size() >= 3:
+				var cen := Vector2.ZERO
+				for q in wet:
+					cen += q
+				cen /= wet.size()
+				for k in range(0, cut.size() - 1, 2):
+					var p1: Vector2 = wet[cut[k]]
+					var p2: Vector2 = wet[cut[k + 1]]
+					if p1.distance_squared_to(p2) > 1e-8:
+						_bank_seg(m, o + p1, o + p2, 0.0, o + cen)
+
+## Веер треугольников многоугольника (выпуклого) лицом вверх
+static func _fan(m: Mesher, poly: PackedVector2Array, o: Vector2, y: float, col: Color) -> void:
+	for k in range(1, poly.size() - 1):
+		if (poly[k] - poly[0]).cross(poly[k + 1] - poly[0]) != 0.0:
+			_up_tri(m, o + poly[0], o + poly[k], o + poly[k + 1], y, col)
+
+static func _up_tri(m: Mesher, a: Vector2, b: Vector2, cc: Vector2, y: float, col: Color) -> void:
+	var A := Vector3(a.x, y, a.y)
+	var B := Vector3(b.x, y, b.y)
+	var C := Vector3(cc.x, y, cc.y)
+	if (B - A).cross(C - A).y < 0.0:
+		m.tri(A, C, B, col)
+	else:
+		m.tri(A, B, C, col)
+
+## Стенка берега по отрезку a–b от y_top вниз, лицом к точке toward (к воде)
+static func _bank_seg(m: Mesher, a: Vector2, b: Vector2, y_top: float, toward: Vector2) -> void:
+	_vface(m, a, b, y_top, BANK_Y, toward, c(BANK_COL), Mesher.M_DIRT)
+
+# ---------- мост ----------
+## Над водой ли край моста (клетка чуть снаружи настила — вода)
+func _over_water(p: Vector2) -> bool:
+	return w.inside(floori(p.x), floori(p.y)) and w.t(floori(p.x), floori(p.y)) == W.WATER
+
+## Сторона моста над водой: перила (стойка на каждом куске, поручень) и бетонный край настила вниз к воде
+func _bridge_side(m: Mesher, r: Array, side: float, ow: float) -> void:
+	var a: Vector2 = r[1]
+	var b: Vector2 = r[2]
+	var na: Vector2 = r[3]
+	var nb: Vector2 = r[4]
+	var nm := (na + nb).normalized()
+	if not _over_water((a + b) * 0.5 + nm * side * (ow + 0.3)):
+		return
+	var rail := c(0xB8B8B0)
+	var post := c(0x8C8C86)
+	# край настила: стенка снаружи от тротуара вниз
+	var pa := a + na * side * ow
+	var pb := b + nb * side * ow
+	_vface(m, pa, pb, LINE_SIDE_Y, -0.45, pa + na * side, c(0x8A8680), Mesher.M_CONCRETE)
+	# поручень: верх и внутренняя сторона
+	m.mat = Mesher.M_NONE
+	_band(m, r, side * (ow - 0.14), side * (ow - 0.02), 1.0, rail)
+	var ia := a + na * side * (ow - 0.14)
+	var ib := b + nb * side * (ow - 0.14)
+	_vface(m, ia, ib, 1.0, 0.86, a, rail, Mesher.M_NONE)
+	var oa := a + na * side * (ow - 0.02)
+	var ob := b + nb * side * (ow - 0.02)
+	_vface(m, oa, ob, 1.0, 0.86, oa + na * side, rail, Mesher.M_NONE)
+	# стойка в начале куска
+	var sp := a + na * side * (ow - 0.08)
+	m.identity()
+	m.translate(Vector3(sp.x, LINE_SIDE_Y, sp.y))
+	m.box(Vector3(0, 0.45, 0), Vector3(0.07, 0.9, 0.07), post)
+	m.identity()
+
+## Опора под мостом над водой — раз в 8 м пути
+func _bridge_pillar(m: Mesher, r: Array, hw: float) -> void:
+	var a: Vector2 = r[1]
+	var b: Vector2 = r[2]
+	if floori(float(r[5]) / 8.0) == floori(float(r[6]) / 8.0) or not _over_water(a):
+		return
+	var t := (b - a).normalized()
+	m.identity()
+	m.translate(Vector3(a.x, WATER_Y - 0.2, a.y))
+	m.rot_y(rad_to_deg(atan2(t.x, t.y)))
+	m.mat = Mesher.M_CONCRETE
+	m.box(Vector3(0, 0.2, 0), Vector3((hw + 0.6) * 2.0, 0.4 + (-0.45 - WATER_Y), 0.8), c(0x8A8680))
+	m.identity()
+	m.mat = Mesher.M_NONE
+
+## Вертикальная стенка по отрезку a–b от y0 до y1, лицом к точке toward
+static func _vface(m: Mesher, a: Vector2, b: Vector2, y0: float, y1: float, toward: Vector2, col: Color, mat: int) -> void:
+	var A0 := Vector3(a.x, y1, a.y)
+	var B0 := Vector3(b.x, y1, b.y)
+	var A1 := Vector3(a.x, y0, a.y)
+	var B1 := Vector3(b.x, y0, b.y)
+	var face := (B0 - A0).cross(A1 - A0)
+	var mid := (a + b) * 0.5
+	m.mat = mat
+	if face.dot(Vector3(toward.x - mid.x, 0.0, toward.y - mid.y)) >= 0.0:
+		m.quad(A0, B0, B1, A1, col)
+	else:
+		m.quad(B0, A0, A1, B1, col)
+	m.mat = Mesher.M_NONE

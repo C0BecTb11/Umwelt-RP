@@ -8,7 +8,7 @@
 import json
 import sys
 
-CHARS = ".=-wt#DdO?T!FCWSMLRcvx"   # как GameWorld.MAP_CHARS
+CHARS = ".=-wt#DdO?T!FCWSMLRcvx~"  # как GameWorld.MAP_CHARS
 
 
 def num(v):

@@ -14,7 +14,7 @@ const W = preload("res://scripts/world.gd")
 
 enum Tool { HAND, BRUSH, RECT, FRAME, PROP, SELECT, SPAWN, ROAD }
 const TOOL_NAMES := ["Рука", "Кисть", "Прямоуг.", "Рамка", "Объект", "Выбор", "Спавн", "Дорога"]
-const ROAD_KINDS := [["street", "Улица"], ["highway", "Трасса"]]
+const ROAD_KINDS := [["street", "Улица"], ["highway", "Трасса"], ["bridge", "Мост"]]
 const CAR_H := 100     # «машина вдоль», занимает 2 клетки
 const CAR_V2 := 101    # «машина поперёк»
 ## Палитра клеток: [номер, название, цвет кнопки]
@@ -23,7 +23,7 @@ const TILES := [
 	[W.SIDEWALK, "Тротуар", Color(0.6, 0.6, 0.58)], [W.WOOD, "Пол: доски", Color(0.6, 0.42, 0.26)],
 	[W.TILEFLOOR, "Пол: плитка", Color(0.75, 0.75, 0.72)], [W.WALL, "Стена", Color(0.85, 0.8, 0.7)],
 	[W.DOOR, "Дверь", Color(0.55, 0.32, 0.18)], [W.WINDOW, "Окно", Color(0.5, 0.7, 0.85)],
-	[W.TREE, "Дерево", Color(0.2, 0.42, 0.18)], [W.FRIDGE, "Холодильник", Color(0.9, 0.9, 0.9)],
+	[W.TREE, "Дерево", Color(0.2, 0.42, 0.18)], [W.WATER, "Вода", Color(0.2, 0.42, 0.52)], [W.FRIDGE, "Холодильник", Color(0.9, 0.9, 0.9)],
 	[W.COUNTER, "Стойка", Color(0.55, 0.45, 0.35)], [W.WARDROBE, "Шкаф", Color(0.45, 0.32, 0.2)],
 	[W.SHELF, "Полка", Color(0.5, 0.4, 0.3)], [W.MEDCAB, "Аптечка", Color(0.85, 0.85, 0.8)],
 	[W.LOCKER, "Шкафчик", Color(0.45, 0.5, 0.55)], [W.STORESHELF, "Стеллаж", Color(0.6, 0.55, 0.45)],
@@ -185,6 +185,8 @@ func _raw(i: int, v: int) -> void:
 		act["t"][i] = w.t_at(i)
 	w.tiles[i] = v
 	w.vis_dirty[i] = true
+	if v == W.WATER:
+		w.has_water = true
 
 ## Кисть: одна клетка (машина — две)
 func paint(c: Vector2i, v: int) -> void:
@@ -343,6 +345,8 @@ func undo() -> bool:
 	for i in a["t"]:
 		w.tiles[i] = a["t"][i]
 		w.vis_dirty[i] = true
+	if a["t"].size() > 0:
+		w.has_water = w.tiles.has(W.WATER)
 	if a["props"] != null:
 		for e in w.props:
 			_mark_e(e)

@@ -23,6 +23,7 @@ const STORESHELF := 18
 const CAR := 19
 const CAR_V := 20
 const CAR_TAIL := 21
+const WATER := 22              # вода (с 0.40): не пройти, кроме моста-линии над ней
 
 const DX4 := [1, -1, 0, 0]
 const DY4 := [0, 0, 1, -1]
@@ -86,6 +87,8 @@ func circle_blocked(cx: float, cy: float, r: float) -> bool:
 	var x1 := floori(cx + r)
 	var y0 := floori(cy - r)
 	var y1 := floori(cy + r)
+	if has_water and _water_blocks(cx, cy, r):
+		return true
 	for y in range(y0, y1 + 1):
 		for x in range(x0, x1 + 1):
 			if not solid(x, y):
@@ -185,15 +188,16 @@ func along_y(x: int, y: int) -> bool:
 ## Карта игры — файл maps/city.json (её правят в редакторе карты, в игру она попадает только с выпуском).
 ## Клетки хранятся строками символов: одна строка — один ряд карты, так изменения видны в истории коммитов.
 const MAP_PATH := "res://maps/city.json"
-const MAP_CHARS := ".=-wt#DdO?T!FCWSMLRcvx"   # символ = номер клетки (9 и 11 — старые, на карте недопустимы)
+const MAP_CHARS := ".=-wt#DdO?T!FCWSMLRcvx~"  # символ = номер клетки (9 и 11 — старые, на карте недопустимы; ~ вода — 0.40)
 const MAX_SIDE := 500           # клеток по стороне (1 клетка ≈ 1 м); 500×500 проверено тестом test_big_map
 const PROP_CHUNK := 10          # = WorldMesh.CHUNK: объекты разложены по кускам графики (props_chunk)
 const MAX_PROPS := 20000
 const Props = preload("res://scripts/props.gd")
 ## Дороги-линии. Ширина: асфальт (половина) и вся полоса с тротуарами/обочинами (половина), метры
-const LINE_KINDS := ["street", "highway"]
-const LINE_ROAD_HW := {"street": 3.0, "highway": 6.0}
-const LINE_OUTER_HW := {"street": 5.0, "highway": 7.5}
+const LINE_KINDS := ["street", "highway", "bridge"]
+const LINE_ROAD_HW := {"street": 3.0, "highway": 6.0, "bridge": 3.0}
+const LINE_OUTER_HW := {"street": 5.0, "highway": 7.5, "bridge": 4.0}
+const BRIDGE_RAIL := 0.15       # перила моста: столько от края настила не пройти
 const MAX_LINES := 2000
 const MAX_LINE_PTS := 64
 const LINE_STEP := 1.0          # шаг сглаженной кривой, м
@@ -265,6 +269,7 @@ func load_map(d: Dictionary) -> String:
 	compute_buildings()
 	index_props()
 	index_lines()
+	has_water = tiles.has(WATER)
 	dirty_tiles.clear()
 	vis_dirty.clear()
 	events.clear()
@@ -406,3 +411,78 @@ func on_line_road(p: Vector2, skip: int, outer: bool = false, pad: float = 0.0) 
 				if Geometry2D.get_closest_point_to_segment(p, r[1], r[2]).distance_squared_to(p) < hw * hw:
 					return true
 	return false
+
+## Точка (круг радиуса r) целиком на настиле моста — над водой здесь можно стоять
+func on_bridge(p: Vector2, r: float) -> bool:
+	var ck := Vector2i(floori(p.x) / PROP_CHUNK, floori(p.y) / PROP_CHUNK)
+	var lim: float = LINE_OUTER_HW["bridge"] - BRIDGE_RAIL - r
+	for dy in range(-1, 2):
+		for dx in range(-1, 2):
+			for rec in lines_chunk.get(ck + Vector2i(dx, dy), []):
+				if rec[0] == "bridge" and Geometry2D.get_closest_point_to_segment(p, rec[1], rec[2]).distance_squared_to(p) <= lim * lim:
+					return true
+	return false
+
+# ================== ВОДА ==================
+## Поле воды: в каждом углу сетки — доля воды в 4 клетках вокруг (0…1). Где вокруг угла есть не трава
+## (дорога, тротуар, дом, край карты) — не больше 0.5: вода не заходит на них. Вода — там, где
+## билинейное поле > 0.5: по нему и рисуется плавный берег, и решается, где не пройти. Клетка воды одна
+## (или полоса в 1 клетку) так водой не становится — вода от 2 клеток в ширину
+var has_water := false
+
+func water_corner(px: int, py: int) -> float:
+	var n := 0
+	var hard := false
+	for c in [Vector2i(px - 1, py - 1), Vector2i(px, py - 1), Vector2i(px - 1, py), Vector2i(px, py)]:
+		var tt := t(c.x, c.y)
+		if tt == WATER:
+			n += 1
+		elif tt != GRASS and tt != TREE:
+			hard = true
+	var f := n / 4.0
+	return minf(f, 0.5) if hard else f
+
+## Поле в 4 углах клетки [лв, пв, пн, лн] (по обходу) или пусто, если рядом нет воды
+func water_corners(x: int, y: int) -> PackedFloat32Array:
+	if not has_water:
+		return PackedFloat32Array()
+	var near := false
+	for dy in range(-1, 2):
+		for dx in range(-1, 2):
+			if t(x + dx, y + dy) == WATER:
+				near = true
+	if not near:
+		return PackedFloat32Array()
+	return PackedFloat32Array([water_corner(x, y), water_corner(x + 1, y), water_corner(x + 1, y + 1), water_corner(x, y + 1)])
+
+## Билинейное поле внутри клетки: u, v от 0 до 1; углы — [лв, пв, пн, лн]
+static func bilerp(f: PackedFloat32Array, u: float, v: float) -> float:
+	return lerpf(lerpf(f[0], f[1], u), lerpf(f[3], f[2], u), v)
+
+## Точка в воде (по полю)
+func water_at(p: Vector2) -> bool:
+	if not has_water:
+		return false
+	var x := floori(p.x)
+	var y := floori(p.y)
+	var f := water_corners(x, y)
+	return not f.is_empty() and bilerp(f, p.x - x, p.y - y) > 0.5
+
+## Круг задевает воду (середина и 8 точек по краю); на мосту — нет
+func _water_blocks(cx: float, cy: float, r: float) -> bool:
+	# быстро: нет клетки воды рядом — нет и воды (поле > 0.5 только у клеток воды и их соседей)
+	var near := false
+	for y in range(floori(cy - r) - 1, floori(cy + r) + 2):
+		for x in range(floori(cx - r) - 1, floori(cx + r) + 2):
+			if inside(x, y) and tiles[y * w + x] == WATER:
+				near = true
+	if not near:
+		return false
+	var c := Vector2(cx, cy)
+	var any := false
+	for k in 9:
+		var p := c if k == 0 else c + Vector2.from_angle(k * PI / 4.0) * r
+		if water_at(p):
+			any = true
+			break
+	return any and not on_bridge(c, r)

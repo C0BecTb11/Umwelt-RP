@@ -16,6 +16,7 @@ const M_SLATE := 5
 const M_ROOM_LIT := 6
 const M_ROOM_DARK := 7
 const M_DIRT := 8
+const M_WATER := 9               # не слой текстуры: шейдер рисует рябь сам
 
 var verts := PackedVector3Array()
 var norms := PackedVector3Array()
