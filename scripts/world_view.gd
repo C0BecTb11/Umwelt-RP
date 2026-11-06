@@ -60,6 +60,7 @@ func setup(w: GameWorld) -> void:
 	wm = WorldMesh.new(w)
 	mat_world = ShaderMaterial.new()
 	mat_world.shader = load("res://shaders/world.gdshader")
+	mat_world.set_shader_parameter("albedo_tex", load("res://assets/tex/world_albedo.png"))
 	mat_fx = StandardMaterial3D.new()
 	mat_fx.vertex_color_use_as_albedo = true
 	mat_fx.vertex_color_is_srgb = true

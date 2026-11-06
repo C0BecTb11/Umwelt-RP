@@ -44,7 +44,7 @@ Umwelt-RP/
 │   ├── items.gd               Items: предметы, одежда (части моделей), слоты, причёски, цвета
 │   ├── hud.gd                 Hud: интерфейс поверх 3D (кнопки, джойстик, панели, часы, деньги)
 │   ├── icons.gd               Icons: иконки предметов и пиктограммы — рисуются кодом
-│   ├── mesher.gd              Mesher: построитель low-poly геометрии с цветом вершин
+│   ├── mesher.gd              Mesher: построитель low-poly геометрии с цветом вершин и номером материала (UV.x)
 │   ├── saves.gd               Saves: сохранение офлайн-мира user://save.json (+ резервная копия)
 │   ├── demo.gd                Demo: демо-сцены для скриншотов (--demo=…)
 │   └── server_only/           НЕ попадает к игрокам (исключено из экспорта Android)
@@ -56,7 +56,10 @@ Umwelt-RP/
 ├── maps/
 │   └── city.json              Карта игры: ряды клеток символами, объекты, точка появления. Попадает в пакет и сервер
 ├── shaders/
-│   └── world.gdshader         Шейдер города: цвет вершин, прорезание стен перед игроком, свечение окон ночью
+│   └── world.gdshader         Шейдер города: цвет вершин × текстура слоя (по мировым координатам), прорезание стен перед игроком, свечение окон ночью
+├── assets/tex/                Текстуры города Quaternius Downtown City MegaKit (CC0), с 0.37
+│   ├── world_albedo.png       Все слои 512×512 одной полосой (импорт «2D Array»); собирает docs/tools/build_textures.py
+│   └── LICENSE.txt            Источник, лицензия, порядок слоёв
 ├── assets/chars/              Модели персонажей Quaternius (CC0), извлечены скриптом docs/tools/extract_chars.gd
 │   ├── LICENSE.txt            Источник и лицензия CC0
 │   ├── m_base.scn, f_base.scn Скелет (62 кости) + AnimationPlayer с 13 анимациями — мужской / женский
@@ -77,6 +80,7 @@ Umwelt-RP/
 │   └── tools/
 │       ├── extract_chars.gd   Инструмент: извлечение частей моделей из glTF Quaternius (запуск вне проекта)
 │       ├── map_format.py      Черновик карты из Supabase (JSON) → текст maps/city.json в принятом виде
+│       ├── build_textures.py  Текстуры набора Quaternius → assets/tex/world_albedo.png (слои 512×512), печатает средние яркости
 │       ├── pending_probe.gd   Проверка в CI: с одного адреса держится не больше 3 подключений без входа (BF-043)
 │       ├── probe_server.gd    Проверка в CI перед выпуском: боевой сервер предъявляет сертификат, вшитый в игру (Net.SERVER_CERT)
 │       └── verify_manifest.gd Проверка в CI: код лаунчера принимает подпись манифеста сборки, подменённый — нет
@@ -113,7 +117,7 @@ Umwelt-RP/
 | `scripts/items.gd` | `Items` | `DEFS` (еда, оружие, одежда с `parts`/`also`/`tint`), `SLOTS`, `BARE`, `HEADS`, `COLORS`, `START_WEAR`; инвентарь (`add_to`, `take`, `count`, `weight`) |
 | `scripts/hud.gd` | `Hud` | Рисование интерфейса (`_draw`), касания, джойстик, панели `INV` / `PAUSE` / `GEAR`, сообщения, напоминание об обновлении; в паузе офлайна — «Редактор карты» (владелец) / «Вернуться в редактор»; в меню сетевой игры — «Аккаунт» (`screen.next = "account"`, 0.31) |
 | `scripts/icons.gd` | `Icons` | `item()` — иконка предмета по id (цветные варианты — по основе), `glyph()` — пиктограммы |
-| `scripts/mesher.gd` | `Mesher` | Треугольники, коробки, трубы, эллипсоиды с цветом вершин; альфа цвета = «вид» (стена/свечение) |
+| `scripts/mesher.gd` | `Mesher` | Треугольники, коробки, трубы, эллипсоиды с цветом вершин; альфа цвета = «вид» (стена/свечение); `mat` (`M_*`) — слой текстуры мира в UV.x; `face_mat`/`face_col` — материал по граням `aabb()` |
 | `scripts/saves.gd` | `Saves` | Офлайн-сохранение: временный файл → основной, резервная копия, проверка формата |
 | `scripts/demo.gd` | `Demo` | Демо-сцены (`--demo=editor` открывает редактор карты — main.gd): `inside`, `inv`, `night`, `evening`, `gear`, `outfit`, `crowd`, `knocked`, `armed`, `catalog` (своё время, `real_clock = false`) |
 | `scripts/server_only/server.gd` | без class_name, `load()` | Ключи `--port`, `--max`, `--noauth`; клиенты (`Client`), «привет» и проверка сборки, вход через Supabase (`_verify` → `_enter`), выдача снимков (`_send_to`), автосохранение раз в 15 с (`AUTOSAVE`) с проверкой «читается обратно», `.bak` и часовые копии `SAVE_HOURLY`, загрузка по цепочке (`_load_world`), лог статистики; защита: `Bucket` (действия 10/с, пакеты движения 40/с), `too_big` (> 8 КБ — отключение), `valid_token`, `HELLO_WAIT` 5 с, `MAX_PENDING_IP` = 3 подключения без входа с адреса (`pending_from`, BF-043); удалённые аккаунты — `_sync_deleted` (RPC `deleted_accounts` раз в `DELETED_EVERY` = 300 с) → `drop_deleted` (BF-044); остановка по `STOP_FILE` (`_stop`: сохранить и выйти, BF-029); сетка районов на время рассылки (`index_players`, подписи внешности раз в 0.2 с — `sig_t`), сжатая карта для входящих (`map_z`, пересборка при смене дверей); `stat_line()` и `--stat=N` — строка статистики (онлайн, кадр средний/худший, кадров/с, отправлено КБ/с, память; 0.33); при запуске с аккаунтами — `drop_phone_chars` (удаляет персонажей «по id телефона», BF-042) |
@@ -121,7 +125,7 @@ Umwelt-RP/
 | `scripts/server_only/nettest.gd` | без class_name | Клиент-бот: подключается, ходит, считает «откаты» и видимых игроков; переменная `NT_HOST` — внешний сервер; идёт в самое свободное направление по улице (не в дом — там его не видно другим, BF-040) и проверяет пройденный путь и замирания; запускается в CI (`build.yml`, «Network test») |
 | `scripts/server_only/authtest.gd` | без class_name | Вход ботом через `account.gd` и проверка, что сервер впустил |
 | `scripts/server_only/loadbots.gd` | без class_name | Нагрузочный тест (0.33): N ботов в одном процессе, у каждого свой `SceneMultiplayer` (`set_multiplayer` на своём узле) и свой экземпляр `Net` с именем «Net» — RPC доходят как от телефона; протокол как у телефона (`hello` → `init` → `in` раз в 50 мс), ходят по улице, принимают откаты; входят по 2 (лимит сервера — 3 без входа с адреса). Сводка: в игре до конца, снимков/с, входящий трафик, откаты; запускается из `main.gd` по `--loadbots=` (нужен `--no-update`, лаунчер этот ключ не знает) |
-| `shaders/world.gdshader` | шейдер | Параметры `player_pos`, `cam_back`, `cut`, `night` (задаёт `world_view.gd`) |
+| `shaders/world.gdshader` | шейдер | Параметры `player_pos`, `cam_back`, `cut`, `night`, `albedo_tex` (задаёт `world_view.gd`); слои: `SCALE`, `MEAN`, `STRENGTH` |
 
 ---
 
@@ -157,7 +161,7 @@ Umwelt-RP/
 - `main.gd` → `load("res://scripts/server_only/server.gd" | audit_test.gd | authtest.gd | nettest.gd")`,
   `preload("res://scripts/account.gd")`, назад — `res://launcher/launcher.tscn`.
 - `world.gd`, `world_mesh.gd`, `world_view.gd`, `audit_test.gd` → `preload("res://scripts/world.gd")` (константы тайлов).
-- `world_view.gd` → `load("res://shaders/world.gdshader")`.
+- `world_view.gd` → `load("res://shaders/world.gdshader")`, `load("res://assets/tex/world_albedo.png")` (с 0.37).
 - `world.gd` → `res://maps/city.json` (`GameWorld.MAP_PATH`, читает `GameState.load_official_map`).
 - `main.gd` → `load("res://scripts/map_editor.gd")`; редактор и «Пройтись» — `user://map_draft.json`.
 - `character.gd` → `res://assets/chars/<m|f>_base.scn`, `res://assets/chars/<m|f>/<Часть>.scn` (имена из `items.gd`).

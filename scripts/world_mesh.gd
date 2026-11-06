@@ -8,6 +8,8 @@ const CHUNK := 10
 const W = preload("res://scripts/world.gd")
 
 const WALL_COLS := [0xDCD2C2, 0xCDB99C, 0xB9C1C6, 0xD8BEA6, 0xC9C3B0, 0xB8C4B0]
+const BRICK_TINTS := [0xFFFFFF, 0xF2DCCC, 0xE0CCC4, 0xFFE8D0]
+const INNER_WALL := 0xDDD6CA      # штукатурка внутри кирпичного дома
 const ROOF_COLS := [0x8A4236, 0x4E5A66, 0x6E5C46, 0x46604E, 0x6A4440]
 const CAR_COLS := [0x8E2E2A, 0x2C4C7C, 0xD6D6CC, 0x35373B, 0x55744A, 0xC89A3C, 0x6A6E74]
 
@@ -46,9 +48,25 @@ func refresh_lamps() -> void:
 			var hd := Props.lamp_head(e)
 			lamps.append([e[1], e[2], hd.x, hd.y])
 
+func building_at_cell(x: int, y: int) -> int:
+	return w.building_of[w.idx(clampi(x, 0, w.w - 1), clampi(y, 0, w.h - 1))]
+
+## Стены дома снаружи: кирпич или штукатурка (пока — по номеру дома)
+static func wall_mat(bi: int) -> int:
+	return Mesher.M_BRICK if hash2(maxi(bi, 0), 7) % 10 < 4 else Mesher.M_CONCRETE
+
+## Цвет стены снаружи: у кирпича — оттенок поверх текстуры, у штукатурки — сам цвет
+static func wall_tint(bi: int) -> Color:
+	if wall_mat(bi) == Mesher.M_BRICK:
+		return c(BRICK_TINTS[hash2(maxi(bi, 0), 11) % BRICK_TINTS.size()], 0.0)
+	return c(WALL_COLS[maxi(bi, 0) % WALL_COLS.size()], 0.0)
+
 func wall_color(x: int, y: int) -> Color:
-	var b: int = w.building_of[w.idx(clampi(x, 0, w.w - 1), clampi(y, 0, w.h - 1))]
-	return c(WALL_COLS[maxi(b, 0) % WALL_COLS.size()], 0.0)
+	return wall_tint(building_at_cell(x, y))
+
+func _inside(x: int, y: int) -> bool:
+	var t := w.t(x, y)
+	return W.is_floor(t) or W.is_furniture(t)
 
 static func ground_h(t: int) -> float:
 	if t == W.SIDEWALK:
@@ -71,6 +89,7 @@ func build_chunk(m: Mesher, cx: int, cy: int) -> void:
 	m.identity()
 
 func _tile(m: Mesher, x: int, y: int) -> void:
+	m.mat = Mesher.M_NONE
 	var t := w.t(x, y)
 	var hv := hash2(x, y)
 	var fx := float(x)
@@ -91,11 +110,13 @@ func _tile(m: Mesher, x: int, y: int) -> void:
 				if hn >= h:
 					continue
 				var side := jit(c(0x7C7C76), hv, 0.05)
+				m.mat = Mesher.M_CONCRETE
 				match k:
 					0: m.quad(Vector3(fx + 1, hn, fz + 1), Vector3(fx + 1, hn, fz), Vector3(fx + 1, h, fz), Vector3(fx + 1, h, fz + 1), side)
 					1: m.quad(Vector3(fx, hn, fz), Vector3(fx, hn, fz + 1), Vector3(fx, h, fz + 1), Vector3(fx, h, fz), side)
 					2: m.quad(Vector3(fx, hn, fz + 1), Vector3(fx + 1, hn, fz + 1), Vector3(fx + 1, h, fz + 1), Vector3(fx, h, fz + 1), side)
 					_: m.quad(Vector3(fx + 1, hn, fz), Vector3(fx, hn, fz), Vector3(fx, h, fz), Vector3(fx + 1, h, fz), side)
+				m.mat = Mesher.M_NONE
 		match t:
 			W.TREE: _tree(m, x, y)
 			W.CAR: _car(m, x, y, true)
@@ -111,13 +132,15 @@ func _floor_near(x: int, y: int) -> int:
 func _ground(m: Mesher, t: int, x: int, y: int, x0: float, z0: float, x1: float, z1: float) -> void:
 	var hv := hash2(x, y)
 	if t == W.GRASS or t == W.TREE:
-		var base := c([0x4C6A38, 0x56723E, 0x4A6436, 0x5A6E3A][hv % 4])
+		var base := c([0x4C6A38, 0x50703C, 0x4A6636, 0x527039][hv % 4])
 		var mx := (x0 + x1) / 2
 		var mz := (z0 + z1) / 2
-		m.flat(x0, z0, mx, mz, 0, jit(base, hv, 0.06))
-		m.flat(mx, z0, x1, mz, 0, jit(base, hv * 3, 0.06))
-		m.flat(x0, mz, mx, z1, 0, jit(base, hv * 5, 0.06))
-		m.flat(mx, mz, x1, z1, 0, jit(base, hv * 7, 0.06))
+		m.mat = Mesher.M_DIRT
+		m.flat(x0, z0, mx, mz, 0, jit(base, hv, 0.02))
+		m.flat(mx, z0, x1, mz, 0, jit(base, hv * 3, 0.02))
+		m.flat(x0, mz, mx, z1, 0, jit(base, hv * 5, 0.02))
+		m.flat(mx, mz, x1, z1, 0, jit(base, hv * 7, 0.02))
+		m.mat = Mesher.M_NONE
 		if x1 - x0 > 0.9 and hv % 37 == 0:
 			var ox := x0 + 0.3 + (hv % 5) * 0.08
 			var oz := z0 + 0.3 + (hv % 7) * 0.06
@@ -130,7 +153,9 @@ func _ground(m: Mesher, t: int, x: int, y: int, x0: float, z0: float, x1: float,
 			m.box(Vector3(0, 0.1, 0), Vector3(0.25, 0.2, 0.05), c(0x6A8A44))
 			m.identity()
 	elif t == W.ROAD:
-		m.flat(x0, z0, x1, z1, 0, jit(c(0x3C3D40), hv, 0.05))
+		m.mat = Mesher.M_ASPHALT
+		m.flat(x0, z0, x1, z1, 0, jit(c(0x3C3D40), hv, 0.02))
+		m.mat = Mesher.M_NONE
 		if x1 - x0 > 0.9:
 			var cxr := x % 25
 			var cyr := y % 25
@@ -153,10 +178,12 @@ func _ground(m: Mesher, t: int, x: int, y: int, x0: float, z0: float, x1: float,
 		var g := 0.02
 		m.flat(x0, z0, x1, z1, h - 0.005, c(0x6E6E68))
 		var base2 := c(0x9C9C96)
-		m.flat(x0 + g, z0 + g, mx2 - g, mz2 - g, h, jit(base2, hv, 0.05))
-		m.flat(mx2 + g, z0 + g, x1 - g, mz2 - g, h, jit(base2, hv * 3, 0.05))
-		m.flat(x0 + g, mz2 + g, mx2 - g, z1 - g, h, jit(base2, hv * 5, 0.05))
-		m.flat(mx2 + g, mz2 + g, x1 - g, z1 - g, h, jit(base2, hv * 7, 0.05))
+		m.mat = Mesher.M_CONCRETE
+		m.flat(x0 + g, z0 + g, mx2 - g, mz2 - g, h, jit(base2, hv, 0.03))
+		m.flat(mx2 + g, z0 + g, x1 - g, mz2 - g, h, jit(base2, hv * 3, 0.03))
+		m.flat(x0 + g, mz2 + g, mx2 - g, z1 - g, h, jit(base2, hv * 5, 0.03))
+		m.flat(mx2 + g, mz2 + g, x1 - g, z1 - g, h, jit(base2, hv * 7, 0.03))
+		m.mat = Mesher.M_NONE
 	elif W.is_floor(t):
 		_floor_top(m, t, x, y, x0, z0, x1, z1)
 	else:
@@ -166,6 +193,7 @@ func _floor_top(m: Mesher, t: int, x: int, y: int, x0: float, z0: float, x1: flo
 	var hv := hash2(x, y)
 	var h := 0.1
 	if t == W.TILEFLOOR:
+		m.mat = Mesher.M_MARBLE
 		var mx := x + 0.5
 		var mz := y + 0.5
 		var a := c(0xD8D0C0)
@@ -179,6 +207,7 @@ func _floor_top(m: Mesher, t: int, x: int, y: int, x0: float, z0: float, x1: flo
 			var cz1 := minf(qz0 + 0.5, z1)
 			if cx1 > cx0 and cz1 > cz0:
 				m.flat(cx0, cz0, cx1, cz1, h, a if (q + (q >> 1)) % 2 == 0 else b)
+		m.mat = Mesher.M_NONE
 	else:
 		for k in 4:
 			var pz0 := y + k * 0.25
@@ -228,6 +257,17 @@ func _walls(m: Mesher, x: int, y: int, t: int) -> void:
 	var u := W.wall_like(w.t(x, y - 1))
 	var d := W.wall_like(w.t(x, y + 1))
 	var horiz := w.along_y(x, y)
+	# грани стены: в сторону комнаты — штукатурка, наружу — материал дома
+	var outm := wall_mat(building_at_cell(x, y))
+	var inner := c(INNER_WALL, 0.0) if outm == Mesher.M_BRICK else col
+	var ins := [_inside(x, y + 1), _inside(x, y - 1), _inside(x + 1, y), _inside(x - 1, y)]
+	var fm := PackedInt32Array([Mesher.M_NONE])
+	var fc: Array = [null]
+	for k in 4:
+		fm.append(Mesher.M_CONCRETE if ins[k] else outm)
+		fc.append(inner if ins[k] else null)
+	m.face_mat = fm
+	m.face_col = fc
 	match t:
 		W.WALL:
 			m.aabb(cx - h, 0, cz - h, cx + h, WH, cz + h, col, cap)
@@ -235,14 +275,19 @@ func _walls(m: Mesher, x: int, y: int, t: int) -> void:
 			if l: m.aabb(x, 0, cz - h, cx, WH, cz + h, col, cap)
 			if d: m.aabb(cx - h, 0, cz, cx + h, WH, y + 1.0, col, cap)
 			if u: m.aabb(cx - h, 0, y, cx + h, WH, cz, col, cap)
-			var base := dk(col, 0.6)
+			_faces_off(m)
+			var base := dk(col, 0.6) if outm != Mesher.M_BRICK else c(0x8A8680, 0.0)
+			m.mat = Mesher.M_CONCRETE
 			if r or l:
 				m.aabb(x if l else cx - h, 0, cz - h - 0.01, x + 1.0 if r else cx + h, 0.18, cz + h + 0.01, base)
 			if u or d:
 				m.aabb(cx - h - 0.01, 0, y if u else cz - h, cx + h + 0.01, 0.18, y + 1.0 if d else cz + h, base)
+			m.mat = Mesher.M_NONE
 		W.WINDOW:
 			_seg(m, x, y, horiz, 0, 0.95, col, cap)
 			_seg(m, x, y, horiz, 1.85, WH, col, cap)
+			_faces_off(m)
+			_room_behind(m, x, y, horiz, ins)
 			var frame := c(0xEDE6DA, 0)
 			if horiz:
 				m.aabb(x + 0.04, 0.95, cz - h - 0.05, x + 0.96, 1.0, cz + h + 0.05, frame)
@@ -261,13 +306,43 @@ func _walls(m: Mesher, x: int, y: int, t: int) -> void:
 				m.aabb(cx - 0.03, 1.0, cz - 0.02, cx + 0.03, 1.85, cz + 0.02, frame)
 		_:
 			_seg(m, x, y, horiz, 2.05, WH, col, cap)
-			var jamb := dk(col, 0.8)
+			_faces_off(m)
+			var jamb := dk(col, 0.8) if outm != Mesher.M_BRICK else c(0xCFC6B6, 0.0)
 			if horiz:
 				m.aabb(x, 0, cz - h - 0.02, x + 0.07, 2.05, cz + h + 0.02, jamb)
 				m.aabb(x + 0.93, 0, cz - h - 0.02, x + 1.0, 2.05, cz + h + 0.02, jamb)
 			else:
 				m.aabb(cx - h - 0.02, 0, y, cx + h + 0.02, 2.05, y + 0.07, jamb)
 				m.aabb(cx - h - 0.02, 0, y + 0.93, cx + h + 0.02, 2.05, y + 1.0, jamb)
+
+func _faces_off(m: Mesher) -> void:
+	m.face_mat = PackedInt32Array()
+	m.face_col = []
+
+## Снаружи окна — картинка комнаты (свет/темно); изнутри дома остаётся простое стекло
+func _room_behind(m: Mesher, x: int, y: int, horiz: bool, ins: Array) -> void:
+	var o := -1     # наружная сторона: 0 +z, 1 -z, 2 +x, 3 -x
+	if horiz:
+		if ins[1] and not ins[0]: o = 0
+		elif ins[0] and not ins[1]: o = 1
+	else:
+		if ins[3] and not ins[2]: o = 2
+		elif ins[2] and not ins[3]: o = 3
+	if o < 0:
+		return
+	var room := c(0xFFFFFF, 0.0)
+	m.mat = Mesher.M_ROOM_LIT if hash2(x, y) % 3 == 0 else Mesher.M_ROOM_DARK
+	var cx := x + 0.5
+	var cz := y + 0.5
+	var a := 0.06
+	var y0 := 1.0
+	var y1 := 1.85
+	match o:
+		0: m.quad(Vector3(x + a, y0, cz + 0.025), Vector3(x + 1 - a, y0, cz + 0.025), Vector3(x + 1 - a, y1, cz + 0.025), Vector3(x + a, y1, cz + 0.025), room)
+		1: m.quad(Vector3(x + 1 - a, y0, cz - 0.025), Vector3(x + a, y0, cz - 0.025), Vector3(x + a, y1, cz - 0.025), Vector3(x + 1 - a, y1, cz - 0.025), room)
+		2: m.quad(Vector3(cx + 0.025, y0, y + 1 - a), Vector3(cx + 0.025, y0, y + a), Vector3(cx + 0.025, y1, y + a), Vector3(cx + 0.025, y1, y + 1 - a), room)
+		_: m.quad(Vector3(cx - 0.025, y0, y + a), Vector3(cx - 0.025, y0, y + 1 - a), Vector3(cx - 0.025, y1, y + 1 - a), Vector3(cx - 0.025, y1, y + a), room)
+	m.mat = Mesher.M_NONE
 
 func _seg(m: Mesher, x: int, y: int, horiz: bool, y0: float, y1: float, col: Color, cap: Color) -> void:
 	var cx := x + 0.5
@@ -416,12 +491,15 @@ func build_roof(m: Mesher, bi: int) -> void:
 	var Z0: float = b[1] + 0.5 - ov
 	var Z1: float = b[3] + 0.5 + ov
 	var col := c(ROOF_COLS[bi % ROOF_COLS.size()])
-	var wall := dk(c(WALL_COLS[bi % WALL_COLS.size()]), 0.82)
+	var wm := wall_mat(bi)
+	var wall := dk(wall_tint(bi), 0.82)
+	wall.a = 1.0
 	var along_x := (X1 - X0) >= (Z1 - Z0)
 	var span := (Z1 - Z0) if along_x else (X1 - X0)
 	var e := WH
 	var R := WH + minf(1.5, span * 0.32)
 	var bands := 4
+	m.mat = Mesher.M_SLATE
 	if along_x:
 		var Zm := (Z0 + Z1) / 2
 		for i in bands:
@@ -436,8 +514,10 @@ func build_roof(m: Mesher, bi: int) -> void:
 			var zc := Z1 - (Z1 - Zm) * t0
 			var zd := Z1 - (Z1 - Zm) * t1
 			m.quad(Vector3(X0, yb, zd), Vector3(X0, ya, zc), Vector3(X1, ya, zc), Vector3(X1, yb, zd), dk(cc, 0.82))
+		m.mat = wm
 		m.tri(Vector3(X0, e, Z0), Vector3(X0, e, Z1), Vector3(X0, R, Zm), wall)
 		m.tri(Vector3(X1, e, Z1), Vector3(X1, e, Z0), Vector3(X1, R, Zm), wall)
+		m.mat = Mesher.M_NONE
 		m.aabb(X0, R - 0.03, Zm - 0.06, X1, R + 0.05, Zm + 0.06, dk(col, 0.6))
 	else:
 		var Xm := (X0 + X1) / 2
@@ -453,13 +533,17 @@ func build_roof(m: Mesher, bi: int) -> void:
 			var xc := X1 - (X1 - Xm) * t0
 			var xd := X1 - (X1 - Xm) * t1
 			m.quad(Vector3(xd, yb, Z1), Vector3(xc, ya, Z1), Vector3(xc, ya, Z0), Vector3(xd, yb, Z0), dk(cc, 0.82))
+		m.mat = wm
 		m.tri(Vector3(X1, e, Z0), Vector3(X0, e, Z0), Vector3(Xm, R, Z0), wall)
 		m.tri(Vector3(X0, e, Z1), Vector3(X1, e, Z1), Vector3(Xm, R, Z1), wall)
+		m.mat = Mesher.M_NONE
 		m.aabb(Xm - 0.06, R - 0.03, Z0, Xm + 0.06, R + 0.05, Z1, dk(col, 0.6))
 	var hv := hash2(b[0], b[1])
 	var px := X0 + (X1 - X0) * (0.25 + (hv % 40) / 100.0)
 	var pz := Z0 + (Z1 - Z0) * (0.3 + (hv % 30) / 100.0)
-	m.aabb(px - 0.2, e, pz - 0.2, px + 0.2, R + 0.45, pz + 0.2, c(0x7A4434), c(0x2A1A14))
+	m.mat = Mesher.M_BRICK
+	m.aabb(px - 0.2, e, pz - 0.2, px + 0.2, R + 0.45, pz + 0.2, c(0xE8D4C8), c(0x2A1A14))
+	m.mat = Mesher.M_NONE
 
 ## Дверь: меш вокруг петли, лицом вдоль X
 static func build_door(m: Mesher) -> void:

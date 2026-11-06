@@ -1,0 +1,5 @@
+Текстуры мира: Quaternius — Downtown City MegaKit, бесплатная версия «Standard», https://quaternius.com
+Лицензия CC0 1.0 (общественное достояние): можно использовать в платной игре, указание автора не обязательно.
+world_albedo.png собран скриптом docs/tools/build_textures.py из папки Textures набора (слои 512×512):
+кирпич, бетон, асфальт, мрамор, черепица, две комнаты за окном, земля. Порядок слоёв — в скрипте и в
+shaders/world.gdshader (SCALE, MEAN, STRENGTH), номера материалов — Mesher.M_*.

@@ -6,10 +6,26 @@ extends RefCounted
 const NORMAL := 1.0
 const GLOW := 0.5
 const WALL := 0.0
+## Материал (слой текстуры мира + 1, 0 — только цвет); уходит в UV.x, шейдер мира кладёт текстуру сам
+const M_NONE := 0
+const M_BRICK := 1
+const M_CONCRETE := 2
+const M_ASPHALT := 3
+const M_MARBLE := 4
+const M_SLATE := 5
+const M_ROOM_LIT := 6
+const M_ROOM_DARK := 7
+const M_DIRT := 8
 
 var verts := PackedVector3Array()
 var norms := PackedVector3Array()
 var cols := PackedColorArray()
+var uvs := PackedVector2Array()
+var mat := 0                     # текущий материал (M_*)
+## Для aabb(): материал и цвет по граням [верх, +z, -z, +x, -x] (пусто — у всех граней mat и цвет вызова).
+## Нужно стенам: снаружи кирпич, внутри — штукатурка
+var face_mat := PackedInt32Array()
+var face_col: Array = []
 var bones := PackedInt32Array()
 var weights := PackedFloat32Array()
 var skinned := false
@@ -21,6 +37,10 @@ func clear() -> void:
 	verts.clear()
 	norms.clear()
 	cols.clear()
+	uvs.clear()
+	mat = M_NONE
+	face_mat = PackedInt32Array()
+	face_col = []
 	bones.clear()
 	weights.clear()
 	xf = Transform3D.IDENTITY
@@ -40,6 +60,7 @@ func _put(v: Vector3, n: Vector3, c: Color) -> void:
 	verts.append(v)
 	norms.append(n)
 	cols.append(c)
+	uvs.append(Vector2(mat, 0.0))
 	if skinned:
 		bones.append(bone)
 		bones.append(0)
@@ -73,11 +94,22 @@ func flat(x0: float, z0: float, x1: float, z1: float, y: float, col: Color) -> v
 
 ## Ящик по осям (без дна)
 func aabb(x0: float, y0: float, z0: float, x1: float, y1: float, z1: float, col: Color, top = null) -> void:
+	var m0 := mat
+	var per := face_mat.size() == 5
+	if per: mat = face_mat[0]
 	flat(x0, z0, x1, z1, y1, top if top != null else col)
-	quad(Vector3(x0, y0, z1), Vector3(x1, y0, z1), Vector3(x1, y1, z1), Vector3(x0, y1, z1), col)
-	quad(Vector3(x1, y0, z0), Vector3(x0, y0, z0), Vector3(x0, y1, z0), Vector3(x1, y1, z0), col)
-	quad(Vector3(x1, y0, z1), Vector3(x1, y0, z0), Vector3(x1, y1, z0), Vector3(x1, y1, z1), col)
-	quad(Vector3(x0, y0, z0), Vector3(x0, y0, z1), Vector3(x0, y1, z1), Vector3(x0, y1, z0), col)
+	if per: mat = face_mat[1]
+	quad(Vector3(x0, y0, z1), Vector3(x1, y0, z1), Vector3(x1, y1, z1), Vector3(x0, y1, z1), _fc(1, col))
+	if per: mat = face_mat[2]
+	quad(Vector3(x1, y0, z0), Vector3(x0, y0, z0), Vector3(x0, y1, z0), Vector3(x1, y1, z0), _fc(2, col))
+	if per: mat = face_mat[3]
+	quad(Vector3(x1, y0, z1), Vector3(x1, y0, z0), Vector3(x1, y1, z0), Vector3(x1, y1, z1), _fc(3, col))
+	if per: mat = face_mat[4]
+	quad(Vector3(x0, y0, z0), Vector3(x0, y0, z1), Vector3(x0, y1, z1), Vector3(x0, y1, z0), _fc(4, col))
+	mat = m0
+
+func _fc(i: int, col: Color) -> Color:
+	return face_col[i] if face_col.size() == 5 and face_col[i] != null else col
 
 ## Ящик с центром и размерами в локальных координатах текущего преобразования
 func box(c: Vector3, s: Vector3, col: Color, bottom: bool = false) -> void:
@@ -180,6 +212,7 @@ func commit(mesh: ArrayMesh = null) -> ArrayMesh:
 	arr[Mesh.ARRAY_VERTEX] = verts
 	arr[Mesh.ARRAY_NORMAL] = norms
 	arr[Mesh.ARRAY_COLOR] = cols
+	arr[Mesh.ARRAY_TEX_UV] = uvs
 	if skinned:
 		arr[Mesh.ARRAY_BONES] = bones
 		arr[Mesh.ARRAY_WEIGHTS] = weights

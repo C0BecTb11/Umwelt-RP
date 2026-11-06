@@ -50,6 +50,7 @@ func _ready() -> void:
 	test_grid()
 	test_pub_cache()
 	test_map_pack()
+	test_world_textures()
 	await test_big_map()
 	test_stamina_net()
 	test_server_guards()
@@ -1044,6 +1045,65 @@ func _big_city(k: int) -> Dictionary:
 	return {"v": 1, "w": sw * k, "h": sh * k, "spawn": [sw * k / 2.0, sh * k / 2.0], "rows": rows, "props": props}
 
 ## BF-052: карта 500×500 — грузится, а телефон держит построенной только округу игрока (иначе ~19 млн вершин)
+## Текстуры мира (0.37): материал каждой грани уходит в UV.x, кирпич — только наружу, картинка комнаты —
+## только с улицы, число слоёв текстуры = числу слоёв в шейдере = последнему материалу Mesher
+func test_world_textures() -> void:
+	var tex: TextureLayered = load("res://assets/tex/world_albedo.png")
+	var code := (load("res://shaders/world.gdshader") as Shader).code
+	var rx := RegEx.create_from_string("SCALE\\[(\\d+)\\]")
+	var mm := rx.search(code)
+	var n_sh := int(mm.get_string(1)) if mm != null else -1
+	check("Текстуры: слоёв в массиве = в шейдере = материалов", tex != null and tex.get_layers() == n_sh and n_sh == Mesher.M_DIRT,
+		"массив %d, шейдер %d, материалов %d" % [tex.get_layers() if tex != null else -1, n_sh, Mesher.M_DIRT])
+	var g := _game()
+	var w := g.world
+	var wm := WorldMesh.new(w)
+	var m := Mesher.new()
+	# асфальт на дороге
+	var road := Vector2i(-1, -1)
+	for y in w.h:
+		for x in w.w:
+			if road.x < 0 and w.t(x, y) == W.ROAD:
+				road = Vector2i(x, y)
+	m.clear()
+	wm._tile(m, road.x, road.y)
+	check("Текстуры: дорога — асфальт", road.x >= 0 and m.uvs.size() > 0 and int(m.uvs[0].x) == Mesher.M_ASPHALT)
+	# стены: кирпич/штукатурка снаружи, внутрь — штукатурка; окно — комната только снаружи
+	var walls := 0
+	var bad := []
+	var brick := 0
+	var rooms := 0
+	for y in range(1, w.h - 1):
+		for x in range(1, w.w - 1):
+			var t := w.t(x, y)
+			if t != W.WALL and t != W.WINDOW:
+				continue
+			walls += 1
+			m.clear()
+			wm._walls(m, x, y, t)
+			for i in m.verts.size():
+				var mat := int(m.uvs[i].x)
+				var n: Vector3 = m.norms[i]
+				if absf(n.y) > 0.5 or m.verts[i].y < 0.2:
+					continue
+				var inn := wm._inside(x + int(roundf(n.x)), y + int(roundf(n.z)))
+				if mat == Mesher.M_BRICK:
+					brick += 1
+					if inn:
+						bad.append("кирпич в комнату %d,%d" % [x, y])
+				elif mat == Mesher.M_ROOM_LIT or mat == Mesher.M_ROOM_DARK:
+					rooms += 1
+					if inn:
+						bad.append("комната за окном видна изнутри %d,%d" % [x, y])
+			if bad.size() > 5:
+				break
+	check("Текстуры: кирпич и картинка комнаты — только наружу", walls > 0 and brick > 0 and rooms > 0 and bad.is_empty(),
+		"стен %d, кирпичных граней %d, окон с комнатой %d; %s" % [walls, brick, rooms, bad.slice(0, 3)])
+	# в чанке после стен материал сброшен: мебель и объекты — без текстуры
+	m.clear()
+	wm.build_chunk(m, 5, 5)
+	check("Текстуры: после чанка материал и грани сброшены", m.mat == Mesher.M_NONE and m.face_mat.is_empty())
+
 func test_big_map() -> void:
 	var md := _big_city(5)
 	var g := GameState.new_game(1)
