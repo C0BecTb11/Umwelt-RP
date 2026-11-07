@@ -528,17 +528,151 @@ func _car(m: Mesher, x: int, y: int, horiz: bool) -> void:
 	m.identity()
 
 # ================== КРЫШИ ==================
+## Крыша (с 0.47, BF-060) — только над закрытым домом и по его форме, не по охватывающему прямоугольнику:
+## 1) «след» дома — стены/двери/окна этого дома и то, что ими закрыто (снаружи до клетки не дойти, не перелезая
+##    стену); стена, не касающаяся комнаты (забор, начатая стена), в след не входит;
+## 2) комнаты нет (стены не замкнуты — дом ещё строят) — крыши нет;
+## 3) след режется на прямоугольники (сначала самый большой): шире 2 клеток — двускатная крыша, уже — плоская.
+##    Где прямоугольник примыкает к другому куску следа, крыша заходит за край клетки — без щели между крышами
+
+## След дома bi: [x0, y0, ширина, высота, маска (1 — под крышей)] или [] — комнаты нет
+func roof_footprint(bi: int) -> Array:
+	var b: Array = w.buildings[bi]
+	var x0: int = b[0] - 1
+	var y0: int = b[1] - 1
+	var WW: int = b[2] - b[0] + 3
+	var HH: int = b[3] - b[1] + 3
+	var n := WW * HH
+	var wallm := PackedByteArray()
+	wallm.resize(n)
+	for yy in HH:
+		for xx in WW:
+			var x := x0 + xx
+			var y := y0 + yy
+			if w.inside(x, y):
+				var i := w.idx(x, y)
+				if w.building_of[i] == bi and GameWorld.wall_like(w.tiles[i]):
+					wallm[yy * WW + xx] = 1
+	# снаружи — заливка от рамки (рамка на клетку шире дома — всегда снаружи) по клеткам без стен этого дома
+	var out := PackedByteArray()
+	out.resize(n)
+	var q := PackedInt32Array()
+	for xx in WW:
+		q.append(xx)
+		q.append((HH - 1) * WW + xx)
+	for yy in range(1, HH - 1):
+		q.append(yy * WW)
+		q.append(yy * WW + WW - 1)
+	for k in q:
+		out[k] = 1
+	var head := 0
+	while head < q.size():
+		var k: int = q[head]
+		head += 1
+		var xx := k % WW
+		for nb in [k - 1 if xx > 0 else -1, k + 1 if xx < WW - 1 else -1, k - WW, k + WW]:
+			if nb >= 0 and nb < n and out[nb] == 0 and wallm[nb] == 0:
+				out[nb] = 1
+				q.append(nb)
+	var mask := PackedByteArray()
+	mask.resize(n)
+	var rooms := 0
+	for k in n:
+		if out[k] == 0 and wallm[k] == 0:
+			mask[k] = 1
+			rooms += 1
+	if rooms == 0:
+		return []
+	# стены — только те, что касаются комнаты (и наискосок: углы)
+	for k in n:
+		if wallm[k] == 0 or out[k] == 1:
+			continue
+		var xx := k % WW
+		var yy := k / WW
+		var touch := false
+		for dy in range(-1, 2):
+			for dx in range(-1, 2):
+				var ax := xx + dx
+				var ay := yy + dy
+				if ax >= 0 and ay >= 0 and ax < WW and ay < HH and out[ay * WW + ax] == 0 and wallm[ay * WW + ax] == 0:
+					touch = true
+		if touch:
+			mask[k] = 1
+	return [x0, y0, WW, HH, mask]
+
+## Самый большой прямоугольник из единиц маски: [x, y, ширина, высота] (по столбикам высот, за один проход)
+static func _max_rect(mask: PackedByteArray, WW: int, HH: int) -> Array:
+	var hts := PackedInt32Array()
+	hts.resize(WW)
+	var best := [0, 0, 0, 0]
+	var best_a := 0
+	for y in HH:
+		for x in WW:
+			hts[x] = hts[x] + 1 if mask[y * WW + x] == 1 else 0
+		var st := PackedInt32Array()
+		for x in WW + 1:
+			var hx: int = hts[x] if x < WW else 0
+			while not st.is_empty() and hts[st[st.size() - 1]] >= hx:
+				var top: int = st[st.size() - 1]
+				st.resize(st.size() - 1)
+				var hh: int = hts[top]
+				var left: int = st[st.size() - 1] + 1 if not st.is_empty() else 0
+				var a := hh * (x - left)
+				if a > best_a:
+					best_a = a
+					best = [left, y - hh + 1, x - left, hh]
+			st.append(x)
+	return best
+
 func build_roof(m: Mesher, bi: int) -> void:
 	m.clear()
-	var b: Array = w.buildings[bi]
-	if b[2] - b[0] < 2 or b[3] - b[1] < 2:
+	var fp := roof_footprint(bi)
+	if fp.is_empty():
 		return
-	var ov := 0.35
-	var X0: float = b[0] + 0.5 - ov
-	var X1: float = b[2] + 0.5 + ov
-	var Z0: float = b[1] + 0.5 - ov
-	var Z1: float = b[3] + 0.5 + ov
+	var x0: int = fp[0]
+	var y0: int = fp[1]
+	var WW: int = fp[2]
+	var HH: int = fp[3]
+	var full: PackedByteArray = fp[4]
+	var mask := full.duplicate()
 	var col := c(ROOF_COLS[hash2(_bkey(bi), 17) % ROOF_COLS.size()])
+	var first := true
+	for it in 48:
+		var r := _max_rect(mask, WW, HH)
+		if r[2] == 0:
+			break
+		var rx: int = r[0]
+		var ry: int = r[1]
+		var rw: int = r[2]
+		var rh: int = r[3]
+		for yy in range(ry, ry + rh):
+			for xx in range(rx, rx + rw):
+				mask[yy * WW + xx] = 0
+		# края: снаружи дома — от середины стены со свесом; к другому куску следа — до края клетки и чуть дальше
+		var ov := 0.35
+		var X0 := x0 + rx + 0.5 - (0.62 if _fp_side(full, WW, HH, rx - 1, ry, 0, rh) else ov)
+		var X1 := x0 + rx + rw - 0.5 + (0.62 if _fp_side(full, WW, HH, rx + rw, ry, 0, rh) else ov)
+		var Z0 := y0 + ry + 0.5 - (0.62 if _fp_side(full, WW, HH, rx, ry - 1, rw, 0) else ov)
+		var Z1 := y0 + ry + rh - 0.5 + (0.62 if _fp_side(full, WW, HH, rx, ry + rh, rw, 0) else ov)
+		if mini(rw, rh) >= 3:
+			_gable(m, bi, X0, X1, Z0, Z1, col, first)
+			first = false
+		else:
+			m.mat = Mesher.M_SLATE
+			m.aabb(X0, WH - 0.02, Z0, X1, WH + 0.12, Z1, dk(col, 0.85))
+			m.mat = Mesher.M_NONE
+
+## Есть ли клетки следа на отрезке за краем куска (по x на rw клеток или по y на rh)
+static func _fp_side(full: PackedByteArray, WW: int, HH: int, x: int, y: int, rw: int, rh: int) -> bool:
+	for k in maxi(rw, rh):
+		var xx := x + (k if rw > 0 else 0)
+		var yy := y + (k if rh > 0 else 0)
+		if xx >= 0 and yy >= 0 and xx < WW and yy < HH and full[yy * WW + xx] == 1:
+			return true
+	return false
+
+## Двускатная крыша над прямоугольником X0..X1 × Z0..Z1; chimney — с трубой (на самом большом куске)
+func _gable(m: Mesher, bi: int, X0: float, X1: float, Z0: float, Z1: float, col: Color, chimney: bool) -> void:
 	var wm := wall_mat(bi)
 	var wall := dk(wall_tint(bi), 0.82)
 	wall.a = 1.0
@@ -586,6 +720,9 @@ func build_roof(m: Mesher, bi: int) -> void:
 		m.tri(Vector3(X0, e, Z1), Vector3(X1, e, Z1), Vector3(Xm, R, Z1), wall)
 		m.mat = Mesher.M_NONE
 		m.aabb(Xm - 0.06, R - 0.03, Z0, Xm + 0.06, R + 0.05, Z1, dk(col, 0.6))
+	if not chimney:
+		return
+	var b: Array = w.buildings[bi]
 	var hv := hash2(b[0], b[1])
 	var px := X0 + (X1 - X0) * (0.25 + (hv % 40) / 100.0)
 	var pz := Z0 + (Z1 - Z0) * (0.3 + (hv % 30) / 100.0)

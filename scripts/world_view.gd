@@ -173,14 +173,36 @@ func setup(w: GameWorld) -> void:
 		add_child(s)
 		shot_nodes.append(s)
 
+## Готовые крыши по ключу «рамка дома + его клетки» (0.47, BF-060): правка одного дома в редакторе не строит
+## заново крыши всех остальных (на 500×500 — ~1500 домов, все крыши ~0.5 с на ПК)
+var roof_cache := {}
+
+func _roof_key(bi: int) -> String:
+	var b: Array = world.buildings[bi]
+	var x0 := maxi(0, b[0] - 1)
+	var x1 := mini(world.w - 1, b[2] + 1)
+	var raw := PackedByteArray()
+	for y in range(maxi(0, b[1] - 1), mini(world.h - 1, b[3] + 1) + 1):
+		raw.append_array(world.tiles.slice(y * world.w + x0, y * world.w + x1 + 1))
+	return "%d,%d,%d,%d:%d" % [b[0], b[1], b[2], b[3], hash(raw)]
+
 func _make_roofs() -> void:
+	var cache := {}
 	for bi in world.buildings.size():
-		wm.build_roof(mesher, bi)
+		var key := _roof_key(bi)
+		var mesh: Mesh
+		if roof_cache.has(key):
+			mesh = roof_cache[key]
+		else:
+			wm.build_roof(mesher, bi)
+			mesh = mesher.commit()
+		cache[key] = mesh
 		var r := MeshInstance3D.new()
-		r.mesh = mesher.commit()
+		r.mesh = mesh
 		r.material_override = mat_world
 		add_child(r)
 		roof_nodes.append(r)
+	roof_cache = cache
 
 func _make_doors() -> void:
 	for i in world.tiles.size():

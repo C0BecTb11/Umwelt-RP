@@ -34,6 +34,7 @@ func _ready() -> void:
 	test_map()
 	test_overview()
 	test_stale_draft()
+	test_roofs()
 	test_editor()
 	test_editor_resize()
 	test_remote_door()
@@ -1039,6 +1040,68 @@ func test_map_pack() -> void:
 		err == "" and (bp[0] as PackedByteArray).size() < bp[1] / 3 and (t1 - t0) < 500000 and (t2 - t1) < 500000,
 		"ошибка «%s»; %d КБ из %d КБ; сжатие %d мс, распаковка %d мс" % [err, (bp[0] as PackedByteArray).size() / 1024, int(bp[1]) / 1024, (t1 - t0) / 1000, (t2 - t1) / 1000])
 	check("Карта при входе: испорченные данные не роняют игру", GameState.unpack_map(PackedByteArray([1, 2, 3]), 100) == null and GameState.unpack_map(PackedByteArray(), 999999999) == null)
+
+## Крыши (0.47, BF-060): над недостроенным домом (стены не замкнуты) крыши нет; над закрытым — в пределах стен
+## со свесом; у дома буквой Г пустой угол рядом не накрыт
+func test_roofs() -> void:
+	var w := GameWorld.new()
+	var rows := []
+	for y in 30:
+		rows.append(".".repeat(30))
+	w.load_map({"v": 1, "w": 30, "h": 30, "spawn": [0.5, 0.5], "rows": rows, "props": []})
+	var outline := func(cells: Dictionary) -> void:
+		for k: Vector2i in cells:
+			for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1), Vector2i(1, 1), Vector2i(-1, -1), Vector2i(1, -1), Vector2i(-1, 1)]:
+				if not cells.has(k + d):
+					w.set_t(k.x, k.y, W.WALL)
+	# недостроенный: две стены углом
+	for x in range(2, 11):
+		w.set_t(x, 2, W.WALL)
+	for y in range(2, 9):
+		w.set_t(2, y, W.WALL)
+	# закрытый прямоугольник 3..8 × 12..17 с дверью
+	var box := {}
+	for y in range(12, 18):
+		for x in range(3, 9):
+			box[Vector2i(x, y)] = true
+	outline.call(box)
+	w.set_t(5, 17, W.DOOR)
+	# буква Г: 12..24 × 2..8 и 12..17 × 9..16
+	var ell := {}
+	for y in range(2, 9):
+		for x in range(12, 25):
+			ell[Vector2i(x, y)] = true
+	for y in range(9, 17):
+		for x in range(12, 18):
+			ell[Vector2i(x, y)] = true
+	outline.call(ell)
+	w.compute_buildings()
+	var wm := WorldMesh.new(w)
+	var m := Mesher.new()
+	var res := {}
+	for bi in w.buildings.size():
+		var b: Array = w.buildings[bi]
+		wm.build_roof(m, bi)
+		var vs := m.verts.duplicate()
+		res[Vector2i(b[0], b[1])] = vs
+	var open_v: int = res.get(Vector2i(2, 2), PackedVector3Array()).size()
+	var box_v: PackedVector3Array = res.get(Vector2i(3, 12), PackedVector3Array())
+	var box_in := box_v.size() > 0
+	for v in box_v:
+		if v.x < 3.0 or v.x > 9.0 or v.z < 12.0 or v.z > 18.0:
+			box_in = false
+	var ell_v: PackedVector3Array = res.get(Vector2i(12, 2), PackedVector3Array())
+	var corner := 0
+	for v in ell_v:
+		if v.x > 18.2 and v.z > 9.2:
+			corner += 1
+	var arm := 0
+	for v in ell_v:
+		if v.z > 12.0:
+			arm += 1
+	check("Крыши: над недостроенным домом нет, над закрытым — в пределах стен, у дома буквой Г пустой угол не накрыт",
+		open_v == 0 and box_in and ell_v.size() > 0 and corner == 0 and arm > 0,
+		"недостроенный %d вершин, прямоугольник в стенах %s, Г: %d вершин, в пустом углу %d, над крылом %d" % [open_v, box_in, ell_v.size(), corner, arm])
 
 ## Черновик редактора, начатый со старой карты игры (0.46, BF-059): редактор начинает с нынешней карты игры,
 ## прежний черновик — в копии; черновик с верным отпечатком открывается как есть
