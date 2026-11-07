@@ -175,7 +175,7 @@ func _process(dt: float) -> void:
 		for m in game.pop_messages(local_pid):
 			hud.add_msg(m)
 		for c in game.pop_chat(local_pid):
-			hud.add_chat(c)
+			hud.on_chat(c)
 		game.world.dirty_tiles.clear()
 		game.fx_net.clear()
 		if not paused:
@@ -252,7 +252,7 @@ func _handle_net() -> void:
 					for m in o.get("m", []):
 						hud.add_msg(m)
 					for c in o.get("c", []):
-						hud.add_chat(str(c))
+						hud.on_chat(c)
 			"bye":
 				Net.I.status = str(o.get("why", "Сервер закрыл соединение"))
 				Net.I.close()

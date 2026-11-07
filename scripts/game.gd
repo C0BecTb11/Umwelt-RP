@@ -132,7 +132,7 @@ var fx: Array = []             # [тип, x, y, параметр] — 3 ране
 var fx_net: Array = []
 var uids := {}                 # постоянный ID телефона друга → номер персонажа
 var real_clock := true         # время = реальное московское; false — идёт само (демо-снимки)
-var chat := {}                 # pid → Array[String] — строки чата для этого игрока (уходят в ev "c")
+var chat := {}                 # pid → Array[[id сказавшего, текст, строка чата]] — для этого игрока (уходят в ev "c")
 var payday_hour := -1          # номер часа (минуты МСК / 60) последнего PayDay; -1 — ещё не считали
 
 func _init(s: int = 0) -> void:
@@ -291,12 +291,14 @@ func _say(p: Player, raw: String) -> void:
 		msg(p.id, "Не так быстро — сообщение не отправлено")
 		return
 	p.chat_cd = CHAT_GAP
+	p.idle = 0.0
 	var line := "%s говорит: %s" % [tag(p), t]
+	# запись: [кто сказал, текст — для облачка над головой (0.53), строка — для чата]
 	for q: Player in players:
 		if q.connected and q.pos.distance_to(p.pos) <= CHAT_R:
 			if not chat.has(q.id):
 				chat[q.id] = []
-			chat[q.id].append(line)
+			chat[q.id].append([p.id, t, line])
 
 func pop_chat(pid: int) -> Array:
 	var c: Array = chat.get(pid, [])
@@ -454,11 +456,14 @@ func update(dt: float) -> void:
 	var today := floori(time / 1440.0)
 	for p: Player in players:
 		_account_time(p, dt, today)
-	# PayDay — в начале каждого часа по МСК; после перезапуска сервера пропущенный час просто засчитывается заново
+	# PayDay — в начале каждого часа по МСК, только когда час стал БОЛЬШЕ прошлого (BF-069): часы сервера,
+	# отошедшие назад через границу часа (поправка времени), раньше давали второй и третий PayDay подряд.
+	# Скачок назад больше чем на час — часы переставили: просто запоминаем новый час, без PayDay.
+	# Скачок вперёд на несколько часов (сервер был выключен) — один PayDay, а не по одному за каждый час
 	var hr := floori(time / 60.0)
-	if payday_hour < 0:
+	if payday_hour < 0 or hr < payday_hour - 1:
 		payday_hour = hr
-	elif hr != payday_hour:
+	elif hr > payday_hour:
 		payday_hour = hr
 		payday()
 	for p: Player in players:
@@ -774,7 +779,8 @@ func _do_action(p: Player, a: Dictionary) -> void:
 	for k in ["c"]:
 		if a.has(k):
 			a[k] = int(a[k])
-	p.idle = 0.0
+	if a["a"] != "say":
+		p.idle = 0.0              # речь снимает АФК только настоящим сообщением (_say), не пустым (BF-070)
 	if a["a"] == "attack":
 		p.ta_act = null
 	var tm := _timing(p, a)

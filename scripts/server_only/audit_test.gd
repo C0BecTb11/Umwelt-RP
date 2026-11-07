@@ -39,6 +39,7 @@ func _ready() -> void:
 	test_furniture_collision()
 	test_attack_walk()
 	test_payday()
+	test_payday_guard()
 	test_chat()
 	test_editor()
 	test_editor_resize()
@@ -1204,6 +1205,78 @@ func test_payday() -> void:
 	check("PayDay: 20 минут за час — опыт и зарплата, меньше — плашка; АФК не в счёт; уровни 4, 6, 8…; сохраняется",
 		bad.is_empty(), str(bad))
 
+## PayDay от накрутки (0.53, BF-069, BF-070): часы назад через границу часа — второго PayDay нет; скачок назад
+## больше часа — без PayDay; вперёд на несколько часов — один PayDay; перезаход в том же часу — не даёт PayDay,
+## а отыгранное складывается; перезапуск сервера посреди часа — отыгранное и час PayDay сохраняются;
+## телефон не может прислать уровень/опыт/время; пустое сообщение не снимает АФК
+func test_payday_guard() -> void:
+	var bad := []
+	var g := GameState.new_game(7)
+	g.real_clock = false
+	var a := g.join_player("g-a", "Alex_Brown", 701, "m", "2026-11-01")
+	var at := func(minutes: float) -> void:
+		g.time = minutes
+		g.update(0.0)
+	at.call(14 * 60 + 59.9)
+	a.hour_play = 1300.0
+	at.call(15 * 60 + 0.1)
+	var e1 := a.exp
+	for m in [14 * 60 + 59.95, 15 * 60 + 0.2, 14 * 60 + 59.97, 15 * 60 + 0.3]:
+		a.hour_play = 1300.0           # даже если бы «наиграл» снова — в этом часу PayDay уже был
+		at.call(m)
+	if e1 != 1 or a.exp != 1:
+		bad.append("откат часов: опыт %d → %d" % [e1, a.exp])
+	at.call(11 * 60.0)                 # часы переставили на 4 часа назад
+	if a.exp != 1 or g.payday_hour != 11:
+		bad.append("скачок назад: опыт %d, час %d" % [a.exp, g.payday_hour])
+	a.hour_play = 1300.0
+	at.call(16 * 60 + 0.5)             # сервер «проспал» 5 часов — один PayDay
+	if a.exp != 2:
+		bad.append("скачок вперёд: опыт %d (ждали 2)" % a.exp)
+	# 12 минут, вышел, вернулся, ещё 9 — за час 21: PayDay дают; сам перезаход PayDay не даёт
+	at.call(16 * 60 + 1.0)
+	a.hour_play = 12 * 60.0
+	g.leave_player(a.id)
+	g._account_time(a, 600.0, floori(g.time / 1440.0))
+	var b := g.join_player("g-a", "Alex_Brown", 701, "m", "2026-11-01")
+	if b != a or a.hour_play != 12 * 60.0 or a.exp != 2:
+		bad.append("перезаход: в часу %d, опыт %d" % [a.hour_play, a.exp])
+	for i in 9 * 60:
+		a.idle = 0.0
+		g._account_time(a, 1.0, floori(g.time / 1440.0))
+	# перезапуск сервера посреди часа
+	var g2 := GameState.new_game(7)
+	g2.real_clock = false
+	g2.load_data(JSON.parse_string(JSON.stringify(g.to_data())))
+	var a2 := g2.player(701)
+	a2.connected = true
+	if absf(a2.hour_play - 21 * 60) > 1.0 or g2.payday_hour != 16:
+		bad.append("после перезапуска: в часу %d, час PayDay %d" % [a2.hour_play, g2.payday_hour])
+	g2.time = 16 * 60 + 30.0
+	g2.update(0.0)
+	g2.time = 17 * 60 + 0.1
+	g2.update(0.0)
+	if a2.exp != 3:
+		bad.append("PayDay после перезапуска: опыт %d (ждали 3)" % a2.exp)
+	# телефон шлёт только движение и действия: поля уровня в них игнорируются, «действий» начисления нет
+	var lv := a2.level
+	g2.remote_input(a2, {"mx": 0.0, "my": 0.0, "x": a2.pos.x, "y": a2.pos.y, "fx": 1.0, "fy": 0.0, "lv": 99, "xp": 99, "ph": 9999.0})
+	for fake in [{"a": "payday"}, {"a": "exp", "n": 5}, {"a": "level"}, {"a": "say"}]:
+		if GameState.valid_action(fake):
+			bad.append("принято действие %s" % [fake])
+		g2._do_action(a2, fake)
+	if a2.level != lv or a2.exp != 3 or a2.hour_play > 1.0:
+		bad.append("телефон поменял уровень/опыт/время: %d %d %d" % [a2.level, a2.exp, a2.hour_play])
+	# пустое сообщение АФК не снимает, настоящее — снимает
+	a2.idle = 500.0
+	g2._do_action(a2, {"a": "say", "text": "   "})
+	var after_empty := a2.idle
+	g2._do_action(a2, {"a": "say", "text": "я тут"})
+	if after_empty != 500.0 or a2.idle != 0.0:
+		bad.append("АФК: после пустого %d, после настоящего %d" % [after_empty, a2.idle])
+	check("PayDay от накрутки: откат часов, перезаход, перезапуск, подделка с телефона, пустой чат — опыт не задваивается",
+		bad.is_empty(), str(bad))
+
 ## Чат (0.52): слышат ближе 20 м и сам говорящий; дальше — нет; текст чистится и обрезается; чаще раза в секунду — нет;
 ## действие «say» проходит по сети (valid_action), строка уходит в событиях «c»
 func test_chat() -> void:
@@ -1225,8 +1298,8 @@ func test_chat() -> void:
 	var lc := g.pop_chat(c.id)
 	if la.size() != 1 or lb.size() != 1 or lc.size() != 0:
 		bad.append("кто слышит: %d %d %d" % [la.size(), lb.size(), lc.size()])
-	elif lb[0] != "Anna_Gray (601) говорит: Привет, как дела?":
-		bad.append("строка: «%s»" % lb[0])
+	elif lb[0] != [601, "Привет, как дела?", "Anna_Gray (601) говорит: Привет, как дела?"]:
+		bad.append("запись: «%s»" % [lb[0]])
 	if a.idle != 0.0:
 		bad.append("чат не сбрасывает АФК")
 	g._do_action(a, {"a": "say", "text": "второе сразу"})
@@ -1235,7 +1308,7 @@ func test_chat() -> void:
 	g._account_time(a, 1.1, floori(g.time / 1440.0))
 	g._do_action(a, {"a": "say", "text": "x".repeat(300)})
 	var lb2 := g.pop_chat(b.id)
-	if lb2.size() != 1 or lb2[0].length() != "Anna_Gray (601) говорит: ".length() + GameState.CHAT_MAX:
+	if lb2.size() != 1 or (lb2[0][1] as String).length() != GameState.CHAT_MAX:
 		bad.append("длинное не обрезано")
 	g._account_time(a, 1.1, floori(g.time / 1440.0))
 	g._do_action(a, {"a": "say", "text": " \n "})
@@ -1244,7 +1317,7 @@ func test_chat() -> void:
 	g._account_time(a, 1.1, floori(g.time / 1440.0))
 	g._do_action(a, {"a": "say", "text": "в сеть"})
 	var ev := g.events_for(b.id, false)
-	if not (ev.get("c", []) as Array).has("Anna_Gray (601) говорит: в сеть"):
+	if not (ev.get("c", []) as Array).has([601, "в сеть", "Anna_Gray (601) говорит: в сеть"]):
 		bad.append("нет в событиях: %s" % [ev])
 	check("Чат: слышат ближе 20 м; текст чистится и обрезается; не чаще раза в секунду; уходит в событиях", bad.is_empty(), str(bad))
 

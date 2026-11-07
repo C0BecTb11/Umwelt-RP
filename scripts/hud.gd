@@ -35,6 +35,9 @@ var chat_send := Rect2()
 const CHAT_KEEP := 40          # строк в истории
 const CHAT_SHOW := 6           # строк на экране, пока чат закрыт
 const CHAT_LIFE := 30.0        # с: строка видна, потом гаснет (в открытом чате — вся история)
+# облачко над головой говорящего (с 0.53): id игрока → [текст, когда сказал (мс), сколько висит (с)]
+var bubbles := {}
+const BUBBLE_W := 210.0        # ширина текста облачка
 
 # кнопки: центр и радиус
 var b_attack := [Vector2.ZERO, 50.0]
@@ -102,6 +105,14 @@ func add_msg(s: String) -> void:
 	msgs.append([s, life, fr])
 	if msgs.size() > 4:
 		msgs.pop_front()
+
+## Запись чата от сервера: [id сказавшего, текст, строка чата] — строка в чат, текст — облачком над головой
+func on_chat(e) -> void:
+	if not (e is Array) or e.size() < 3:
+		return
+	add_chat(str(e[2]))
+	var t := str(e[1])
+	bubbles[int(e[0])] = [t, Time.get_ticks_msec(), clampf(3.0 + t.length() * 0.07, 4.0, 10.0)]
 
 func add_chat(s: String) -> void:
 	chat_lines.append([s, Time.get_ticks_msec()])
@@ -439,6 +450,7 @@ func _overlays(g: GameState, me: GameState.Player, vr: Rect2) -> void:
 		var nm: String = GameState.tag(p)
 		var sp: Vector2 = screen.view.project(Vector3(p.rpos.x, 2.05, p.rpos.y))
 		_text(sp, nm, 12, Color(0.75, 0.9, 1.0), HORIZONTAL_ALIGNMENT_CENTER, true)
+	_bubbles(g, me)
 	draw_texture_rect(vignette, vr, false)
 	var low := 0.0
 	if me.hp < 30.0 and not me.dead:
@@ -584,6 +596,39 @@ func _draw_chat(x: float, y: float) -> void:
 	for r in rows:
 		_text(Vector2(x, y + 15), r[0], 14, Color(1, 1, 1, r[1]), HORIZONTAL_ALIGNMENT_LEFT, true)
 		y += 19
+
+## Облачка с речью над головами (с 0.53): над именем (у себя — над головой), до 3 строк, гаснут в конце
+func _bubbles(g: GameState, me: GameState.Player) -> void:
+	var now := Time.get_ticks_msec()
+	for id in bubbles.keys():
+		var b: Array = bubbles[id]
+		var age := (now - int(b[1])) / 1000.0
+		if age > b[2]:
+			bubbles.erase(id)
+			continue
+		var p := g.player(int(id))
+		if p == null or p.dead or not p.connected:
+			continue
+		var a := clampf((b[2] - age) / 0.6, 0.0, 1.0) * clampf(age / 0.15, 0.0, 1.0)
+		var lines := _wrap(b[0], 13, BUBBLE_W)
+		if lines.size() > 3:
+			lines = lines.slice(0, 3)
+			lines[2] = (lines[2] as String).left(maxi(0, (lines[2] as String).length() - 1)) + "…"
+		var w := 0.0
+		for l in lines:
+			w = maxf(w, _tw(l, 13))
+		var tip: Vector2 = screen.view.project(Vector3(p.rpos.x, 2.05, p.rpos.y)) + Vector2(0, -16 if p.id != me.id else 4)
+		if p.ta_act != null:
+			tip.y -= 34                  # над кольцом «Ем / Надеваю»
+		var h := lines.size() * 17.0 + 10.0
+		var r := Rect2(tip.x - w / 2 - 9, tip.y - 7 - h, w + 18, h)
+		var bg := Color(0.96, 0.96, 0.94, 0.92 * a)
+		_rr(r, 9, bg)
+		draw_colored_polygon(PackedVector2Array([Vector2(tip.x - 6, r.end.y - 0.5), Vector2(tip.x + 6, r.end.y - 0.5), Vector2(tip.x, tip.y)]), bg)
+		var y := r.position.y + 18
+		for l in lines:
+			_text(Vector2(tip.x, y), l, 13, Color(0.08, 0.09, 0.1, a), HORIZONTAL_ALIGNMENT_CENTER)
+			y += 17
 
 ## Разбить строку по словам на куски не шире w
 func _wrap(s: String, size: int, w: float) -> Array:

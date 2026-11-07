@@ -78,10 +78,11 @@ static func create(kind: String) -> GameState:
 	if kind == "chat" or kind == "chatlog":
 		var q1: GameState.Player = g.players[1]
 		var q3: GameState.Player = g.players[3]
-		g.chat[p.id] = ["%s говорит: Привет! Не подскажешь, где мэрия?" % GameState.tag(q1),
-			"%s говорит: Прямо по Мейн-стрит, там площадь" % GameState.tag(p),
-			"%s говорит: Спасибо, а автовокзал далеко?" % GameState.tag(q1),
-			"%s говорит: Нет, к югу от центра, рядом с больницей. Пойдём, покажу" % GameState.tag(q3)]
+		var said := [[q1, "Привет! Не подскажешь, где мэрия?"], [p, "Прямо по Мейн-стрит, там площадь"],
+			[q1, "Спасибо, а автовокзал далеко?"], [q3, "Нет, к югу от центра, рядом с больницей. Пойдём, покажу"]]
+		g.chat[p.id] = []
+		for e in said:
+			g.chat[p.id].append([e[0].id, e[1], "%s говорит: %s" % [GameState.tag(e[0]), e[1]]])
 	if kind == "chatlog":
 		p.hour_play = 25 * 60      # настоящий PayDay — плашка, как в игре
 		g.payday()
