@@ -33,6 +33,7 @@ func _ready() -> void:
 	test_world_gen()
 	test_map()
 	test_overview()
+	test_stale_draft()
 	test_editor()
 	test_editor_resize()
 	test_remote_door()
@@ -1038,6 +1039,43 @@ func test_map_pack() -> void:
 		err == "" and (bp[0] as PackedByteArray).size() < bp[1] / 3 and (t1 - t0) < 500000 and (t2 - t1) < 500000,
 		"ошибка «%s»; %d КБ из %d КБ; сжатие %d мс, распаковка %d мс" % [err, (bp[0] as PackedByteArray).size() / 1024, int(bp[1]) / 1024, (t1 - t0) / 1000, (t2 - t1) / 1000])
 	check("Карта при входе: испорченные данные не роняют игру", GameState.unpack_map(PackedByteArray([1, 2, 3]), 100) == null and GameState.unpack_map(PackedByteArray(), 999999999) == null)
+
+## Черновик редактора, начатый со старой карты игры (0.46, BF-059): редактор начинает с нынешней карты игры,
+## прежний черновик — в копии; черновик с верным отпечатком открывается как есть
+func test_stale_draft() -> void:
+	var ME = load("res://scripts/map_editor.gd")
+	var md := GameWorld.read_map_file()
+	md["spawn"] = [3.5, 3.5]
+	var old_text := GameWorld.map_text(md)
+	for f in [ME.DRAFT, ME.DRAFT_BASE, ME.DRAFT_OLD]:
+		DirAccess.remove_absolute(f)
+	var fd := FileAccess.open(ME.DRAFT, FileAccess.WRITE)
+	fd.store_string(old_text)
+	fd.close()
+	var stale_nobase: bool = ME.draft_stale()
+	var ed = ME.new()
+	ed.headless = true
+	add_child(ed)
+	var official := GameWorld.new()
+	official.load_map(GameWorld.read_map_file())
+	var from_game: bool = ed.w.spawn == official.spawn
+	var backup_ok := FileAccess.get_file_as_string(ME.DRAFT_OLD) == old_text
+	var fresh: bool = not ME.draft_stale()
+	ed.queue_free()
+	# черновик с верным отпечатком — открывается как есть
+	fd = FileAccess.open(ME.DRAFT, FileAccess.WRITE)
+	fd.store_string(old_text)
+	fd.close()
+	var ed2 = ME.new()
+	ed2.headless = true
+	add_child(ed2)
+	var kept: bool = ed2.w.spawn == Vector2(3.5, 3.5)
+	ed2.queue_free()
+	for f in [ME.DRAFT, ME.DRAFT_BASE, ME.DRAFT_OLD]:
+		DirAccess.remove_absolute(f)
+	check("Редактор: черновик со старой карты игры — начинается с нынешней, прежний в копии; свежий черновик — как есть",
+		stale_nobase and from_game and backup_ok and fresh and kept,
+		"без отпечатка устарел %s, взята карта игры %s, копия %s, отпечаток обновлён %s, свежий открыт %s" % [stale_nobase, from_game, backup_ok, fresh, kept])
 
 ## Вид сверху в редакторе (0.45): схема покрывает всю карту ровно один раз, цвет клетки верный,
 ## правка клетки перестраивает одну полосу рядов

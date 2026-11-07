@@ -8,6 +8,10 @@ extends Node
 signal finished(action: String, focus: Vector2)   # "exit" — в лаунчер, "walk" — пройтись по черновику
 
 const DRAFT := "user://map_draft.json"
+## Отпечаток карты игры, с которой начат черновик (с 0.46, BF-059). Вышла новая карта игры (или отпечатка нет —
+## черновик старше 0.46) — редактор начинает с карты игры, прежний черновик кладёт в DRAFT_OLD
+const DRAFT_BASE := "user://map_draft_base.txt"
+const DRAFT_OLD := "user://map_draft_old.json"
 const Props = preload("res://scripts/props.gd")
 const AccountApi = preload("res://scripts/account.gd")
 const W = preload("res://scripts/world.gd")
@@ -93,11 +97,17 @@ func _ready() -> void:
 	g = GameState.new(1)
 	g.real_clock = false
 	g.time = 13 * 60.0
+	var stale := use_draft and draft_stale()
+	if stale:
+		DirAccess.remove_absolute(DRAFT_OLD)
+		DirAccess.rename_absolute(DRAFT, DRAFT_OLD)
 	var d := load_draft() if use_draft else {}
 	var err := g.world.load_map(d) if not d.is_empty() else "нет черновика"
 	if err != "":
 		g.load_official_map()
 	w = g.world
+	if stale:
+		save_draft()
 	g.spawn = w.spawn
 	if focus == Vector2(50, 50):
 		focus = w.spawn
@@ -115,7 +125,8 @@ func _ready() -> void:
 	_make_markers()
 	_make_ui()
 	_set_tool(Tool.HAND)
-	_say("Редактор карты. Два пальца — двигать и приближать. Внизу — инструменты")
+	_say("Карта в игре новая — черновик начат с неё" if stale
+		else "Редактор карты. Два пальца — двигать и приближать. Внизу — инструменты")
 
 ## Черновик из телефона (пустой словарь — черновика нет)
 static func load_draft() -> Dictionary:
@@ -124,6 +135,18 @@ static func load_draft() -> Dictionary:
 	var d = JSON.parse_string(FileAccess.get_file_as_string(DRAFT))
 	return d if d is Dictionary else {}
 
+## Отпечаток нынешней карты игры (md5 файла)
+static func official_print() -> String:
+	return FileAccess.get_file_as_string(GameWorld.map_path).md5_text()
+
+## Черновик есть, но начат с другой карты игры (или до 0.46 — без отпечатка)
+static func draft_stale() -> bool:
+	if not FileAccess.file_exists(DRAFT):
+		return false
+	if not FileAccess.file_exists(DRAFT_BASE):
+		return true
+	return FileAccess.get_file_as_string(DRAFT_BASE).strip_edges() != official_print()
+
 func save_draft() -> void:
 	var f := FileAccess.open(DRAFT, FileAccess.WRITE)
 	if f == null:
@@ -131,6 +154,11 @@ func save_draft() -> void:
 		return
 	f.store_string(GameWorld.map_text(w.map_data()))
 	f.close()
+	# черновик открыт после проверки draft_stale — он начат с нынешней карты игры
+	var fb := FileAccess.open(DRAFT_BASE, FileAccess.WRITE)
+	if fb != null:
+		fb.store_string(official_print())
+		fb.close()
 	unsaved = false
 
 # ================== ПРАВКИ (их же проверяют автотесты) ==================
