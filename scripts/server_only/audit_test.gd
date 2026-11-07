@@ -18,6 +18,8 @@ func check(name: String, ok: bool, details: String = "") -> void:
 const SEED := 20261104     # случайные маршруты в тестах — одни и те же при каждом запуске
 
 func _ready() -> void:
+	# карта игры с 0.45 чистая — тесты идут на тестовом городе (дома, двери, окна, фонари)
+	GameWorld.map_path = GameWorld.TEST_MAP_PATH
 	seed(SEED)
 	print("зерно случайности тестов: %d" % SEED)
 	test_walls()
@@ -30,6 +32,7 @@ func _ready() -> void:
 	test_saves()
 	test_world_gen()
 	test_map()
+	test_overview()
 	test_editor()
 	test_editor_resize()
 	test_remote_door()
@@ -372,6 +375,11 @@ func _find_opening(g: GameState, tile: int) -> Vector2i:
 
 ## Карта из файла: читается, правильная, плохую не принимает; объекты мешают ходить; двери и игроки после смены карты
 func test_map() -> void:
+	var game_map = JSON.parse_string(FileAccess.get_file_as_string(GameWorld.MAP_PATH))
+	var gw := GameWorld.new()
+	var gerr: String = gw.load_map(game_map) if game_map is Dictionary else "не JSON"
+	check("Карта игры (maps/city.json) читается без ошибок, точка появления свободна", gerr == ""
+		and not gw.circle_blocked(gw.spawn.x, gw.spawn.y, GameState.PLAYER_R), gerr)
 	var d := GameWorld.read_map_file()
 	var w := GameWorld.new()
 	var err := w.load_map(d)
@@ -379,7 +387,7 @@ func test_map() -> void:
 	for e in w.props:
 		if e[0] == "lamp":
 			lamps += 1
-	check("Карта: maps/city.json читается без ошибок, на ней есть фонари", err == "" and lamps > 0, err)
+	check("Карта: тестовый город читается без ошибок, на нём есть фонари", err == "" and lamps > 0, err)
 	check("Карта: точка появления свободна", err == "" and not w.circle_blocked(w.spawn.x, w.spawn.y, GameState.PLAYER_R), "в %s стена или объект" % w.spawn)
 	# туда-обратно через текст файла — то же самое
 	var w2 := GameWorld.new()
@@ -1031,9 +1039,47 @@ func test_map_pack() -> void:
 		"ошибка «%s»; %d КБ из %d КБ; сжатие %d мс, распаковка %d мс" % [err, (bp[0] as PackedByteArray).size() / 1024, int(bp[1]) / 1024, (t1 - t0) / 1000, (t2 - t1) / 1000])
 	check("Карта при входе: испорченные данные не роняют игру", GameState.unpack_map(PackedByteArray([1, 2, 3]), 100) == null and GameState.unpack_map(PackedByteArray(), 999999999) == null)
 
+## Вид сверху в редакторе (0.45): схема покрывает всю карту ровно один раз, цвет клетки верный,
+## правка клетки перестраивает одну полосу рядов
+func test_overview() -> void:
+	var w := GameWorld.new()
+	var md := GameWorld.read_map_file()
+	md["lines"] = [["street", 10.0, 10.0, 60.0, 10.0]]
+	w.load_map(md)
+	var ov := MapOverview.new()
+	ov.setup(w)
+	ov.refresh()
+	var area := 0.0
+	var wall := Vector2i(-1, -1)
+	for i in w.tiles.size():
+		if w.tiles[i] == W.WALL:
+			wall = Vector2i(i % w.w, i / w.w)
+			break
+	var wall_ok := false
+	for b in ov.bands:
+		var mesh: ArrayMesh = b.mesh
+		if mesh == null:
+			continue
+		var arr := mesh.surface_get_arrays(0)
+		var v: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+		var cl: PackedColorArray = arr[Mesh.ARRAY_COLOR]
+		for i in range(0, v.size(), 3):
+			area += absf((v[i + 1] - v[i]).cross(v[i + 2] - v[i]).y) * 0.5
+			var p := Vector2(wall.x + 0.5, wall.y + 0.5)
+			if Geometry2D.point_is_inside_triangle(p, Vector2(v[i].x, v[i].z), Vector2(v[i + 1].x, v[i + 1].z), Vector2(v[i + 2].x, v[i + 2].z)):
+				wall_ok = cl[i] == MapOverview.tile_col(W.WALL)
+	w.set_t(5, 25, W.WATER)
+	ov.mark_row(25)
+	var dirty := ov.band_dirty.count(1)
+	ov.refresh()
+	check("Вид сверху: схема покрывает всю карту один раз, цвет клетки верный, дорога есть; правка — одна полоса",
+		absf(area - w.w * w.h) < 0.5 and wall.x >= 0 and wall_ok and ov.lines_node.mesh != null and dirty == 1 and ov.ready_all(),
+		"площадь %.1f из %d, стена %s %s, дорога %s, полос к перестройке %d" % [area, w.w * w.h, wall, wall_ok, ov.lines_node.mesh != null, dirty])
+	ov.free()
+
 ## Город 500×500 из нынешнего 100×100, уложенного 5×5 (реальная плотность домов и объектов)
 func _big_city(k: int) -> Dictionary:
-	var src: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://maps/city.json"))
+	var src: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(GameWorld.map_path))
 	var sw: int = src["w"]
 	var sh: int = src["h"]
 	var rows := []

@@ -217,8 +217,13 @@ const MAX_LINES := 2000
 const MAX_LINE_PTS := 64
 const LINE_STEP := 1.0          # шаг сглаженной кривой, м
 
+## Откуда читать карту: игра — MAP_PATH; автотесты (--audit) подменяют на тестовый город TEST_MAP_PATH (с 0.45:
+## карта игры — чистая, а тестам нужны дома, двери, окна, фонари)
+const TEST_MAP_PATH := "res://scripts/server_only/test_city.json"
+static var map_path := MAP_PATH
+
 static func read_map_file() -> Dictionary:
-	var d = JSON.parse_string(FileAccess.get_file_as_string(MAP_PATH))
+	var d = JSON.parse_string(FileAccess.get_file_as_string(map_path))
 	return d if d is Dictionary else {}
 
 ## Загрузить карту; возвращает текст ошибки или "" если всё хорошо. При ошибке мир не меняется

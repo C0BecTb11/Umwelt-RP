@@ -38,6 +38,7 @@ Umwelt-RP/
 │   ├── world.gd               GameWorld: карта из файла (load_map/map_data), проходимость, объекты, дороги-линии, двери, окна
 │   ├── props.gd               Объекты карты: каталог (фонарь, скамейка, гидрант…), столкновения, модели (без class_name)
 │   ├── map_editor.gd          Редактор карты: офлайн, только владелец; черновик → Supabase map_drafts (без class_name)
+│   ├── map_overview.gd        MapOverview: вид сверху на всю карту в редакторе (плоская схема клеток и дорог, 0.45)
 │   ├── world_mesh.gd          WorldMesh: 3D-геометрия города по карте (чанки, объекты, крыши, двери; фонари — из объектов)
 │   ├── world_view.gd          WorldView: 3D-сцена: камера, солнце, свет, игроки, эффекты
 │   ├── character.gd           CharModel: персонаж Quaternius — скелет, анимации, части одежды, оружие
@@ -54,7 +55,7 @@ Umwelt-RP/
 │       ├── loadbots.gd        Нагрузочный тест: много лёгких ботов в одном процессе (--no-update --loadbots=число,порт,секунд)
 │       └── authtest.gd        Проверка входа Supabase → сервер (--authtest=…), в CI auth-test.yml
 ├── maps/
-│   └── city.json              Карта игры: ряды клеток символами, объекты, точка появления. Попадает в пакет и сервер
+│   └── city.json              Карта игры (с 0.45 — чистая: трава 100×100): ряды клеток символами, объекты, точка появления. Попадает в пакет и сервер
 ├── shaders/
 │   └── world.gdshader         Шейдер города: цвет вершин × текстура слоя (по мировым координатам), прорезание стен перед игроком, свечение окон ночью
 ├── assets/tex/                Текстуры города Quaternius Downtown City MegaKit (CC0), с 0.37
@@ -110,9 +111,10 @@ Umwelt-RP/
 | `scripts/game_screen.gd` | `GameScreen` | Режимы `SOLO` (логика на телефоне) и `CLIENT` (логика на сервере, здесь — предсказание своего движения); шлёт `in`/`act`/`hello`; принимает `init`/`st`/`ev`/`bye`; обрыв связи (`lost`, `can_retry`, 6 с без снимков — `SILENCE_MS`, 0.33); карта из `init.mapz` (0.34); проверка обновлений раз в 180 с |
 | `scripts/world.gd` | `GameWorld` | Тайлы и их типы; карта из файла (до 500×500 — `MAX_SIDE`): `read_map_file`, `load_map` (с проверкой, при ошибке мир не меняется), объекты по кускам графики `props_chunk` (`PROP_CHUNK`, 0.35), дороги-линии `lines` (0.38: `LINE_KINDS`, `line_path` — кривая: прямые + дуги на углах (0.44: `line_points`, `line_corners`, `line_corner_radii`, `LINE_TURN_R`, `LINE_MIN_R`), перекрёстки `_find_junctions`/`_add_junction` → `lines_junc`, `line_junc`, `line_len`, `on_line` (0.44), `index_lines` → `lines_chunk` — куски `[вид, A, B, нормаль, нормаль, путь до A, до B, номер, нормаль предыдущего]`, `on_line_road` — точка на асфальте/обочине линии, `s_self` — своя дорога далеко по пути считается чужой, 0.43), вода (0.40: `WATER`, `has_water`, поле `water_corner`/`water_corners`/`bilerp`/`water_at`, `_water_blocks` в `circle_blocked`, `on_bridge`; глубина для вида — `water_dist`, `compute_water_depth`, `water_depth_corners`, 0.41), `map_data`, `map_text`, символы клеток `MAP_CHARS`; объекты `props` и круги столкновений `prop_cols` (`index_props`); проходимость (`solid`, `circle_blocked` — стены и объекты), видимость по прямой (`los`: сквозь окно видно, пуля не проходит), окна и двери, здания (`compute_buildings`) |
 | `scripts/props.gd` | без class_name, `preload` | `DEFS` (название, круги `col`), `ORDER` (палитра редактора), `colliders()`, `lamp_head()`, `build()` — модель объекта в `Mesher` |
-| `scripts/map_editor.gd` | без class_name, `load()` из main | Камера сверху (при отдалении `view.stream_r` до 10), размер карты `resize_map` (только больше, до 500, город на месте — 0.36), инструменты Рука/Кисть/Прямоугольник/Рамка/Объект/Выбор/Спавн, отмена, черновик `user://map_draft.json`, «Пройтись», «Из игры», «Отправить» (POST `map_drafts`). Логика правок (`paint`, `rect`, `place_prop`, `move_prop`, `rotate_prop`, `delete_prop`, `set_spawn`, `undo`) отдельно от касаний |
+| `scripts/map_editor.gd` | без class_name, `load()` из main | Камера сверху (при отдалении `view.stream_r` до 10; дальше `ZOOM_3D` — вид сверху `view.overview`, предел `_zoom_max`, 0.45), размер карты `resize_map` (только больше, до 500, город на месте — 0.36), инструменты Рука/Кисть/Прямоугольник/Рамка/Объект/Выбор/Спавн, отмена, черновик `user://map_draft.json`, «Пройтись», «Из игры», «Отправить» (POST `map_drafts`). Логика правок (`paint`, `rect`, `place_prop`, `move_prop`, `rotate_prop`, `delete_prop`, `set_spawn`, `undo`) отдельно от касаний |
+| `scripts/map_overview.gd` | `MapOverview` | Вид сверху на всю карту в редакторе (0.45): полосы по `BAND` = 10 рядов (`bands`, `band_dirty`, `mark_row`), клетки — прямоугольники по рядам (`_band_mesh`, цвет `tile_col`), дороги-линии полосами (`_lines_mesh`, `_strip`), `refresh(max_bands)`, `ready_all`; без света, без тумана |
 | `scripts/world_mesh.gd` | `WorldMesh` | Чанки геометрии (кусок 10×10, объекты — из `props_chunk`), стены, мебель, машины-декорации, деревья, объекты карты (`Props.build`), фонари (`lamps` из объектов, `refresh_lamps`), крыши, двери |
-| `scripts/world_view.gd` | `WorldView` | 3D-узлы; построенными держит только куски графики вокруг игрока (`stream_r` = 4, `built`, дальние освобождает — 0.35, BF-052); камера (`cam_pitch`, 54° в игре), солнце и окружение по `darkness()`, фонари, модели игроков (`CharModel`), кровь, частицы, выстрелы; перевод джойстика в направление мира; для редактора — `hide_roofs`, `rebuild_static`, `mark_point`, `ground_point` |
+| `scripts/world_view.gd` | `WorldView` | 3D-узлы (редактор: вид сверху `overview`/`ov` — `MapOverview`, `_overview_switch`, 0.45); построенными держит только куски графики вокруг игрока (`stream_r` = 4, `built`, дальние освобождает — 0.35, BF-052); камера (`cam_pitch`, 54° в игре), солнце и окружение по `darkness()`, фонари, модели игроков (`CharModel`), кровь, частицы, выстрелы; перевод джойстика в направление мира; для редактора — `hide_roofs`, `rebuild_static`, `mark_point`, `ground_point` |
 | `scripts/character.gd` | `CharModel` | Загружает `assets/chars/<пол>_base.scn` и части; `set_wear()` по `Items.part_for/tint_for`; тон кожи; оружие на кости `Wrist.R`; выбор анимации в `pose(phase, moving, attack, weapon_id, lying, sneak)` |
 | `scripts/items.gd` | `Items` | `DEFS` (еда, оружие, одежда с `parts`/`also`/`tint`), `SLOTS`, `BARE`, `HEADS`, `COLORS`, `START_WEAR`; инвентарь (`add_to`, `take`, `count`, `weight`) |
 | `scripts/hud.gd` | `Hud` | Рисование интерфейса (`_draw`), касания, джойстик, панели `INV` / `PAUSE` / `GEAR`, сообщения, напоминание об обновлении; в паузе офлайна — «Редактор карты» (владелец) / «Вернуться в редактор»; в меню сетевой игры — «Аккаунт» (`screen.next = "account"`, 0.31) |
@@ -162,7 +164,8 @@ Umwelt-RP/
   `preload("res://scripts/account.gd")`, назад — `res://launcher/launcher.tscn`.
 - `world.gd`, `world_mesh.gd`, `world_view.gd`, `audit_test.gd` → `preload("res://scripts/world.gd")` (константы тайлов).
 - `world_view.gd` → `load("res://shaders/world.gdshader")`, `load("res://assets/tex/world_albedo.png")` (с 0.37).
-- `world.gd` → `res://maps/city.json` (`GameWorld.MAP_PATH`, читает `GameState.load_official_map`).
+- `world.gd` → `res://maps/city.json` (`GameWorld.MAP_PATH`, читает `GameState.load_official_map`); откуда читать — `GameWorld.map_path` (автотесты ставят `TEST_MAP_PATH` = `res://scripts/server_only/test_city.json`, 0.45).
+- `world_view.gd` → `MapOverview` (создаёт при первом отдалении редактора за 3D-вид; `overview` > 0 — вид сверху, 0.45).
 - `main.gd` → `load("res://scripts/map_editor.gd")`; редактор и «Пройтись» — `user://map_draft.json`.
 - `character.gd` → `res://assets/chars/<m|f>_base.scn`, `res://assets/chars/<m|f>/<Часть>.scn` (имена из `items.gd`).
 
@@ -290,6 +293,7 @@ CI:     godot --headless -- --audit | --nettest=… | --authtest=…  (main.gd �
 | `scripts/boot.gd` | Адрес сервера и Supabase для всех клиентов |
 | `scripts/items.gd` | id вещей хранятся в сохранениях; переименование или удаление id без миграции — потеря вещей. Имена частей должны существовать в `assets/chars` (проверяет автотест) |
 | `assets/chars/*.scn` | Используются по именам из `items.gd` и `character.gd`; переименование ломает одежду |
+| `scripts/server_only/test_city.json` | Тестовый город (прежняя карта игры до 0.45): на нём идут автотесты (`GameWorld.TEST_MAP_PATH`). Не карта игры — правки в нём игроки не увидят |
 | `maps/city.json` | Карта для всех: сервер и офлайн. Битый файл — сервер не загрузит город (проверяет автотест «Карта: …»). Символы клеток — `GameWorld.MAP_CHARS`; id объектов должны быть в `props.gd` |
 | `scripts/props.gd` | id объектов записаны в карте: переименование или удаление id — карта перестанет загружаться |
 | `scripts/server_only/server.gd` | Вход в игру, сохранение мира на сервере |

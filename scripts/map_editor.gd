@@ -41,6 +41,12 @@ var prop_rot := 0.0
 var sel := -1                  # выбранный объект (номер в w.props)
 var focus := Vector2(50, 50)   # куда смотрит камера
 var zoom := 24.0
+## Отдаление: до ZOOM_3D — 3D-вид, дальше — вид сверху на всю карту (MapOverview, с 0.45): высота видимой области
+## = zoom · OV_K метров, предел — вся карта целиком с запасом
+const ZOOM_MIN := 8.0
+const ZOOM_3D := 70.0
+const OV_K := 0.6
+var _was_ov := false
 var undo_stack: Array = []
 var act = null                 # текущая правка: {"t": {клетка: было}, "props": копия или null, "spawn": было или null, "lines": копия или null}
 var road_kind := "street"      # вид новой дороги-линии
@@ -571,7 +577,7 @@ func _unhandled_input(e: InputEvent) -> void:
 	if view == null:
 		return
 	if e is InputEventMouseButton and e.pressed and (e.button_index == MOUSE_BUTTON_WHEEL_UP or e.button_index == MOUSE_BUTTON_WHEEL_DOWN):
-		zoom = clampf(zoom * (0.9 if e.button_index == MOUSE_BUTTON_WHEEL_UP else 1.1), 8.0, 70.0)
+		zoom = clampf(zoom * (0.9 if e.button_index == MOUSE_BUTTON_WHEEL_UP else 1.1), ZOOM_MIN, _zoom_max())
 		return
 	if e is InputEventScreenTouch:
 		if e.pressed:
@@ -612,10 +618,21 @@ func _pinch_move() -> void:
 	var mid: Vector2 = ((ps[0] as Vector2) + ps[1]) * 0.5
 	focus += view.ground_point(pinch_mid) - view.ground_point(mid)
 	if pinch_d > 10.0 and d > 10.0:
-		zoom = clampf(zoom * pinch_d / d, 8.0, 70.0)
+		zoom = clampf(zoom * pinch_d / d, ZOOM_MIN, _zoom_max())
 	pinch_d = d
 	pinch_mid = mid
 	_clamp_focus()
+
+## Предел отдаления: карта видна целиком между верхними и нижними кнопками (~240 точек экрана) и по ширине
+func _zoom_max() -> float:
+	var vs := get_viewport().get_visible_rect().size
+	var aspect := vs.x / maxf(1.0, vs.y)
+	var free_h := maxf(0.3, (vs.y - 240.0) / maxf(1.0, vs.y))
+	# вид сверху повёрнут на прямой угол, ближайший к повороту камеры: при 90°/270° ширина и высота карты меняются
+	var turned := int(roundf(view.cam_yaw / 90.0)) % 2 != 0 if view != null else false
+	var mw := float(w.h if turned else w.w)
+	var mh := float(w.w if turned else w.h)
+	return maxf(ZOOM_3D, maxf(mh / free_h, mw / aspect * 1.08) / OV_K)
 
 func _clamp_focus() -> void:
 	focus = Vector2(clampf(focus.x, 0.0, w.w), clampf(focus.y, 0.0, w.h))
@@ -744,8 +761,16 @@ func _process(dt: float) -> void:
 	me.rpos = focus
 	me.pos = focus
 	me.face = Vector2.ZERO
-	view.cam_d = zoom
-	view.stream_r = clampi(ceili(zoom * 1.2 / 10.0) + 1, 4, 10)   # отдалился — держим построенным больше города
+	view.cam_d = minf(zoom, ZOOM_3D)
+	view.stream_r = clampi(ceili(minf(zoom, ZOOM_3D) * 1.2 / 10.0) + 1, 4, 10)   # отдалился — держим построенным больше города
+	view.overview = zoom * OV_K if zoom > ZOOM_3D else 0.0
+	if (zoom > ZOOM_3D) != _was_ov:
+		_was_ov = zoom > ZOOM_3D
+		_say("Вся карта сверху. Разведи пальцы — снова 3D" if _was_ov else "3D-вид")
+	# метки дорог (точки, кольца концов) на виде сверху — крупнее, чтобы не терялись
+	var ms := maxf(1.0, zoom * OV_K / 40.0) if zoom > ZOOM_3D else 1.0
+	for mk in road_marks + end_marks:
+		mk.scale = Vector3(ms, 1.0, ms)
 	view.cam_x = focus.x
 	view.cam_z = focus.y
 	view.update(dt, g, me, -1)

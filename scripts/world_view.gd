@@ -54,6 +54,10 @@ var shake := 0.0
 var hurt_flash := 0.0
 var vibrate := 0
 var target := -1
+## Редактор карты: вид сверху на всю карту (MapOverview). > 0 — включён, это высота видимой области, м
+var overview := 0.0
+var ov: MapOverview
+var _ov_on := false
 
 func setup(w: GameWorld) -> void:
 	world = w
@@ -199,6 +203,9 @@ func rebuild_static() -> void:
 
 ## Редактор карты: перестроить участок, где стоит (стоял) объект
 func mark_point(x: float, y: float) -> void:
+	if ov != null:
+		ov.mark_row(floori(y))
+		ov.lines_dirty = true
 	var cx := clampi(floori(x) / WorldMesh.CHUNK, 0, wm.chunks_x - 1)
 	var cy := clampi(floori(y) / WorldMesh.CHUNK, 0, wm.chunks_y - 1)
 	chunk_dirty[cy * wm.chunks_x + cx] = 1
@@ -237,6 +244,8 @@ func _mark_dirty(i: int) -> void:
 		var ny: int = y + d.y
 		if not world.inside(nx, ny):
 			continue
+		if ov != null and d.x == 0:
+			ov.mark_row(ny)
 		chunk_dirty[(ny / WorldMesh.CHUNK) * wm.chunks_x + nx / WorldMesh.CHUNK] = 1
 
 # ================== ОБНОВЛЕНИЕ ==================
@@ -250,6 +259,7 @@ func update(dt: float, g: GameState, me: GameState.Player, local_pid: int) -> vo
 	for f in g.fx:
 		_on_fx(f, local_pid, me)
 	g.fx.clear()
+	_overview_switch()
 	# перестройка чанков: сначала ближайшие к игроку; вблизи — сразу, дальше — по 2 за кадр
 	var pcx := clampi(floori(me.rpos.x) / WorldMesh.CHUNK, 0, wm.chunks_x - 1)
 	var pcy := clampi(floori(me.rpos.y) / WorldMesh.CHUNK, 0, wm.chunks_y - 1)
@@ -261,6 +271,8 @@ func update(dt: float, g: GameState, me: GameState.Player, local_pid: int) -> vo
 				order.append([maxi(absi(cx - pcx), absi(cy - pcy)), ci])
 	order.sort_custom(func(a, b): return a[0] < b[0])
 	var n_built := 0
+	if _ov_on:
+		order.clear()                # вид сверху: 3D-куски не строим (их не видно)
 	for o in order:
 		if o[0] > 1 and n_built >= 2:
 			break
@@ -294,7 +306,7 @@ func update(dt: float, g: GameState, me: GameState.Player, local_pid: int) -> vo
 	for k in door_nodes:
 		var n: MeshInstance3D = door_nodes[k]
 		var tt2 := world.t_at(k)
-		n.visible = tt2 == W.DOOR or tt2 == W.DOOR_OPEN
+		n.visible = (tt2 == W.DOOR or tt2 == W.DOOR_OPEN) and not _ov_on
 		var ang: float = door_angle.get(k, 90.0 if tt2 == W.DOOR_OPEN else 0.0)
 		n.rotation.y = deg_to_rad(n.get_meta("base") + ang)
 	# частицы
@@ -339,6 +351,30 @@ func update(dt: float, g: GameState, me: GameState.Player, local_pid: int) -> vo
 	if walk.size() > 600:
 		walk.clear()
 	_place_scene(g, me, dt)
+
+## Вид сверху: включить/выключить — 3D-куски, крыши, двери прячутся, схема показывается (и наоборот)
+func _overview_switch() -> void:
+	var on := overview > 0.0
+	if on and ov == null:
+		ov = MapOverview.new()
+		ov.setup(world)
+		add_child(ov)
+	if ov != null and on:
+		ov.refresh(8)                 # по 8 полос за кадр: большая карта появляется за несколько кадров без рывка
+	if on == _ov_on:
+		return
+	_ov_on = on
+	ov.visible = on
+	env.fog_enabled = not on
+	sun.visible = not on
+	for n in chunk_nodes:
+		n.visible = not on
+	for r in roof_nodes:
+		r.visible = not on and not hide_roofs
+	for k in door_nodes:
+		door_nodes[k].visible = not on
+	for k in players:
+		players[k].visible = not on
 
 func _walk_update(id: int, pos: Vector2, dt: float) -> void:
 	if not walk.has(id):
@@ -414,11 +450,22 @@ func _place_scene(g: GameState, me: GameState.Player, dt: float) -> void:
 	var pitch := deg_to_rad(cam_pitch)
 	var yaw := deg_to_rad(cam_yaw)
 	var D := cam_d
+	if _ov_on:
+		cam.projection = Camera3D.PROJECTION_ORTHOGONAL
+		cam.size = overview
+		cam.far = 1000.0
+		cam.position = Vector3(cam_x, 500.0, cam_z)
+		# сверху — по сторонам карты (ближайший к повороту 3D-камеры прямой угол): карта не наискосок
+		cam.rotation = Vector3(-PI * 0.5, deg_to_rad(roundf(cam_yaw / 90.0) * 90.0), 0.0)
+	else:
+		cam.projection = Camera3D.PROJECTION_PERSPECTIVE
+		cam.far = 140.0
 	var sh := shake * shake * 0.25
 	var t := Vector3(cam_x + (randf() - 0.5) * sh, 0.6, cam_z + (randf() - 0.5) * sh)
 	var eye := t + Vector3(sin(yaw) * cos(pitch) * D, sin(pitch) * D, cos(yaw) * cos(pitch) * D)
-	cam.position = eye
-	cam.look_at(t, Vector3.UP)
+	if not _ov_on:
+		cam.position = eye
+		cam.look_at(t, Vector3.UP)
 	# ---------- солнце, небо ----------
 	var sd := Vector3(0.35, -0.85, -0.4)
 	if hh >= 5.0 and hh <= 21.5:
@@ -486,7 +533,7 @@ func _place_scene(g: GameState, me: GameState.Player, dt: float) -> void:
 	# ---------- крыши ----------
 	for bi in roof_nodes.size():
 		# крыша над игроком не видна, но тень от неё остаётся — в доме тень, как под настоящей крышей
-		roof_nodes[bi].visible = not hide_roofs
+		roof_nodes[bi].visible = not hide_roofs and not _ov_on
 		roof_nodes[bi].cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY if bi == inside_building else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	# ---------- игроки ----------
 	var alive := {}
