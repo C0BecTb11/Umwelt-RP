@@ -38,6 +38,8 @@ func _ready() -> void:
 	test_city_map()
 	test_furniture_collision()
 	test_attack_walk()
+	test_payday()
+	test_chat()
 	test_editor()
 	test_editor_resize()
 	test_remote_door()
@@ -1123,6 +1125,128 @@ func test_city_map() -> void:
 		on_road.is_empty(), "на дороге: %d %s" % [on_road.size(), on_road.slice(0, 5)])
 	check("Карта игры: от каждого дома дорожка доходит до тротуара улицы",
 		nowalk.is_empty(), "без дорожки: %d %s" % [nowalk.size(), nowalk.slice(0, 6)])
+
+## PayDay и уровни (0.52): 20 минут за час — опыт и зарплата; меньше — ничего и плашка; АФК не считается;
+## уровень 1→2 за 4 PayDay, 2→3 — ещё 6; сутки сбрасывают «отыграно сегодня»; час МСК сменился — PayDay один раз;
+## уровень, опыт и дата регистрации переживают сохранение
+func test_payday() -> void:
+	var bad := []
+	var g := GameState.new_game(5)
+	g.real_clock = false
+	var a := g.join_player("t-a", "Alex_Brown", 501, "m", "2026-11-04")
+	var b := g.join_player("t-b", "Bill_Stone", 502, "m")
+	var today := floori(g.time / 1440.0)
+	# A играет 21 минуту, B — 10 минут, потом стоит без дела
+	for i in 21 * 60:
+		a.idle = 0.0
+		g._account_time(a, 1.0, today)
+	for i in 30 * 60:
+		if i < 10 * 60:
+			b.idle = 0.0
+		g._account_time(b, 1.0, today)
+	if absf(b.hour_play - (10 * 60 + GameState.AFK_AFTER)) > 2.0 or b.day_afk < 17 * 60:
+		bad.append("АФК: в часу %d с, АФК %d с" % [b.hour_play, b.day_afk])
+	g.pop_messages(a.id)
+	g.pop_messages(b.id)
+	g.payday()
+	var ma := " ".join(g.pop_messages(a.id))
+	var mb := " ".join(g.pop_messages(b.id))
+	if a.exp != 1 or a.level != 1 or not ma.contains("PayDay") or not ma.contains("1/4"):
+		bad.append("A: уровень %d опыт %d «%s»" % [a.level, a.exp, ma])
+	if b.exp != 0 or not mb.contains("не отыграли минимум 20 минут"):
+		bad.append("B: опыт %d «%s»" % [b.exp, mb])
+	if a.hour_play != 0.0 or b.hour_play != 0.0:
+		bad.append("отыгранное за час не обнулилось")
+	# уровни: 4 очка до 2-го, потом 6 до 3-го
+	for k in 3:
+		a.hour_play = GameState.PAYDAY_MIN_PLAY
+		g.payday()
+	if a.level != 2 or a.exp != 0 or GameState.exp_need(2) != 6 or GameState.exp_need(3) != 8:
+		bad.append("уровень после 4 PayDay: %d (%d)" % [a.level, a.exp])
+	for k in 6:
+		a.hour_play = GameState.PAYDAY_MIN_PLAY
+		g.payday()
+	if a.level != 3:
+		bad.append("уровень после 10 PayDay: %d" % a.level)
+	# вышедшему PayDay не приходит
+	b.connected = false
+	b.hour_play = 3000.0
+	g.pop_messages(b.id)
+	g.payday()
+	if b.exp != 0 or not g.pop_messages(b.id).is_empty():
+		bad.append("вышедшему пришёл PayDay")
+	b.connected = true
+	# новые сутки
+	g._account_time(a, 1.0, today + 1)
+	if a.day_play > 2.0 or a.day != today + 1:
+		bad.append("сутки не сбросились: %d" % a.day_play)
+	# смена часа: PayDay ровно один раз
+	g.payday_hour = -1
+	g.time = 14 * 60 + 59.5
+	g.update(0.1)
+	var x0 := a.exp
+	a.hour_play = GameState.PAYDAY_MIN_PLAY
+	g.update(0.3)                 # 14:59.8
+	g.update(0.3)                 # 15:00.1 — PayDay
+	g.update(0.3)
+	if a.exp != x0 + 1:
+		bad.append("смена часа: опыт %d → %d" % [x0, a.exp])
+	# сохранение
+	var g2 := GameState.new_game(5)
+	g2.load_data(JSON.parse_string(JSON.stringify(g.to_data())))
+	var a2 := g2.player(a.id)
+	if a2 == null or a2.level != a.level or a2.exp != a.exp or a2.reg != "2026-11-04" or g2.payday_hour != g.payday_hour:
+		bad.append("после сохранения: %s" % [[a2.level, a2.exp, a2.reg] if a2 != null else "нет игрока"])
+	if GameState.reg_from_iso("2026-11-04T22:30:00.123+00:00") != "2026-11-05" or GameState.date_ru("2026-11-07") != "7 ноября 2026":
+		bad.append("даты: %s / %s" % [GameState.reg_from_iso("2026-11-04T22:30:00.123+00:00"), GameState.date_ru("2026-11-07")])
+	if b.reg != g.today_str():
+		bad.append("без даты из базы — дата первого входа")
+	check("PayDay: 20 минут за час — опыт и зарплата, меньше — плашка; АФК не в счёт; уровни 4, 6, 8…; сохраняется",
+		bad.is_empty(), str(bad))
+
+## Чат (0.52): слышат ближе 20 м и сам говорящий; дальше — нет; текст чистится и обрезается; чаще раза в секунду — нет;
+## действие «say» проходит по сети (valid_action), строка уходит в событиях «c»
+func test_chat() -> void:
+	var bad := []
+	var g := GameState.new_game(6)
+	g.real_clock = false
+	var a := g.join_player("c-a", "Anna_Gray", 601, "f")
+	var b := g.join_player("c-b", "Ben_Cole", 602, "m")
+	var c := g.join_player("c-c", "Carl_Reed", 603, "m")
+	a.pos = Vector2(100, 100)
+	b.pos = Vector2(112, 100)
+	c.pos = Vector2(125, 100)
+	a.idle = 500.0
+	if not GameState.valid_action({"a": "say", "text": "привет"}) or GameState.valid_action({"a": "say", "text": 5}):
+		bad.append("valid_action")
+	g._do_action(a, {"a": "say", "text": "  Привет,\n\tкак   дела?  "})
+	var la := g.pop_chat(a.id)
+	var lb := g.pop_chat(b.id)
+	var lc := g.pop_chat(c.id)
+	if la.size() != 1 or lb.size() != 1 or lc.size() != 0:
+		bad.append("кто слышит: %d %d %d" % [la.size(), lb.size(), lc.size()])
+	elif lb[0] != "Anna_Gray (601) говорит: Привет, как дела?":
+		bad.append("строка: «%s»" % lb[0])
+	if a.idle != 0.0:
+		bad.append("чат не сбрасывает АФК")
+	g._do_action(a, {"a": "say", "text": "второе сразу"})
+	if not g.pop_chat(b.id).is_empty() or not " ".join(g.pop_messages(a.id)).contains("Не так быстро"):
+		bad.append("нет ограничения частоты")
+	g._account_time(a, 1.1, floori(g.time / 1440.0))
+	g._do_action(a, {"a": "say", "text": "x".repeat(300)})
+	var lb2 := g.pop_chat(b.id)
+	if lb2.size() != 1 or lb2[0].length() != "Anna_Gray (601) говорит: ".length() + GameState.CHAT_MAX:
+		bad.append("длинное не обрезано")
+	g._account_time(a, 1.1, floori(g.time / 1440.0))
+	g._do_action(a, {"a": "say", "text": " \n "})
+	if not g.pop_chat(b.id).is_empty():
+		bad.append("пустое ушло")
+	g._account_time(a, 1.1, floori(g.time / 1440.0))
+	g._do_action(a, {"a": "say", "text": "в сеть"})
+	var ev := g.events_for(b.id, false)
+	if not (ev.get("c", []) as Array).has("Anna_Gray (601) говорит: в сеть"):
+		bad.append("нет в событиях: %s" % [ev])
+	check("Чат: слышат ближе 20 м; текст чистится и обрезается; не чаще раза в секунду; уходит в событиях", bad.is_empty(), str(bad))
 
 ## Удар на ходу (0.51, BF-067): ноги идут анимацией ходьбы, удар — только верхом тела; стоя — удар целиком;
 ## пошёл посреди удара — удар доигрывает верхом, ноги шагают; добивание ногой — всегда целиком

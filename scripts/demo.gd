@@ -15,13 +15,13 @@ static func create(kind: String) -> GameState:
 			g.time = 23 * 60.0
 		"evening":
 			g.time = 19 * 60.0 + 50.0
-		"gear", "outfit", "crowd", "knocked", "armed":
+		"gear", "outfit", "crowd", "knocked", "armed", "chat", "chatlog":
 			_open_street(g, p)
 			p.wear = {"torso": "suit_jacket", "legs": "pants", "feet": "shoes"}
 			p.face = Vector2(0, 1)
 			for id in ["hoodie", "jeans", "work_vest", "boots", "medkit"]:
 				Items.add_to(p.inv, id, 1)
-	if kind == "crowd" or kind == "knocked" or kind == "armed":
+	if kind == "crowd" or kind == "knocked" or kind == "armed" or kind == "chat" or kind == "chatlog":
 		var outfits := [{"torso": "hoodie", "legs": "shorts", "feet": "sneakers"}, {"torso": "work_vest", "legs": "work_pants", "feet": "boots"},
 			{"torso": "dress", "feet": "shoes"}, {"torso": "biker_vest", "legs": "jeans", "feet": "boots"}]
 		var genders := ["m", "m", "f", "f"]
@@ -66,6 +66,25 @@ static func create(kind: String) -> GameState:
 			q.wear = looks[k][1]
 			q.name = ""
 			g.players.append(q)
+	if kind == "menu" or kind == "stats":
+		# пример статистики для снимка: 1 уровень, 1 из 4 очков, сегодня 2 ч 33 мин и 7 мин АФК
+		p.level = 1
+		p.exp = 1
+		p.reg = "2026-11-04"
+		p.day = floori(g.time / 1440.0)
+		p.day_play = 2 * 3600 + 33 * 60
+		p.day_afk = 7 * 60
+		p.hour_play = 14 * 60
+	if kind == "chat" or kind == "chatlog":
+		var q1: GameState.Player = g.players[1]
+		var q3: GameState.Player = g.players[3]
+		g.chat[p.id] = ["%s говорит: Привет! Не подскажешь, где мэрия?" % GameState.tag(q1),
+			"%s говорит: Прямо по Мейн-стрит, там площадь" % GameState.tag(p),
+			"%s говорит: Спасибо, а автовокзал далеко?" % GameState.tag(q1),
+			"%s говорит: Нет, к югу от центра, рядом с больницей. Пойдём, покажу" % GameState.tag(q3)]
+	if kind == "chatlog":
+		p.hour_play = 25 * 60      # настоящий PayDay — плашка, как в игре
+		g.payday()
 	if kind == "inv":
 		for id in ["canned", "water", "pistol", "ammo", "apple", "chips", "medkit"]:
 			Items.add_to(p.inv, id, 12 if id == "ammo" else 2)

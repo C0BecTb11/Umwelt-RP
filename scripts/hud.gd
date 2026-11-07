@@ -2,7 +2,7 @@ class_name Hud
 extends Control
 ## Интерфейс поверх 3D: мудлы, кнопки, джойстик, панели (вещи, одежда, пауза).
 
-enum Pnl { NONE, INV, PAUSE, GEAR }
+enum Pnl { NONE, INV, PAUSE, GEAR, MENU, STATS }
 
 var screen: GameScreen
 var font: Font
@@ -27,6 +27,14 @@ var panel_last_y := 0.0
 var panel_drag := false
 var update_note := ""     # постоянное напоминание: вышла новая версия
 var msgs: Array = []      # [текст, время]
+# чат (с 0.52): строки [текст, когда пришла (мс)]; поле ввода — LineEdit (клавиатура телефона)
+var chat_lines: Array = []
+var chat_open := false
+var chat_edit: LineEdit
+var chat_send := Rect2()
+const CHAT_KEEP := 40          # строк в истории
+const CHAT_SHOW := 6           # строк на экране, пока чат закрыт
+const CHAT_LIFE := 30.0        # с: строка видна, потом гаснет (в открытом чате — вся история)
 
 # кнопки: центр и радиус
 var b_attack := [Vector2.ZERO, 50.0]
@@ -35,6 +43,8 @@ var b_run := [Vector2.ZERO, 32.0]
 var b_inv := [Vector2.ZERO, 24.0]
 var b_pause := [Vector2.ZERO, 24.0]
 var b_gear := [Vector2.ZERO, 24.0]
+var b_menu := [Vector2.ZERO, 24.0]   # меню игрока (статистика и дальше) — с 0.52
+var b_chat := [Vector2.ZERO, 24.0]   # написать в чат — с 0.52
 var gear_slot := ""           # выбранный слот в «Снаряжении»
 var gear_rects: Array = []     # [Rect2, слот]
 var gear_rows: Array = []      # [Rect2, id] вещи, которые можно надеть
@@ -54,6 +64,14 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vignette = _radial(Color(0, 0, 0, 0), Color(0, 0, 0, 0.45), 0.55)
 	hurt_tex = _radial(Color(0.6, 0, 0, 0), Color(0.65, 0, 0, 0.75), 0.35)
+	chat_edit = LineEdit.new()
+	chat_edit.visible = false
+	chat_edit.max_length = GameState.CHAT_MAX
+	chat_edit.placeholder_text = "Сообщение — слышат те, кто рядом"
+	chat_edit.add_theme_font_size_override("font_size", 18)
+	chat_edit.mouse_filter = Control.MOUSE_FILTER_STOP
+	chat_edit.text_submitted.connect(func(_t: String) -> void: _send_chat())
+	add_child(chat_edit)
 
 static func _radial(inner: Color, outer: Color, start: float) -> GradientTexture2D:
 	var g := Gradient.new()
@@ -74,9 +92,45 @@ static func _radial(inner: Color, outer: Color, start: float) -> GradientTexture
 func paused() -> bool: return panel == Pnl.PAUSE
 
 func add_msg(s: String) -> void:
-	msgs.append([s, 4.0])
+	# длинную плашку (PayDay) успеть прочитать; пришедшие в одном кадре (две строки PayDay) гаснут вместе
+	var life := clampf(2.0 + s.length() * 0.07, 4.0, 9.0)
+	var fr := Engine.get_process_frames()
+	for m in msgs:
+		if int(m[2]) == fr:
+			life = maxf(life, m[1])
+			m[1] = life
+	msgs.append([s, life, fr])
 	if msgs.size() > 4:
 		msgs.pop_front()
+
+func add_chat(s: String) -> void:
+	chat_lines.append([s, Time.get_ticks_msec()])
+	if chat_lines.size() > CHAT_KEEP:
+		chat_lines.pop_front()
+
+func open_chat() -> void:
+	chat_open = true
+	_release()
+	var s := _safe()
+	var w := minf(s.size.x * 0.55, 620.0)
+	chat_edit.position = Vector2(s.position.x + 14, 60)
+	chat_edit.size = Vector2(w - 120, 44)
+	chat_send = Rect2(s.position.x + 14 + w - 112, 60, 112, 44)
+	chat_edit.text = ""
+	chat_edit.visible = true
+	chat_edit.grab_focus()
+
+func close_chat() -> void:
+	chat_open = false
+	chat_edit.release_focus()
+	chat_edit.visible = false
+	DisplayServer.virtual_keyboard_hide()
+
+func _send_chat() -> void:
+	var t := GameState.clean_chat(chat_edit.text)
+	if t != "":
+		screen.act({"a": "say", "text": t})
+	close_chat()
 
 func joystick() -> Vector2:
 	if joy_id < 0:
@@ -105,6 +159,12 @@ func open_demo_panel(kind: String) -> void:
 		"gear":
 			panel = Pnl.GEAR
 			gear_slot = "torso"
+		"menu":
+			panel = Pnl.MENU
+		"stats":
+			panel = Pnl.STATS
+		"chat":
+			open_chat()
 
 # ================== РАСКЛАДКА ==================
 func _safe() -> Rect2:
@@ -128,6 +188,8 @@ func _layout() -> void:
 	b_pause[0] = Vector2(W - 38, 38)
 	b_inv[0] = Vector2(W - 96, 38)
 	b_gear[0] = Vector2(W - 154, 38)
+	b_menu[0] = Vector2(W - 212, 38)
+	b_chat[0] = Vector2(W - 270, 38)
 
 func _hit(b: Array, p: Vector2) -> bool:
 	return p.distance_to(b[0]) < b[1] * 1.15
@@ -167,6 +229,14 @@ func _touch(type: int, id: int, p: Vector2) -> void:
 	var me := screen.me()
 	if me == null:
 		return
+	if chat_open:
+		# пока пишешь — игра не управляется; тап мимо поля закрывает чат, поле ввода само ловит свои касания
+		if type == 0:
+			if chat_send.has_point(p):
+				_send_chat()
+			elif not Rect2(chat_edit.position, chat_edit.size).has_point(p):
+				close_chat()
+		return
 	if me.dead:
 		return      # без сознания: ждём, пока персонаж очнётся
 	if panel != Pnl.NONE:
@@ -178,6 +248,11 @@ func _touch(type: int, id: int, p: Vector2) -> void:
 			if _hit(b_pause, p):
 				panel = Pnl.PAUSE
 				_release()
+			elif _hit(b_menu, p):
+				panel = Pnl.MENU
+				_release()
+			elif _hit(b_chat, p):
+				open_chat()
 			elif _hit(b_inv, p):
 				panel = Pnl.INV
 				scroll[0] = 0.0
@@ -242,6 +317,12 @@ func _panel_tap(g: GameState, me: GameState.Player, p: Vector2) -> void:
 		panel = Pnl.NONE
 		return
 	match panel:
+		Pnl.MENU:
+			if btn_a.has_point(p):
+				panel = Pnl.STATS
+		Pnl.STATS:
+			if btn_b.has_point(p):
+				panel = Pnl.MENU
 		Pnl.PAUSE:
 			if btn_a.has_point(p):
 				panel = Pnl.NONE
@@ -334,6 +415,8 @@ func _draw() -> void:
 		Pnl.INV: _draw_inv(me)
 		Pnl.PAUSE: _draw_pause()
 		Pnl.GEAR: _draw_gear(me)
+		Pnl.MENU: _draw_menu()
+		Pnl.STATS: _draw_stats(g, me)
 	if me.dead:
 		_draw_dead(g, me, vr)
 	if screen.lost:
@@ -412,7 +495,8 @@ func _hud(g: GameState, me: GameState.Player) -> void:
 	# мудлы
 	var mx := x + 4
 	var my := y + 70
-	for m in _moodles(g, me):
+	var mds := _moodles(g, me)
+	for m in mds:
 		var ring: Color = [Color(0.54, 0.56, 0.59), Color(0.91, 0.78, 0.31), Color(0.91, 0.54, 0.19), Color(0.88, 0.23, 0.23)][m.lvl]
 		draw_circle(Vector2(mx + 17, my), 17, Color(0.08, 0.09, 0.13, 0.75))
 		draw_arc(Vector2(mx + 17, my), 16, 0, TAU, 32, ring, 2.5, true)
@@ -436,11 +520,12 @@ func _hud(g: GameState, me: GameState.Player) -> void:
 		_rr(Rect2(W / 2 - uw / 2, 48, uw, 22), 11, Color(0.55, 0.38, 0.12, 0.85))
 		_text(Vector2(W / 2, 63), update_note, 12, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER)
 		ty = 92.0
-	# сообщения
+	# сообщения (плашки) — внизу по центру: сверху слева теперь чат (с 0.52), сверху по центру — часы
+	ty = H - 44.0 - (msgs.size() - 1) * 26.0
 	for msg in msgs:
 		var a := minf(1.0, msg[1])
-		var mw := _tw(msg[0], 13) + 24
-		_rr(Rect2(W / 2 - mw / 2, ty - 16, mw, 22), 11, Color(0.055, 0.07, 0.085, 0.6 * a))
+		var mw := _tw(msg[0], 13) + 28
+		_rr(Rect2(W / 2 - mw / 2, ty - 16, mw, 22), 11, Color(0.055, 0.07, 0.085, 0.7 * a))
 		_text(Vector2(W / 2, ty), msg[0], 13, Color(1, 1, 1, a), HORIZONTAL_ALIGNMENT_CENTER)
 		ty += 26
 	# джойстик
@@ -465,6 +550,55 @@ func _hud(g: GameState, me: GameState.Player) -> void:
 	_btn(b_inv, Color(0.19, 0.2, 0.22, 0.6), "bag", "", "", "")
 	_btn(b_pause, Color(0.19, 0.2, 0.22, 0.6), "pause", "", "", "")
 	_btn(b_gear, Color(0.19, 0.2, 0.22, 0.6), "gear", "", "", "")
+	_btn(b_menu, Color(0.19, 0.2, 0.22, 0.6), "menu", "", "", "")
+	_btn(b_chat, Color(0.19, 0.2, 0.22, 0.6), "chat", "", "", "")
+	_draw_chat(x, 126.0 if not mds.is_empty() else 66.0)
+
+## Чат слева сверху: закрыт — последние строки, гаснут через CHAT_LIFE; открыт — вся история на тёмной подложке
+func _draw_chat(x: float, y: float) -> void:
+	var W := get_viewport_rect().size.x
+	var maxw := minf(W * 0.36, 540.0)
+	var now := Time.get_ticks_msec()
+	var lim := 12 if chat_open else CHAT_SHOW
+	var rows: Array = []          # [строка, прозрачность]
+	for i in range(chat_lines.size() - 1, -1, -1):
+		var e: Array = chat_lines[i]
+		var age := (now - int(e[1])) / 1000.0
+		var a := 1.0 if chat_open else clampf((CHAT_LIFE - age) / 5.0, 0.0, 1.0)
+		if a <= 0.0:
+			break
+		var wr := _wrap(e[0], 14, maxw)
+		for k in range(wr.size() - 1, -1, -1):
+			rows.push_front([wr[k], a])
+		if rows.size() >= lim:
+			break
+	while rows.size() > lim:
+		rows.pop_front()
+	if chat_open:
+		y = 112.0
+		_rr(Rect2(x - 6, y - 4, maxw + 12, maxf(rows.size(), 1) * 19 + 10), 8, Color(0.05, 0.06, 0.07, 0.75))
+		if rows.is_empty():
+			_text(Vector2(x, y + 15), "Сообщений пока нет", 14, Color(1, 1, 1, 0.5))
+		_rr(chat_send, 10, Color(0.24, 0.42, 0.24))
+		_text(chat_send.get_center() + Vector2(0, 6), "Отправить", 15, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER)
+	for r in rows:
+		_text(Vector2(x, y + 15), r[0], 14, Color(1, 1, 1, r[1]), HORIZONTAL_ALIGNMENT_LEFT, true)
+		y += 19
+
+## Разбить строку по словам на куски не шире w
+func _wrap(s: String, size: int, w: float) -> Array:
+	var out: Array = []
+	var cur := ""
+	for word in s.split(" "):
+		var t: String = word if cur == "" else cur + " " + word
+		if _tw(t, size) <= w or cur == "":
+			cur = t
+		else:
+			out.append(cur)
+			cur = word
+	if cur != "":
+		out.append(cur)
+	return out
 
 func _btn(b: Array, col: Color, glyph: String, item: String, badge: String, label: String) -> void:
 	var c: Vector2 = b[0]
@@ -610,6 +744,41 @@ func _draw_pause() -> void:
 		_rr(btn_d, 10, Color(0.42, 0.34, 0.14) if ed != "Аккаунт" else Color(0.3, 0.27, 0.36))
 		_text(btn_d.get_center() + Vector2(0, 6), ed, 16, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER)
 	_text(Vector2(cx, y + sp * (4 if ed != "" else 2) + (26 if ed != "" else 80)), "Umwelt RP · версия 0.%s" % Version.BUILD, 12, Color(0.56, 0.56, 0.56), HORIZONTAL_ALIGNMENT_CENTER)
+
+# ---------- меню игрока (с 0.52) ----------
+func _draw_menu() -> void:
+	_panel_bg("Меню игрока")
+	var bw := minf(panel_rect.size.x * 0.6, 360.0)
+	var cx := panel_rect.get_center().x
+	btn_a = Rect2(cx - bw / 2, panel_rect.position.y + 70, bw, 50)
+	_rr(btn_a, 10, Color(0.24, 0.35, 0.47))
+	_text(btn_a.get_center() + Vector2(0, 6), "Статистика", 16, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER)
+
+func _draw_stats(_g: GameState, me: GameState.Player) -> void:
+	_panel_bg("Статистика")
+	var x := panel_rect.position.x + 28
+	var vx := x + minf(panel_rect.size.x * 0.42, 280.0)
+	var y := panel_rect.position.y + 78
+	var rows := [
+		["Уровень", "%d  (%d/%d)" % [me.level, me.exp, GameState.exp_need(me.level)]],
+		["Лицензии", "нет"],
+		["Статус VIP", "нет"],
+		[],
+		["Дата регистрации аккаунта", GameState.date_ru(me.reg)],
+		["Статичный ID", str(me.id)],
+		["Отыграно сегодня", "%s  (АФК: %s)" % [GameState.dur_ru(me.day_play), GameState.dur_ru(me.day_afk)]],
+		["В этом часу", "%s из 20 мин для PayDay" % GameState.dur_ru(me.hour_play)],
+	]
+	for r in rows:
+		if r.is_empty():
+			y += 14
+			continue
+		_text(Vector2(x, y), r[0] + ":", 16, Color(0.7, 0.72, 0.76))
+		_text(Vector2(vx, y), r[1], 16, Color.WHITE)
+		y += 32
+	btn_b = Rect2(x, panel_rect.end.y - 60, 140, 44)
+	_rr(btn_b, 10, Color(0.31, 0.33, 0.35))
+	_text(btn_b.get_center() + Vector2(0, 6), "‹ Назад", 15, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER)
 
 # ---------- экран «Тело» ----------
 

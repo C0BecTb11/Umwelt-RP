@@ -3,6 +3,7 @@ extends Node
 ## Запуск сервера:  godot --headless -- --server --port=7790
 ## Запуск клиента:  godot --headless -- --nettest=имя,порт,ожидаемо_других
 ## Клиент входит, 2 с идёт, стоит, проверяет, что видит остальных и что сервер принял его позицию.
+## С 0.52 ещё говорит в чат (дважды, с паузой) и проверяет, что слышал всех остальных ботов рядом.
 
 var role := ""
 var main: Node
@@ -19,6 +20,7 @@ var frozen := 0
 var frames := 0
 var last_other := {}
 var free_len := 0.0            # сколько клеток свободно в выбранном направлении (до стены, не больше 6)
+var said := 0
 
 func _ready() -> void:
 	var parts := role.split(",")
@@ -68,13 +70,27 @@ func _process(dt: float) -> void:
 				t = 0.0
 		3:
 			_watch(scr)
+			if (said == 0 and t > 0.1) or (said == 1 and t > 2.5):
+				said += 1
+				scr.act({"a": "say", "text": "привет от " + nick})
 			if t > 4.0:
 				var me := scr.me()
 				var moved := me.pos.distance_to(start_pos)
 				var rollbacks := move_rollbacks
 				# шагом 2 с — около 4.6 клетки, если путь свободен; замирания чужих бегущих — не больше 5% кадров
 				var need := minf(free_len, 4.6) * 0.6
-				var ok := saw_max >= expect and rollbacks == 0 and not scr.lost and moved >= need and frozen <= frames * 0.05
+				var heard := {}
+				var mine := false
+				for cl in scr.hud.chat_lines:
+					var line: String = cl[0]
+					var who := line.get_slice(" говорит: привет от ", 1)
+					if who == nick:
+						mine = true
+					elif who != "":
+						heard[who] = true
+				L("чат: слышал %d других (%s), своё сообщение %s" % [heard.size(), ", ".join(heard.keys()), "пришло" if mine else "НЕ пришло"])
+				var ok := saw_max >= expect and rollbacks == 0 and not scr.lost and moved >= need and frozen <= frames * 0.05 \
+					and heard.size() >= expect and mine
 				L("прошёл %.2f клетки (нужно ≥ %.2f), откатов %d, видел других: %d (ожидалось %d), кадров с другими %d, из них без движения у бегущих %d" % [moved, need, rollbacks, saw_max, expect, frames, frozen])
 				if reconnect and ok:
 					L("жду обрыва связи и переподключения")

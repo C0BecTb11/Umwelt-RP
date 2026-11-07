@@ -219,6 +219,10 @@ func _process(dt: float) -> void:
 		var p := game.player(pid)
 		if p == null or not p.connected:
 			game.messages.erase(pid)
+	for pid in game.chat.keys():
+		var p3 := game.player(pid)
+		if p3 == null or not p3.connected:
+			game.chat.erase(pid)
 	autosave_t -= dt
 	if autosave_t <= 0.0:
 		autosave_t = AUTOSAVE
@@ -291,7 +295,7 @@ func _send_to(c: Client, dt: float) -> void:
 	if full:
 		c.full_t = 0.25
 	# между полными — только если есть что слать (эффекты, двери, сообщения); иначе не собираем пакет каждый кадр
-	if not full and game.fx_net.is_empty() and game.world.dirty_tiles.is_empty() and not game.messages.has(c.pid):
+	if not full and game.fx_net.is_empty() and game.world.dirty_tiles.is_empty() and not game.messages.has(c.pid) and not game.chat.has(c.pid):
 		return
 	var ev := game.events_for(c.pid, full)
 	if ev.size() > 1:
@@ -385,13 +389,14 @@ func _verify(c: Client, token: String) -> void:
 		_reject(c, "Сессия устарела — войди в аккаунт заново" if u[0] == 401 or u[0] == 403 else "Сервер аккаунтов недоступен, попробуй позже")
 		return
 	var user_id := str(u[1]["id"])
-	var ch: Array = await _sb("/rest/v1/characters?select=id,name,gender&user_id=eq." + user_id, token)
+	var ch: Array = await _sb("/rest/v1/characters?select=id,name,gender,created_at&user_id=eq." + user_id, token)
 	if not by_peer.has(c.peer):
 		return
 	if ch[0] != 200 or not (ch[1] is Array) or ch[1].is_empty():
 		_reject(c, "У аккаунта нет персонажа — создай его при входе")
 		return
-	_enter(c, "sb:" + user_id, str(ch[1][0]["name"]), int(ch[1][0].get("id", -1)), str(ch[1][0].get("gender", "m")))
+	_enter(c, "sb:" + user_id, str(ch[1][0]["name"]), int(ch[1][0].get("id", -1)), str(ch[1][0].get("gender", "m")),
+		GameState.reg_from_iso(str(ch[1][0].get("created_at", ""))))
 
 func _reject(c: Client, why: String) -> void:
 	c.checking = false
@@ -414,7 +419,7 @@ func _sb(path: String, token: String) -> Array:
 
 ## Впустить в мир. key — ключ аккаунта («sb:…»; в --noauth — uid телефона).
 ## Перенос персонажа «по id телефона» к аккаунту убран (Н1, BF-042): чужой id телефона больше ничего не даёт
-func _enter(c: Client, key: String, pname: String, static_id: int = -1, gender: String = "") -> void:
+func _enter(c: Client, key: String, pname: String, static_id: int = -1, gender: String = "", reg_date: String = "") -> void:
 	c.checking = false
 	if not by_peer.has(c.peer):
 		return
@@ -424,7 +429,7 @@ func _enter(c: Client, key: String, pname: String, static_id: int = -1, gender: 
 			Net.I.send({"t": "bye", "why": "В этот аккаунт вошли с другого устройства"}, other.peer)
 			Net.I.kick(other.peer)
 			other.pid = -1
-	var p := game.join_player(key, pname if pname != "" else "Гражданин", static_id, gender)
+	var p := game.join_player(key, pname if pname != "" else "Гражданин", static_id, gender, reg_date)
 	c.pid = p.id
 	c.full_t = 0.0
 	if map_z.is_empty():

@@ -100,7 +100,7 @@ RLS включён. Политики:
 |---|---|---|
 | `scripts/account.gd` `load_character()` | `GET /rest/v1/characters?select=id,name&user_id=eq.<свой>` | вход: есть ли персонаж |
 | `scripts/account.gd` `create_character()` | `POST /rest/v1/characters` (`user_id`, `name`, `gender`) | создание персонажа (ошибки `23505` — имя занято, `23514` — неверный формат) |
-| `scripts/server_only/server.gd` `_verify()` | `GET /rest/v1/characters?select=id,name,gender&user_id=eq.<игрока>` **с токеном самого игрока** | вход на игровой сервер: имя, ID, пол → `GameState.join_player` |
+| `scripts/server_only/server.gd` `_verify()` | `GET /rest/v1/characters?select=id,name,gender,created_at&user_id=eq.<игрока>` **с токеном самого игрока** | вход на игровой сервер: имя, ID, пол → `GameState.join_player`; с 0.52 `created_at` — дата регистрации в «Статистике» (право `SELECT` у `authenticated` на столбец проверено запросом `has_column_privilege`, 2026-11-07) |
 
 Деньги, вещи, одежда, позиция в Supabase **не хранятся** — они в файле мира на игровом сервере
 (`server_world.json`, ключ игрока `sb:<user_id>` в `GameState.uids`).

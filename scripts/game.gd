@@ -9,6 +9,15 @@ const VIEW_R := 40.0            # радиус, в котором приходя
 const SEE_R := 20.0             # радиус, в котором приходят другие игроки: экран телефона (до ~17 клеток) с запасом
 const START_MONEY := 500        # стартовые наличные нового персонажа, $
 const RESPAWN_TIME := 20.0      # секунд без сознания
+# PayDay и уровни (с 0.52, решение владельца 2026-11-07): раз в час по серверу (в 00 минут по МСК) каждому
+# в игре — PayDay. Отыграл за час не меньше 20 минут (без АФК) — зарплата на банковский счёт и 1 очко опыта,
+# иначе ничего и плашка «не отыграли 20 минут». Уровень 1→2 — 4 очка, дальше на 2 больше за уровень (4, 6, 8…)
+const PAYDAY_MIN_PLAY := 20 * 60.0   # секунд игры за час для PayDay
+const AFK_AFTER := 120.0             # секунд без движения, действий и чата — дальше время идёт в АФК
+# Чат (с 0.52): обычная речь — слышат те, кто ближе CHAT_R (как в SAMP)
+const CHAT_R := 20.0                 # м
+const CHAT_MAX := 120                # символов в сообщении
+const CHAT_GAP := 1.0                # с между сообщениями одного игрока
 
 ## Карточка игрока. ВСЁ, что принадлежит игроку (деньги, счёт, вещи, одежда, позиция, а дальше — права,
 ## фракция, работа, ключи от домов и машин), — поля этой карточки и сохраняются в player_data().
@@ -53,6 +62,15 @@ class Player:
 	var wear := {}             # слот → id надетой вещи (в inv её нет)
 	var look := {}             # внешность: g — пол "m"/"f", h — причёска (часть модели), sk — тон кожи 0..3
 	var snaps: Array = []      # снимки [время, x, y, fx, fy] для плавной отрисовки чужого игрока
+	var level := 1             # уровень (открывает работы — позже)
+	var exp := 0               # очки опыта к следующему уровню: 1 за засчитанный PayDay
+	var hour_play := 0.0       # с: отыграно (без АФК) с прошлого PayDay
+	var day := -1              # номер суток по МСК, к которым относятся day_play/day_afk
+	var day_play := 0.0        # с: отыграно сегодня (без АФК)
+	var day_afk := 0.0         # с: сегодня в игре, но без движения и действий дольше AFK_AFTER
+	var reg := ""              # дата регистрации аккаунта «ГГГГ-ММ-ДД» (МСК): из Supabase characters.created_at
+	var idle := 0.0            # с без движения/действий/чата (не сохраняется)
+	var chat_cd := 0.0         # с до следующего сообщения в чат (не сохраняется)
 	var rface := Vector2(1, 0)
 	func _init(pid: int = 0) -> void:
 		id = pid
@@ -114,6 +132,8 @@ var fx: Array = []             # [тип, x, y, параметр] — 3 ране
 var fx_net: Array = []
 var uids := {}                 # постоянный ID телефона друга → номер персонажа
 var real_clock := true         # время = реальное московское; false — идёт само (демо-снимки)
+var chat := {}                 # pid → Array[String] — строки чата для этого игрока (уходят в ev "c")
+var payday_hour := -1          # номер часа (минуты МСК / 60) последнего PayDay; -1 — ещё не считали
 
 func _init(s: int = 0) -> void:
 	seed = s
@@ -175,6 +195,114 @@ func player(pid: int) -> Player:
 			return p
 	return null
 
+## Очков опыта до следующего уровня: 1→2 — 4, 2→3 — 6, 3→4 — 8 … (владелец, 2026-11-07)
+static func exp_need(level: int) -> int:
+	return 2 * maxi(level, 1) + 2
+
+## Зарплата в PayDay. Её платит организация (фракция, работа); организаций пока нет — 0 (владелец, 2026-11-07)
+func payday_salary(_p: Player) -> int:
+	return 0
+
+## Дата «ГГГГ-ММ-ДД» по МСК из времени игры (минуты от 1970 по МСК)
+func today_str() -> String:
+	return Time.get_date_string_from_unix_time(int(time * 60.0))
+
+## Дата регистрации из Supabase (created_at, UTC, «2026-11-04T12:34:56.1+00:00») → «ГГГГ-ММ-ДД» по МСК
+static func reg_from_iso(s: String) -> String:
+	if s.length() < 19:
+		return ""
+	var u := Time.get_unix_time_from_datetime_string(s.left(19))
+	if u <= 0:
+		return ""
+	return Time.get_date_string_from_unix_time(u + MSK_OFFSET)
+
+## «7 ноября 2026» из «2026-11-07»
+static func date_ru(d: String) -> String:
+	var a := d.split("-")
+	if a.size() != 3 or not a[1].is_valid_int() or int(a[1]) < 1 or int(a[1]) > 12:
+		return "—"
+	return "%d %s %s" % [int(a[2]), MONTHS[int(a[1]) - 1], a[0]]
+
+## «2 ч 33 мин» / «12 мин»
+static func dur_ru(sec: float) -> String:
+	var m := int(sec / 60.0)
+	return "%d ч %02d мин" % [m / 60, m % 60] if m >= 60 else "%d мин" % m
+
+## Время в игре и АФК; сутки — по МСК
+func _account_time(p: Player, dt: float, today: int) -> void:
+	if p.day != today:
+		p.day = today
+		p.day_play = 0.0
+		p.day_afk = 0.0
+	p.chat_cd = maxf(0.0, p.chat_cd - dt)
+	if not p.connected:
+		return
+	p.idle += dt
+	if p.idle < AFK_AFTER:
+		p.hour_play += dt
+		p.day_play += dt
+	else:
+		p.day_afk += dt
+
+## PayDay: всем, кто в игре. Отыгранное за час обнуляется у всех (и у вышедших — часы не копятся)
+func payday() -> void:
+	for p: Player in players:
+		if p.connected:
+			if p.hour_play >= PAYDAY_MIN_PLAY:
+				var pay := payday_salary(p)
+				p.bank += pay
+				p.exp += 1
+				var up := false
+				while p.exp >= exp_need(p.level):
+					p.exp -= exp_need(p.level)
+					p.level += 1
+					up = true
+				msg(p.id, "PayDay! Зарплата $%d зачислена на банковский счёт" % pay)
+				msg(p.id, ("Новый уровень: %d! Опыт %d/%d" if up else "Уровень %d, опыт %d/%d") % [p.level, p.exp, exp_need(p.level)])
+			else:
+				msg(p.id, "PayDay: зарплата и опыт не начислены")
+				msg(p.id, "Вы не отыграли минимум 20 минут за час (отыграно %s)" % dur_ru(p.hour_play))
+		p.hour_play = 0.0
+
+## Очистить текст чата: без управляющих символов и лишних пробелов, не длиннее CHAT_MAX
+static func clean_chat(raw: String) -> String:
+	var out := ""
+	var sp := false
+	for c0 in raw:
+		var ch: String = c0
+		var code := ch.unicode_at(0)
+		if code < 32 or code == 127 or (code >= 0x200B and code <= 0x200F) or code == 0xFEFF:
+			ch = " "
+		if ch == " ":
+			if sp or out == "":
+				continue
+			sp = true
+		else:
+			sp = false
+		out += ch
+	return out.strip_edges().left(CHAT_MAX).strip_edges()
+
+## Сказать вслух: слышат все в игре ближе CHAT_R (и сам говорящий)
+func _say(p: Player, raw: String) -> void:
+	var t := clean_chat(raw)
+	if t == "":
+		return
+	if p.chat_cd > 0.0:
+		msg(p.id, "Не так быстро — сообщение не отправлено")
+		return
+	p.chat_cd = CHAT_GAP
+	var line := "%s говорит: %s" % [tag(p), t]
+	for q: Player in players:
+		if q.connected and q.pos.distance_to(p.pos) <= CHAT_R:
+			if not chat.has(q.id):
+				chat[q.id] = []
+			chat[q.id].append(line)
+
+func pop_chat(pid: int) -> Array:
+	var c: Array = chat.get(pid, [])
+	chat.erase(pid)
+	return c
+
 func msg(pid: int, text: String) -> void:
 	if not messages.has(pid):
 		messages[pid] = []
@@ -218,7 +346,7 @@ func set_gender(p: Player, gender: String) -> void:
 			Items.add_to(p.inv, p.wear[sl], 1)
 			p.wear.erase(sl)
 
-func join_player(uid: String, pname: String, static_id: int = -1, gender: String = "") -> Player:
+func join_player(uid: String, pname: String, static_id: int = -1, gender: String = "", reg_date: String = "") -> Player:
 	var pid := -1
 	if static_id > 0:
 		if uids.has(uid) and int(uids[uid]) != static_id:
@@ -242,6 +370,11 @@ func join_player(uid: String, pname: String, static_id: int = -1, gender: String
 	p.name = pname
 	if gender != "":
 		set_gender(p, gender)
+	if reg_date != "":
+		p.reg = reg_date                       # из Supabase — главный источник
+	elif p.reg == "":
+		p.reg = today_str()                    # без аккаунта (тесты) или старая карточка — дата первого входа сюда
+	p.idle = 0.0
 	p.move = Vector2.ZERO
 	p.force_seq += 1
 	p.snaps.clear()
@@ -283,6 +416,9 @@ func _move_id(p: Player, to: int) -> void:
 	if messages.has(from):
 		messages[to] = messages[from]
 		messages.erase(from)
+	if chat.has(from):
+		chat[to] = chat[from]
+		chat.erase(from)
 
 func _spawn_player(pid: int) -> Player:
 	var p := Player.new(pid)
@@ -292,6 +428,7 @@ func _spawn_player(pid: int) -> Player:
 	p.wear = Items.START_WEAR.duplicate()
 	p.look = default_look(pid, "m")
 	p.money = START_MONEY
+	p.reg = today_str()
 	players.append(p)
 	return p
 
@@ -314,6 +451,16 @@ func update(dt: float) -> void:
 		if p != null and not p.dead:
 			_do_action(p, a[1])
 	time = msk_time() if real_clock else time + dt * MINUTES_PER_SEC
+	var today := floori(time / 1440.0)
+	for p: Player in players:
+		_account_time(p, dt, today)
+	# PayDay — в начале каждого часа по МСК; после перезапуска сервера пропущенный час просто засчитывается заново
+	var hr := floori(time / 60.0)
+	if payday_hour < 0:
+		payday_hour = hr
+	elif hr != payday_hour:
+		payday_hour = hr
+		payday()
 	for p: Player in players:
 		_update_player(p, dt)
 	_age_shots(dt)
@@ -438,6 +585,7 @@ func _update_player(p: Player, dt: float) -> void:
 		running = r[0]
 		mag = r[1]
 	if mag > 0.1:
+		p.idle = 0.0
 		if running:
 			p.stamina = maxf(0.0, p.stamina - dt * 12.0)
 		if p.ta_act != null:
@@ -616,6 +764,8 @@ static func valid_action(a) -> bool:
 			return a.get("id") is String and Items.DEFS.has(a["id"])
 		"unwear":
 			return a.get("slot") in Items.SLOTS
+		"say":
+			return a.get("text") is String and (a["text"] as String).length() <= CHAT_MAX * 4
 	return false
 
 func _do_action(p: Player, a: Dictionary) -> void:
@@ -624,6 +774,7 @@ func _do_action(p: Player, a: Dictionary) -> void:
 	for k in ["c"]:
 		if a.has(k):
 			a[k] = int(a[k])
+	p.idle = 0.0
 	if a["a"] == "attack":
 		p.ta_act = null
 	var tm := _timing(p, a)
@@ -644,6 +795,7 @@ func _perform(p: Player, a: Dictionary) -> void:
 		"use": _use(p, a["id"])
 		"wear": _wear(p, a["id"])
 		"unwear": _unwear(p, a["slot"])
+		"say": _say(p, a["text"])
 		"drop":
 			# РП: выброшенная вещь пропадает (кучек на земле и обыска больше нет)
 			var n := p.count(a["id"])
@@ -834,7 +986,8 @@ func player_data(p: Player) -> Dictionary:
 		"dead": p.dead, "rt": snappedf(p.respawn_t, 0.1), "eq": p.eq, "mo": p.money, "bk": p.bank,
 		"inv": Items.copy(p.inv), "aa": snappedf(p.attack_anim, 0.01), "con": p.connected, "sn": p.sneaking,
 		"tn": p.ta_name if p.ta_act != null else "", "tp": snappedf(p.ta_progress(), 0.01),
-		"nm": p.name, "fs": p.force_seq, "wr": p.wear.duplicate(), "lk": p.look.duplicate()}
+		"nm": p.name, "fs": p.force_seq, "wr": p.wear.duplicate(), "lk": p.look.duplicate(),
+		"lv": p.level, "xp": p.exp, "ph": roundf(p.hour_play), "dy": p.day, "dp": roundf(p.day_play), "da": roundf(p.day_afk), "rg": p.reg}
 
 ## Что видят другие игроки: без инвентаря, денег и здоровья (это личное)
 func player_public(p: Player) -> Dictionary:
@@ -871,6 +1024,13 @@ func player_from(o: Dictionary, p: Player) -> void:
 	p.look = look_from(o.get("lk"), p.id)
 	p.wear = wear_from(o.get("wr", {}))
 	p.force_seq = int(o.get("fs", 0))
+	p.level = maxi(1, int(o.get("lv", 1)))
+	p.exp = maxi(0, int(o.get("xp", 0)))
+	p.hour_play = maxf(0.0, float(o.get("ph", 0.0)))
+	p.day = int(o.get("dy", -1))
+	p.day_play = maxf(0.0, float(o.get("dp", 0.0)))
+	p.day_afk = maxf(0.0, float(o.get("da", 0.0)))
+	p.reg = str(o.get("rg", ""))
 	var tn: String = o.get("tn", "")
 	if tn != "":
 		p.ta_name = tn
@@ -896,7 +1056,7 @@ func to_data() -> Dictionary:
 		ps.append(player_data(p))
 	# карта берётся из файла; в сохранении клетки нужны только ради открытых и закрытых дверей
 	return {"v": SAVE_VERSION, "seed": seed, "time": time, "uids": uids.duplicate(), "tiles": Marshalls.raw_to_base64(world.tiles),
-		"w": world.w, "p": ps}
+		"w": world.w, "p": ps, "pdh": payday_hour}
 
 ## Здание, под крышей которого стоит точка, или -1 — улица. Так же решает телефон, чью крышу не рисовать
 ## (world_view.gd, inside_building): стена — снаружи, пол, дверь, окно, мебель — внутри
@@ -1083,6 +1243,7 @@ static func migrate(o: Dictionary) -> Dictionary:
 func load_data(o: Dictionary) -> void:
 	o = migrate(o)
 	time = float(o.get("time", 8 * 60.0))
+	payday_hour = int(o.get("pdh", -1))
 	uids = o.get("uids", {}).duplicate() if o.get("uids") is Dictionary else {}
 	if o.get("map") is Dictionary:
 		# клиент: карту со всеми дверями прислал сервер
@@ -1171,6 +1332,9 @@ func events_for(pid: int, full_players: bool, all_pub := false) -> Dictionary:
 	var m := pop_messages(pid)
 	if m.size() > 0:
 		o["m"] = m
+	var ch := pop_chat(pid)
+	if ch.size() > 0:
+		o["c"] = ch
 	return o
 
 func pop_messages(pid: int) -> Array:

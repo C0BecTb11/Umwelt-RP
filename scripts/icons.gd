@@ -210,6 +210,20 @@ static func glyph(ci: CanvasItem, kind: String, c: Vector2, r: float, col: Color
 		"gear":
 			ci.draw_colored_polygon(PackedVector2Array([c + Vector2(-0.25, -0.6) * r, c + Vector2(0.25, -0.6) * r, c + Vector2(0.7, -0.25) * r, c + Vector2(0.5, 0.0) * r, c + Vector2(0.35, -0.12) * r, c + Vector2(0.35, 0.65) * r, c + Vector2(-0.35, 0.65) * r, c + Vector2(-0.35, -0.12) * r, c + Vector2(-0.5, 0.0) * r, c + Vector2(-0.7, -0.25) * r]), col)
 			ci.draw_arc(c + Vector2(0, -0.6) * r, r * 0.16, 0, PI, 8, Color(0.1, 0.1, 0.12), r * 0.1, true)
+		"menu":
+			for k in 3:
+				ci.draw_rect(Rect2(c + Vector2(-0.45, -0.38 + k * 0.32) * r, Vector2(0.9, 0.16) * r), col)
+		"chat":
+			Icons._sb.bg_color = col
+			Icons._sb.set_corner_radius_all(int(r * 0.25))
+			Icons._sb.border_width_left = 0
+			Icons._sb.border_width_right = 0
+			Icons._sb.border_width_top = 0
+			Icons._sb.border_width_bottom = 0
+			Icons._sb.draw(ci.get_canvas_item(), Rect2(c + Vector2(-0.55, -0.45) * r, Vector2(1.1, 0.72) * r))
+			ci.draw_colored_polygon(PackedVector2Array([c + Vector2(-0.3, 0.2) * r, c + Vector2(0.05, 0.2) * r, c + Vector2(-0.35, 0.55) * r]), col)
+			for k in 3:
+				ci.draw_circle(c + Vector2(-0.27 + k * 0.27, -0.09) * r, r * 0.08, Color(0.12, 0.13, 0.15))
 		"pause":
 			ci.draw_rect(Rect2(c + Vector2(-0.32, -0.42) * r, Vector2(0.22, 0.84) * r), col)
 			ci.draw_rect(Rect2(c + Vector2(0.1, -0.42) * r, Vector2(0.22, 0.84) * r), col)
