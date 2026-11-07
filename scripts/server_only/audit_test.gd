@@ -40,6 +40,7 @@ func _ready() -> void:
 	test_attack_walk()
 	test_payday()
 	test_payday_guard()
+	test_world_backup()
 	test_chat()
 	test_editor()
 	test_editor_resize()
@@ -1275,6 +1276,44 @@ func test_payday_guard() -> void:
 	if after_empty != 500.0 or a2.idle != 0.0:
 		bad.append("АФК: после пустого %d, после настоящего %d" % [after_empty, a2.idle])
 	check("PayDay от накрутки: откат часов, перезаход, перезапуск, подделка с телефона, пустой чат — опыт не задваивается",
+		bad.is_empty(), str(bad))
+
+## Резервная копия мира для Supabase (0.54): сжатая копия разворачивается в тот же мир (игроки, уровень, двери),
+## влезает в лимит базы (4 МБ) с запасом; ключ сервера — 64 hex, создаётся один раз и потом читается тот же;
+## испорченная копия не принимается
+func test_world_backup() -> void:
+	var bad := []
+	var S = load("res://scripts/server_only/server.gd")
+	var g := GameState.new_game(9)
+	g.players.clear()
+	for i in 200:
+		var p := g.join_player("sb:u%d" % i, "Name_N%d" % i, 900 + i, "m", "2026-11-01")
+		p.level = 1 + i % 7
+		p.exp = i % 3
+		p.money = 1000 + i
+	var pl: Dictionary = S.backup_payload(g)
+	var d = S.backup_unpack(str(pl.get("data", "")))
+	if d == null:
+		bad.append("не разворачивается")
+	else:
+		var g2 := GameState.new(9)
+		g2.load_data(d)
+		var q := g2.player(950)
+		if g2.players.size() != 200 or q == null or q.level != 1 + 50 % 7 or q.money != 1050 or g2.uids.get("sb:u50", -1) != 950:
+			bad.append("после копии: игроков %d" % g2.players.size())
+	var kb := str(pl.get("data", "")).length() / 1024
+	if kb <= 0 or kb > 1024:
+		bad.append("размер %d КБ" % kb)
+	if S.backup_unpack("испорчено") != null or S.backup_unpack(Marshalls.raw_to_base64("{}".to_utf8_buffer().compress(FileAccess.COMPRESSION_GZIP))) != null:
+		bad.append("испорченная копия принята")
+	var kp := "user://audit_backup.key"
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(kp))
+	var k1: String = S.load_backup_key(kp)
+	var k2: String = S.load_backup_key(kp)
+	if k1.length() != 64 or not k1.is_valid_hex_number() or k1 != k2:
+		bad.append("ключ: %s / %s" % [k1.left(8), k2.left(8)])
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(kp))
+	check("Копия мира для Supabase: разворачивается в тот же мир (200 игроков — %d КБ), испорченная не принимается, ключ постоянный" % kb,
 		bad.is_empty(), str(bad))
 
 ## Чат (0.52): слышат ближе 20 м и сам говорящий; дальше — нет; текст чистится и обрезается; чаще раза в секунду — нет;

@@ -10,6 +10,13 @@ const SAVE_HOURLY := "user://server_world.h%02d.json"   # копия раз в �
 ## сервер сохранит мир и выйдет сам. Сигнал остановки Godot не ловит — без файла мир терялся бы за последние 15 с
 const STOP_FILE := "user://stop.request"
 const WORLD_SEED := 1990
+## Резервные копии мира в Supabase (0.54): раз в час сжатый файл мира уходит в базу (world_backups, хранится 7 дней).
+## Ключ сервер создаёт сам (BACKUP_KEY_FILE, как ключ DTLS) и при первом запуске регистрирует его отпечаток —
+## только если в базе ещё нет ключа. Работает только на боевом порту (Net.DEFAULT_PORT) с аккаунтами:
+## тесты (--noauth, другие порты, --nobackup) ключ не регистрируют и копии не шлют
+const BACKUP_KEY_FILE := "user://backup.key"
+const BACKUP_EVERY := 3600.0   # сек. между копиями (база сама не примет чаще раза в 50 минут)
+const BACKUP_FIRST := 300.0    # первая копия — через 5 минут после запуска
 
 var game: GameState
 var port := Net.DEFAULT_PORT
@@ -28,6 +35,10 @@ var started_ms := 0
 var noauth := false
 var deleted_t := 2.0           # проверка удалённых аккаунтов (BF-044): через 2 с после запуска, потом раз в DELETED_EVERY
 var deleted_state := ""        # последний итог проверки удалённых аккаунтов — в журнал только при смене
+var backup_on := false         # копии в Supabase включены (боевой сервер)
+var backup_key := ""           # 64 hex-символа; в базе — только sha256 от него
+var backup_t := BACKUP_FIRST
+var no_backup := false         # --nobackup
 var refused_ip := 0            # отказано подключениям сверх MAX_PENDING_IP (в журнал раз в минуту)
 var stop_t := 0.0
 var sig_t := 0.0
@@ -101,10 +112,22 @@ func _ready() -> void:
 			stat_t = stat_every
 		elif a == "--noauth":
 			noauth = true          # только для локальных тестов: вход по uid телефона без аккаунта
+		elif a == "--nobackup":
+			no_backup = true       # тестовый сервер с аккаунтами (CI auth-test): копий в Supabase не слать
 	started_ms = Time.get_ticks_msec()
 	if FileAccess.file_exists(STOP_FILE):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(STOP_FILE))   # старый запрос от прошлой остановки
 	game = _load_world()
+	backup_on = not noauth and not no_backup and port == Net.DEFAULT_PORT
+	if backup_on:
+		set_process(false)                 # пока говорим с базой, мир ещё не готов
+		backup_key = load_backup_key(BACKUP_KEY_FILE)
+		var reg: Array = await _rpc("register_backup_key", {"key_hash": backup_key.sha256_text()})
+		var accepted: bool = reg[1] == true
+		_log("резервные копии в Supabase: %s" % ("ключ сервера принят" if accepted else ("ОШИБКА — в базе другой ключ сервера (переустановка? раздел 6 руководства)" if reg[0] == 200 else "база недоступна (код %d), попробую при отправке" % reg[0])))
+		if game == null and accepted:
+			game = await _restore_backup()
+		set_process(true)
 	if game == null:
 		game = GameState.new_game(WORLD_SEED)
 		game.players.clear()        # на сервере нет «своего» игрока
@@ -195,6 +218,81 @@ func _sync_deleted() -> void:
 	_log("удалены персонажи удалённых аккаунтов: %d" % gone.size())
 	save_world()
 
+# ================== резервные копии в Supabase (0.54) ==================
+## Ключ сервера для копий: читаем из файла или создаём случайный (32 байта → 64 hex). Не меняется, пока жив файл
+static func load_backup_key(path: String) -> String:
+	if FileAccess.file_exists(path):
+		var k := FileAccess.get_file_as_string(path).strip_edges()
+		if k.length() == 64 and k.is_valid_hex_number():
+			return k
+	var key := Crypto.new().generate_random_bytes(32).hex_encode()
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	if f != null:
+		f.store_string(key)
+		f.close()
+	return key
+
+## Копия мира для базы: JSON мира → gzip → base64. {} — мир не превращается в читаемый файл
+static func backup_payload(g: GameState) -> Dictionary:
+	var text := GameState.save_text(g.to_data())
+	if text == "":
+		return {}
+	var raw := text.to_utf8_buffer()
+	return {"data": Marshalls.raw_to_base64(raw.compress(FileAccess.COMPRESSION_GZIP)), "players": g.players.size(), "raw_bytes": raw.size()}
+
+## Обратно: base64 → gzip → JSON мира; null — испорчено
+static func backup_unpack(b64: String):
+	var z := Marshalls.base64_to_raw(b64)
+	if z.is_empty():
+		return null
+	var raw := z.decompress_dynamic(64 * 1024 * 1024, FileAccess.COMPRESSION_GZIP)
+	var d = JSON.parse_string(raw.get_string_from_utf8()) if raw.size() > 0 else null
+	return d if GameState.valid_save(d) else null
+
+## Вызов функции базы publishable-ключом (роль anon): [код ответа, разобранный ответ]
+func _rpc(fn: String, body: Dictionary) -> Array:
+	var h := HTTPRequest.new()
+	h.timeout = 30.0
+	add_child(h)
+	var err := h.request(Boot.SUPABASE_URL + "/rest/v1/rpc/" + fn, PackedStringArray(["apikey: " + Boot.SUPABASE_KEY, "Content-Type: application/json"]), HTTPClient.METHOD_POST, JSON.stringify(body))
+	if err != OK:
+		h.queue_free()
+		return [0, null]
+	var r: Array = await h.request_completed
+	h.queue_free()
+	if r[0] != HTTPRequest.RESULT_SUCCESS:
+		return [0, null]
+	return [int(r[1]), JSON.parse_string((r[3] as PackedByteArray).get_string_from_utf8())]
+
+func _send_backup() -> void:
+	var pl := backup_payload(game)
+	if pl.is_empty():
+		_log("резервная копия в Supabase: мир не прошёл проверку — не отправлена")
+		return
+	pl["token"] = backup_key
+	var r: Array = await _rpc("put_world_backup", pl)
+	var res := str(r[1]) if r[0] == 200 else "код %d" % r[0]
+	match res:
+		"ok": _log("резервная копия в Supabase: отправлена (%d КБ, персонажей %d)" % [str(pl["data"]).length() / 1024, int(pl["players"])])
+		"too_soon": pass                   # перезапуск сервера: копия этого часа уже есть
+		"denied": _log("резервная копия в Supabase: ОШИБКА — ключ сервера не принят (раздел 6 руководства)")
+		_: _log("резервная копия в Supabase: не отправлена (%s)" % res)
+
+## Своего файла мира нет (новый сервер или все файлы испорчены) — берём последнюю копию из базы
+func _restore_backup() -> GameState:
+	var r: Array = await _rpc("get_latest_world_backup", {"token": backup_key})
+	if r[0] != 200 or not (r[1] is Dictionary):
+		_log("своего мира нет, копии в Supabase нет (код %d)" % r[0])
+		return null
+	var d = backup_unpack(str(r[1].get("data", "")))
+	if d == null:
+		_log("ОШИБКА: копия мира из Supabase испорчена")
+		return null
+	var g := GameState.new(int(d.get("seed", WORLD_SEED)))
+	g.load_data(d)
+	_log("мир восстановлен из копии в Supabase от %s (персонажей %d)" % [str(r[1].get("created_at", "?")), g.players.size()])
+	return g
+
 func _log(s: String) -> void:
 	print("[%s] %s" % [Time.get_datetime_string_from_system(), s])
 
@@ -248,6 +346,11 @@ func _process(dt: float) -> void:
 		if deleted_t <= 0.0:
 			deleted_t = DELETED_EVERY
 			_sync_deleted()
+	if backup_on:
+		backup_t -= dt
+		if backup_t <= 0.0:
+			backup_t = BACKUP_EVERY
+			_send_backup()
 	stop_t -= dt
 	if stop_t <= 0.0:
 		stop_t = 0.25

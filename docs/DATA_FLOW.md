@@ -36,7 +36,7 @@
 |---|---|---|
 | Аккаунт (почта, пароль) | **☁️ `auth.users`** | 📱 `user://account.cfg`: почта и refresh-токен (пароль не хранится) |
 | Имя, постоянный ID, пол | **☁️ `public.characters`** | 🖥 `Player.name`, `Player.id`, `Player.look.g` в файле мира; 📱 в памяти |
-| Деньги, счёт, вещи, одежда, здоровье, голод, позиция | **🖥 файл мира `server_world.json`** | 🖥 `server_world.bak.json`; 📱 только в памяти (свои — полностью) |
+| Деньги, счёт, вещи, одежда, здоровье, голод, позиция, уровень, опыт | **🖥 файл мира `server_world.json`** | 🖥 `server_world.bak.json` и часовые; с 0.54 ☁️ `world_backups` — сжатая копия раз в час, 7 дней; 📱 только в памяти (свои — полностью) |
 | Кто какой игрок (`uids`: ключ аккаунта → ID) | **🖥 файл мира** | — (никому не отправляется) |
 | Карта | **репозиторий `maps/city.json`** → 📦 game.pck и сборка сервера | 🖥 открытые двери — в файле мира; 📱 карта от сервера в памяти |
 | Офлайн-мир («Офлайн-тест») | **📱 `user://save.json`** | `save.bak.json`; с сервером не связан |
@@ -159,6 +159,9 @@
 | Сохранение мира | `server.gd` `save_world` → `game.gd` `to_data`, `save_text` | 🖥 память → `user://server_world.json` + `.bak.json` + `server_world.hЧЧ.json` (на Hetzner `/srv/umwelt/data/godot/app_userdata/Umwelt RP/`) | `v`, `seed`, `time`, `uids`, `tiles` (base64 — ради дверей), `w`, `p` (все карточки; с 0.52 в карточке `lv`, `xp`, `ph`, `dy`, `dp`, `da`, `rg`), с 0.52 `pdh` — час последнего PayDay |
 | Карта для клиента | `game.gd` `to_data_for` | 🖥 → 📱 `init` | `map` целиком (с текущими дверями) |
 | Изменения карты в игре | `game.gd` `_interact` → `world.set_idx` → `dirty_tiles` → `events_for` (`tc`) | 🖥 → 📱 `ev` | только двери (открыть/закрыть) |
+| Резервная копия в Supabase (с 0.54) | `server.gd` `_send_backup` → `backup_payload` (JSON мира → gzip → base64) → `_rpc("put_world_backup")` | 🖥 → ☁️ `POST /rest/v1/rpc/put_world_backup`, HTTPS, publishable-ключ (роль `anon`) | `token` (ключ сервера из `user://backup.key`), `data`, `players`, `raw_bytes`. Раз в час (первая — через 5 мин). База принимает только с зарегистрированным ключом, не чаще раза в 50 мин, хранит 7 дней. Только боевой сервер (порт 7777, аккаунты, без `--nobackup`) |
+| Регистрация ключа копий | `server.gd` `_ready` → `load_backup_key` → `_rpc("register_backup_key")` | 🖥 → ☁️ | `key_hash` = sha256 ключа; база запоминает, только если ключа ещё нет. Сам ключ из сервера не уходит иначе как в вызовах копий (HTTPS) |
+| Восстановление из Supabase | `server.gd` `_ready` (своего мира нет или все файлы испорчены) → `_restore_backup` → `_rpc("get_latest_world_backup")` → `backup_unpack` → `load_data` | ☁️ → 🖥 | последняя копия; только с ключом этого сервера (после переустановки — см. руководство, раздел 6) |
 | Офлайн | `main.gd` `_solo_world` → `saves.gd` `load_game` / `GameState.new_game` | 📱 | карта из своего пакета |
 | Черновик карты | `map_editor.gd` `save_draft`, `_on_send` | 📱 → `user://map_draft.json`; 📱 → ☁️ `POST /rest/v1/map_drafts` (HTTPS, токен владельца) | `map_data()`. Дальше — вручную: Claude читает черновик через Supabase и коммитит `maps/city.json` |
 
