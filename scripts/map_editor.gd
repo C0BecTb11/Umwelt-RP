@@ -60,7 +60,8 @@ var road_marks: Array = []     # метки точек рисуемой доро
 var end_marks: Array = []      # метки концов всех дорог (к ним можно присоединиться)
 var drag_to := Vector2(-1, -1) # куда тянут выбранный объект (кусок графики перестраивается один раз — при отпускании)
 var ghost: MeshInstance3D      # полупрозрачный объект под пальцем, пока тянут
-const ROAD_SNAP := 3.0         # касание ближе этого к концу дороги — присоединиться к нему
+const ROAD_SNAP := 3.0         # касание ближе этого к концу дороги — присоединиться к нему (у широкой дороги — по её
+                               # ширине: на всей «торцевой» площадке трассы, с 0.48, BF-061)
 var unsaved := false
 var reset_t := 0.0
 var size_t := 0.0              # окно подтверждения «Размер»
@@ -376,6 +377,24 @@ func road_tap(gp: Vector2) -> String:
 		var e: Array = w.lines[en2[0]]
 		gp = Vector2(e[1], e[2]) if en2[1] == 0 else Vector2(e[e.size() - 2], e[e.size() - 1])
 		joined = true
+		# конец в конец дороги того же вида — сливаются в одну: угол скругляется дугой, без зазора и наплыва (BF-061)
+		var mg := _merged(road_line, en2[0], en2[1], gp)
+		if not mg.is_empty():
+			var n0: int = (w.lines[road_line].size() - 1) / 2
+			var rr := GameWorld.line_corner_radii(mg)
+			var lim: float = GameWorld.LINE_MIN_R[mg[0]]
+			for ci in range(maxi(0, n0 - 2), mini(rr.size(), n0 + 1)):
+				if rr[ci] < lim:
+					return "Слишком крутой поворот для %s — поставь точку дальше" \
+							% {"street": "улицы", "highway": "трассы", "bridge": "моста"}[mg[0]]
+			_remember_lines()
+			_mark_line(w.lines[road_line])
+			_mark_line(w.lines[en2[0]])
+			w.lines[road_line] = mg
+			delete_road(en2[0])
+			_mark_line(mg)
+			road_line = -1
+			return "Дороги слиты в одну. Следующее касание — новая дорога"
 	else:
 		var mp2 := road_mid_near(gp, road_line)
 		if mp2.x >= 0.0:
@@ -390,6 +409,26 @@ func road_tap(gp: Vector2) -> String:
 		road_line = -1
 		return "Соединено с дорогой. Следующее касание — новая дорога"
 	return "Точек: %d. Касайся дальше. «Готово» — закончить, «Отменить» — убрать последнюю" % ((w.lines[road_line].size() - 1) / 2)
+
+## Дорога li, продолженная точкой at (это конец k дороги other: 0 — начало, 1 — конец) и дальше всеми точками other.
+## Пусто — не сливаются: другой вид дороги или точек станет больше MAX_LINE_PTS
+func _merged(li: int, other: int, k: int, at: Vector2) -> Array:
+	var e: Array = w.lines[li]
+	var o: Array = w.lines[other]
+	if e[0] != o[0] or (e.size() - 1) / 2 + (o.size() - 1) / 2 > GameWorld.MAX_LINE_PTS:
+		return []
+	var r: Array = e.duplicate()
+	r.append(at.x)
+	r.append(at.y)
+	if k == 0:
+		for j in range(3, o.size() - 1, 2):
+			r.append(o[j])
+			r.append(o[j + 1])
+	else:
+		for j in range(o.size() - 4, 0, -2):
+			r.append(o[j])
+			r.append(o[j + 1])
+	return r
 
 ## Точка at сделает поворот дороги li круче допустимого (GameWorld.LINE_MIN_R): проверяются два последних угла —
 ## новый и предыдущий (у него укоротился отрезок под дугу)
@@ -407,17 +446,18 @@ func too_sharp(li: int, at: Vector2) -> bool:
 ## Конец другой дороги рядом с точкой: [номер, 0 — начало / 1 — конец] или пусто
 func road_end_near(at: Vector2, skip: int) -> Array:
 	var best := []
-	var bd := ROAD_SNAP
+	var bd := INF
 	for i in w.lines.size():
 		if i == skip:
 			continue
 		var e: Array = w.lines[i]
 		if e.size() < 5:
 			continue
+		var snap := maxf(ROAD_SNAP, float(GameWorld.LINE_OUTER_HW[e[0]]))
 		for k in 2:
 			var p := Vector2(e[1], e[2]) if k == 0 else Vector2(e[e.size() - 2], e[e.size() - 1])
 			var d := p.distance_to(at)
-			if d < bd:
+			if d < snap and d < bd:
 				bd = d
 				best = [i, k]
 	return best

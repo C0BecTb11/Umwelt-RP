@@ -1467,6 +1467,26 @@ func test_road_lines() -> void:
 				t_far += 1
 			if absf(c3.x - (140.0 - 5.625)) < 0.1:
 				t_near += 1
+	# угол «трасса кончается — улица начинается» (разные виды, не сливаются): круглые концы, без выреза (0.48, BF-061)
+	var cw := GameWorld.new()
+	var cmd := w.map_data()
+	cmd["lines"] = [["highway", 10.0, 10.0, 40.0, 10.0], ["street", 40.0, 10.0, 40.0, 40.0]]
+	cw.load_map(cmd)
+	var cwm := WorldMesh.new(cw)
+	var notch_pts := [Vector2(42.5, 8.0), Vector2(43.5, 6.5), Vector2(41.0, 5.0)]
+	var covered := 0
+	for cy2 in range(0, 2):
+		for cx2 in range(3, 5):
+			var mc := Mesher.new()
+			cwm.build_chunk(mc, cx2, cy2)
+			for i in range(0, mc.verts.size(), 3):
+				if absf(mc.verts[i].y - WorldMesh.LINE_ROAD_Y) > 0.001:
+					continue
+				for np2: Vector2 in notch_pts:
+					if Geometry2D.point_is_inside_triangle(np2, Vector2(mc.verts[i].x, mc.verts[i].z), Vector2(mc.verts[i + 1].x, mc.verts[i + 1].z), Vector2(mc.verts[i + 2].x, mc.verts[i + 2].z)):
+						covered += 1
+	check("Дороги: угол трассы и улицы конец в конец — асфальт без выреза (круглые концы)", covered >= notch_pts.size(),
+		"точек угла под асфальтом: %d из %d" % [covered, notch_pts.size()])
 	check("Дороги: перекрёсток — «зебры» и стоп-линии на подъездах, внутри без осевой; на Т — кромка рвётся только со стороны примыкания",
 		jx.size() == 1 and zebra >= 40 and yel_in == 0 and t_far > 0 and t_near == 0 and tw.lines_junc.size() == 1,
 		"перекрёстков %d, «зебра» %d, осевая внутри %d, Т: кромка справа %d, слева %d" % [jx.size(), zebra, yel_in, t_far, t_near])
@@ -1712,6 +1732,26 @@ func test_editor_speed_roads() -> void:
 	var ok90: bool = (w.lines[hl].size() - 1) / 2 == 3
 	check("Редактор: слишком крутой поворот дороги не ставится, обычный — ставится", refused and ok90,
 		"шпилька отказана %s («%s»), 90° принят %s" % [refused, msg, ok90])
+	# слияние (0.48, BF-061): трасса к концу другой трассы — одна дорога с дугой на углу; касание на «торце»
+	# широкой трассы (в 6 м от конца, не на оси) — тоже конец
+	ed.road_line = -1
+	ed.road_kind = "highway"
+	var n_before: int = w.lines.size()
+	for p in [Vector2(60, 10), Vector2(90, 10)]:
+		ed.begin()
+		ed.road_tap(p)
+		ed.end()
+	ed.road_line = -1
+	for p in [Vector2(90, 50), Vector2(95, 14)]:
+		ed.begin()
+		ed.road_tap(p)
+		ed.end()
+	var merged: Array = w.lines[w.lines.size() - 1]
+	var one: bool = w.lines.size() == n_before + 1 and (merged.size() - 1) / 2 == 3 and Vector2(merged[3], merged[4]) == Vector2(90, 10)
+	var mr := GameWorld.line_corner_radii(merged)
+	check("Редактор: трасса к концу трассы — сливаются в одну с дугой на углу; конец ловится по ширине дороги",
+		one and mr.size() == 1 and mr[0] >= GameWorld.LINE_MIN_R["highway"],
+		"дорог стало %d (ждали %d), точки %s, радиус угла %s" % [w.lines.size(), n_before + 1, merged, mr])
 	ed.road_kind = "street"
 	ed.queue_free()
 

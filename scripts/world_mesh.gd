@@ -789,8 +789,18 @@ static func _band(m: Mesher, r: Array, o1: float, o2: float, y: float, col: Colo
 ## Мазок шириной 2·hw: прямоугольник куска (чуть заходит на соседей — LINE_OVERLAP) + клинья на стыке
 ## с предыдущим куском (с обеих сторон). Без нахлёста стыки кусков давали щели в долю пикселя, и сквозь все слои
 ## трассы точками светился светлый тротуар улицы под ней
-static func _stroke(m: Mesher, r: Array, hw: float, y: float, col: Color) -> void:
+static func _stroke(m: Mesher, r: Array, hw: float, y: float, col: Color, cap: Array = []) -> void:
 	_band(m, r, -hw, hw, y, col, LINE_OVERLAP)
+	if not cap.is_empty():
+		# полукруг радиусом hw наружу от конца
+		var pc: Vector2 = cap[0]
+		var dir: Vector2 = cap[1]
+		var nn := Vector2(-dir.y, dir.x) * hw
+		var prev := pc + nn
+		for k in range(1, 13):
+			var cur := pc + nn.rotated(-PI * k / 12.0)
+			_up_tri_q(m, pc, prev, cur, y, col)
+			prev = cur
 	var np = r[8]
 	if np == null:
 		return
@@ -857,16 +867,28 @@ func _line_seg(m: Mesher, r: Array) -> void:
 	var mid := (a + b) * 0.5
 	var li: int = r[7]
 	var s_mid: float = (float(r[5]) + float(r[6])) * 0.5
+	# конец дороги, упёртый в другую дорогу (стык конец в конец разных видов, отворот), — круглый: квадратные
+	# торцы двух дорог под углом давали зазор-«вырез» и наплыв (BF-061). Свободный конец — прямой
+	var cap := []
+	var t := (b - a).normalized()
+	if float(r[5]) <= 0.0:
+		var pe := a + t * 0.3
+		if w.on_line_road(pe, li, false, 0.0, 0.0):
+			cap = [pe, -t]
+	elif float(r[6]) >= float(w.line_len[li]) - 1e-3:
+		var pe := b - t * 0.3
+		if w.on_line_road(pe, li, false, 0.0, float(r[6])):
+			cap = [pe, t]
 	if kind == "highway":
 		m.mat = Mesher.M_ASPHALT
-		_stroke(m, r, ow, LINE_SHOULDER_Y, c(0x5E5E58))
-		_stroke(m, r, hw, LINE_ROAD_Y, c(0x3C3D40))
+		_stroke(m, r, ow, LINE_SHOULDER_Y, c(0x5E5E58), cap)
+		_stroke(m, r, hw, LINE_ROAD_Y, c(0x3C3D40), cap)
 	else:
 		m.mat = Mesher.M_CONCRETE
-		_stroke(m, r, ow, LINE_SIDE_Y, c(0x9C9C96))
-		_stroke(m, r, hw + 0.18, LINE_CURB_Y, c(0x7C7C76))
+		_stroke(m, r, ow, LINE_SIDE_Y, c(0x9C9C96), cap)
+		_stroke(m, r, hw + 0.18, LINE_CURB_Y, c(0x7C7C76), cap)
 		m.mat = Mesher.M_ASPHALT
-		_stroke(m, r, hw, LINE_ROAD_Y, c(0x3C3D40))
+		_stroke(m, r, hw, LINE_ROAD_Y, c(0x3C3D40), cap)
 	m.mat = Mesher.M_NONE
 	if kind == "bridge":
 		for side in [-1.0, 1.0]:
