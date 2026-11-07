@@ -347,12 +347,28 @@ func road_tap(gp: Vector2) -> String:
 		if mp2.x >= 0.0:
 			gp = mp2
 			joined = true
+	if too_sharp(road_line, gp):
+		return "Слишком крутой поворот для %s — поставь точку дальше" \
+				% {"street": "улицы", "highway": "трассы", "bridge": "моста"}[w.lines[road_line][0]]
 	if road_point(gp) < 0:
 		return "Дальше нельзя: край карты или в дороге уже %d точек" % GameWorld.MAX_LINE_PTS
 	if joined:
 		road_line = -1
 		return "Соединено с дорогой. Следующее касание — новая дорога"
 	return "Точек: %d. Касайся дальше. «Готово» — закончить, «Отменить» — убрать последнюю" % ((w.lines[road_line].size() - 1) / 2)
+
+## Точка at сделает поворот дороги li круче допустимого (GameWorld.LINE_MIN_R): проверяются два последних угла —
+## новый и предыдущий (у него укоротился отрезок под дугу)
+func too_sharp(li: int, at: Vector2) -> bool:
+	var e: Array = w.lines[li].duplicate()
+	e.append(snappedf(at.x, 0.5))
+	e.append(snappedf(at.y, 0.5))
+	var rr := GameWorld.line_corner_radii(e)
+	var lim: float = GameWorld.LINE_MIN_R[e[0]]
+	for i in range(maxi(0, rr.size() - 2), rr.size()):
+		if rr[i] < lim:
+			return true
+	return false
 
 ## Конец другой дороги рядом с точкой: [номер, 0 — начало / 1 — конец] или пусто
 func road_end_near(at: Vector2, skip: int) -> Array:

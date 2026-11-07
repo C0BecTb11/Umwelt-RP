@@ -108,6 +108,8 @@ func build_chunk(m: Mesher, cx: int, cy: int) -> void:
 	m.identity()
 	for r in w.lines_chunk.get(Vector2i(cx, cy), []):
 		_line_seg(m, r)
+	for jn in w.lines_junc.get(Vector2i(cx, cy), []):
+		_junction(m, jn)
 	m.mat = Mesher.M_NONE
 
 func _tile(m: Mesher, x: int, y: int) -> void:
@@ -613,11 +615,10 @@ const LINE_CURB_Y := 0.035     # полоса бордюра
 const LINE_SHOULDER_Y := 0.0375  # обочина трассы: выше тротуара и бордюра улицы (на въезде улицы на трассу
                                  # не мерцают вперемешку), но ниже асфальта — асфальт улицы идёт через обочину
 const LINE_ROAD_Y := 0.04      # асфальт
-const LINE_EDGE_Y := 0.045     # трасса: белая кромка
-const LINE_TOP_Y := 0.05       # трасса: асфальт поверх кромки
 const LINE_MARK_Y := 0.056     # разметка
 const LINE_SELF_WIN := 25.0    # своя же дорога дальше этого по пути — как чужая (петля): разметку на ней не рисуем
 const WEDGE_STEP := 0.26       # шаг дуги клина на стыке, рад (~15°)
+const JUNC_PAD := 1.0          # перекрёсток: разметка обрывается на столько дальше края чужой дороги (м), там стоп-линия
 const LINE_OVERLAP := 0.05     # мазок заходит на соседние куски на столько (м): швов между кусками нет вовсе
 
 ## Плоский четырёхугольник лицом вверх (порядок точек любой, по кругу)
@@ -670,6 +671,44 @@ static func _stroke(m: Mesher, r: Array, hw: float, y: float, col: Color) -> voi
 			_up_tri_q(m, a, prev, cur, y, col)
 			prev = cur
 
+## Полоса разметки o1..o2 с клином на стыке с предыдущим куском (на повороте без щелей); joint = false — без клина
+static func _band_j(m: Mesher, r: Array, o1: float, o2: float, y: float, col: Color, joint := true) -> void:
+	_band(m, r, o1, o2, y, col, LINE_OVERLAP)
+	var np = r[8]
+	if not joint or np == null:
+		return
+	var a: Vector2 = r[1]
+	var n: Vector2 = r[3]
+	if absf((np as Vector2).angle_to(n)) < 0.002:
+		return
+	if o1 * o2 >= 0.0:
+		_up_quad(m, a + np * o1, a + np * o2, a + n * o2, a + n * o1, y, col)
+	else:
+		_up_tri_q(m, a, a + np * o1, a + n * o1, y, col)
+		_up_tri_q(m, a, a + np * o2, a + n * o2, y, col)
+
+## Разметка этой линии в точке (путь s, смещение от оси o) скрыта: внутри перекрёстка — ближе края чужой
+## дороги + JUNC_PAD (по прямой через точку перекрёстка: смещение вдоль чужой оси учтено)
+func _junc_hide(li: int, s: float, o: float) -> bool:
+	for jn in w.line_junc.get(li, []):
+		for side in 2:
+			if jn[1 + side * 3] != li:
+				continue
+			var k: int = jn[4 - side * 3]
+			var tl: Vector2 = jn[3 + side * 3]
+			var tk: Vector2 = jn[6 - side * 3]
+			var nl := Vector2(-tl.y, tl.x)
+			var nk := Vector2(-tk.y, tk.x)
+			var ds := s - float(jn[2 + side * 3])
+			var d := ds * tl.dot(nk) + o * nl.dot(nk)
+			if absf(d) >= float(GameWorld.LINE_OUTER_HW[w.lines[k][0]]) + JUNC_PAD:
+				continue
+			# чужая дорога есть в этом месте (на Т-перекрёстке её нет по ту сторону — там кромка не рвётся)
+			var u := float(jn[5 - side * 3]) + ds * tl.dot(tk) + o * nl.dot(tk)
+			if u > 0.0 and u < float(w.line_len[k]):
+				return true
+	return false
+
 ## Один кусок (~1 м) дороги-линии
 func _line_seg(m: Mesher, r: Array) -> void:
 	var kind: String = r[0]
@@ -677,6 +716,7 @@ func _line_seg(m: Mesher, r: Array) -> void:
 	var ow: float = GameWorld.LINE_OUTER_HW[kind]
 	var a: Vector2 = r[1]
 	var b: Vector2 = r[2]
+	var n: Vector2 = r[3]
 	var mid := (a + b) * 0.5
 	var li: int = r[7]
 	var s_mid: float = (float(r[5]) + float(r[6])) * 0.5
@@ -684,10 +724,6 @@ func _line_seg(m: Mesher, r: Array) -> void:
 		m.mat = Mesher.M_ASPHALT
 		_stroke(m, r, ow, LINE_SHOULDER_Y, c(0x5E5E58))
 		_stroke(m, r, hw, LINE_ROAD_Y, c(0x3C3D40))
-		m.mat = Mesher.M_NONE
-		_stroke(m, r, hw - 0.3, LINE_EDGE_Y, c(0xD8D8D0))
-		m.mat = Mesher.M_ASPHALT
-		_stroke(m, r, hw - 0.45, LINE_TOP_Y, c(0x3C3D40))
 	else:
 		m.mat = Mesher.M_CONCRETE
 		_stroke(m, r, ow, LINE_SIDE_Y, c(0x9C9C96))
@@ -699,19 +735,78 @@ func _line_seg(m: Mesher, r: Array) -> void:
 		for side in [-1.0, 1.0]:
 			_bridge_side(m, r, side, ow)
 		_bridge_pillar(m, r, hw)
-	# разметка — не на чужом асфальте и не на своём, если дорога сюда вернулась петлёй
-	if w.on_line_road(mid, li, false, 0.0, s_mid):
+	var white := c(0xD8D8D0)
+	# сплошные белые по краям трассы — обрываются там, где к трассе примыкает другая дорога
+	if kind == "highway":
+		for sd in [-1.0, 1.0]:
+			var o: float = sd * (hw - 0.375)
+			if not _junc_hide(li, s_mid, o) and not w.on_line_road(mid + n * o, li, false, 0.0, s_mid):
+				_band_j(m, r, sd * (hw - 0.45), sd * (hw - 0.3), LINE_MARK_Y, white)
+	# разметка по оси и полосам — не внутри перекрёстка, не на чужом асфальте и не на своём,
+	# если дорога сюда вернулась петлёй
+	if _junc_hide(li, s_mid, 0.0) or w.on_line_road(mid, li, false, 0.0, s_mid):
 		return
 	var yel := c(0xC8A83A)
 	if kind == "street" or kind == "bridge":
 		if fmod(s_mid, 3.0) < 1.5:
-			_band(m, r, -0.06, 0.06, LINE_MARK_Y, yel)
+			_band_j(m, r, -0.06, 0.06, LINE_MARK_Y, yel, fmod(s_mid - 0.6, 3.0) < 1.5)
 	else:
-		_band(m, r, -0.25, -0.12, LINE_MARK_Y, yel)
-		_band(m, r, 0.12, 0.25, LINE_MARK_Y, yel)
+		_band_j(m, r, -0.25, -0.12, LINE_MARK_Y, yel)
+		_band_j(m, r, 0.12, 0.25, LINE_MARK_Y, yel)
 		if fmod(s_mid, 9.0) < 3.0:
-			_band(m, r, -3.07, -2.93, LINE_MARK_Y, c(0xD8D8D0))
-			_band(m, r, 2.93, 3.07, LINE_MARK_Y, c(0xD8D8D0))
+			var jt := fmod(s_mid - 0.6, 9.0) < 3.0
+			for sd in [-1.0, 1.0]:
+				if not _junc_hide(li, s_mid, sd * 3.0):
+					_band_j(m, r, sd * 2.93, sd * 3.07, LINE_MARK_Y, white, jt)
+
+## Перекрёсток: на каждом подъезде каждой из двух дорог — «зебра» поперёк этой дороги (вдоль края чужой)
+## и стоп-линия на встречной к перекрёстку половине (движение правостороннее)
+func _junction(m: Mesher, jn: Array) -> void:
+	m.mat = Mesher.M_NONE
+	for side in 2:
+		_junc_marks(m, jn[0], jn[1 + side * 3], jn[2 + side * 3], jn[3 + side * 3], jn[4 - side * 3], jn[6 - side * 3])
+
+func _junc_marks(m: Mesher, p: Vector2, li: int, s: float, tl: Vector2, k: int, tk: Vector2) -> void:
+	var nl := Vector2(-tl.y, tl.x)
+	var nk := Vector2(-tk.y, tk.x)
+	var cc := tl.dot(nk)
+	var e := nl.dot(nk)
+	if absf(cc) < GameWorld.JUNC_MIN_SIN:
+		return
+	var hwl: float = GameWorld.LINE_ROAD_HW[w.lines[li][0]]
+	var hwk: float = GameWorld.LINE_ROAD_HW[w.lines[k][0]]
+	var owk: float = GameWorld.LINE_OUTER_HW[w.lines[k][0]]
+	var d0 := hwk + 0.5              # «зебра»: от края чужого асфальта…
+	var d1 := owk + 0.6              # …до края её тротуара/обочины
+	var st0 := owk + JUNC_PAD        # стоп-линия — там, где снова начинается разметка
+	var st1 := st0 + 0.45
+	var white := c(0xD8D8D0)
+	var ln: float = w.line_len[li]
+	for sg in [1.0, -1.0]:
+		# подъезд должен быть: дорога продолжается за стоп-линию
+		var far := (st1 + hwl * absf(e)) / absf(cc) + 0.5
+		if s + sg * far > ln - 0.3 or s + sg * far < 0.3:
+			continue
+		var g: float = sg * signf(cc)
+		var bw := -(hwl - 0.3)
+		while bw + 0.45 <= hwl - 0.3 + 0.001:
+			_junc_quad(m, p, tl, nl, cc, e, g, li, bw, bw + 0.45, d0, d1, white)
+			bw += 0.9
+		# стоп-линия на половине, что едет к перекрёстку: справа по ходу — это -sg · нормаль
+		_junc_quad(m, p, tl, nl, cc, e, g, li, 0.0, -sg * (hwl - 0.2), st0, st1, white)
+
+## Четырёхугольник разметки: смещения от оси этой дороги w0..w1, расстояния от оси чужой d0..d1.
+## Рисуется, только если все углы на асфальте этой дороги (на изогнутой дороге не уходит на траву)
+func _junc_quad(m: Mesher, p: Vector2, tl: Vector2, nl: Vector2, cc: float, e: float, g: float, li: int,
+		w0: float, w1: float, d0: float, d1: float, col: Color) -> void:
+	var q := []
+	for wd in [[w0, d0], [w1, d0], [w1, d1], [w0, d1]]:
+		var t: float = (wd[1] * g - wd[0] * e) / cc
+		var pt: Vector2 = p + tl * t + nl * wd[0]
+		if not w.on_line(pt, li, 0.02):
+			return
+		q.append(pt)
+	_up_quad(m, q[0], q[1], q[2], q[3], LINE_MARK_Y, col)
 
 # ================== ВОДА ==================
 const WATER_Y := -0.6           # гладь воды ниже земли: виден берег, мост над ней

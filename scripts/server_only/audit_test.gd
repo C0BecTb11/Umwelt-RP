@@ -1123,6 +1123,13 @@ func _road_world() -> GameWorld:
 	var err := w.load_map(md)
 	return w if err == "" else null
 
+## Радиус окружности через три точки (INF — на одной прямой)
+static func _circ_r(a: Vector2, b: Vector2, c: Vector2) -> float:
+	var ar := absf((b - a).cross(c - a))
+	if ar < 1e-6:
+		return INF
+	return a.distance_to(b) * b.distance_to(c) * a.distance_to(c) / (2.0 * ar)
+
 func test_road_lines() -> void:
 	var w := _road_world()
 	check("Дороги: карта с дорогами-линиями грузится", w != null and w.lines.size() == 4)
@@ -1152,20 +1159,27 @@ func test_road_lines() -> void:
 		if t.load_map(md) != "":
 			rejected += 1
 	check("Дороги: неверные дороги в файле — отказ (%d видов)" % bad.size(), rejected == bad.size(), "отказано %d" % rejected)
-	# кривая проходит через точки и идёт мелкими шагами
+	# кривая (с 0.44, BF-058): от первой точки до последней, углы — дуги (радиус по точкам пути не меньше
+	# радиуса дуги угла), мелкие шаги; угол 90° с длинными отрезками — дуга желаемого радиуса
 	var path := GameWorld.line_path(w.lines[0])
-	var through := true
-	for k in range(1, w.lines[0].size() - 1, 2):
-		var p := Vector2(w.lines[0][k], w.lines[0][k + 1])
-		var near := false
-		for q in path:
-			if q.distance_to(p) < 0.01:
-				near = true
-		through = through and near
+	var e0: Array = w.lines[0]
+	var ends_ok := path[0].distance_to(Vector2(e0[1], e0[2])) < 0.01 \
+		and path[path.size() - 1].distance_to(Vector2(e0[e0.size() - 2], e0[e0.size() - 1])) < 0.01
 	var max_step := 0.0
 	for i in path.size() - 1:
 		max_step = maxf(max_step, path[i].distance_to(path[i + 1]))
-	check("Дороги: кривая проходит через точки, шаг не больше %.1f м" % GameWorld.LINE_STEP, through and max_step <= GameWorld.LINE_STEP + 0.05, "шаг %.2f" % max_step)
+	var rmin := INF
+	for r in GameWorld.line_corner_radii(e0):
+		rmin = minf(rmin, r)
+	var rpath := INF
+	for i in range(1, path.size() - 1):
+		rpath = minf(rpath, _circ_r(path[i - 1], path[i], path[i + 1]))
+	var sq := ["street", 0.0, 0.0, 60.0, 0.0, 60.0, 60.0]
+	var sq_r := GameWorld.line_corner_radii(sq)
+	check("Дороги: кривая — от первой точки до последней, углы скруглены дугой, шаг не больше %.1f м" % GameWorld.LINE_STEP,
+		ends_ok and max_step <= GameWorld.LINE_STEP + 0.05 and rpath >= rmin * 0.95 and sq_r.size() == 1
+		and absf(sq_r[0] - GameWorld.LINE_TURN_R["street"]) < 0.01,
+		"концы %s, шаг %.2f, радиус по пути %.1f, дуги %.1f, угол 90° — %s" % [ends_ok, max_step, rpath, rmin, sq_r])
 	check("Дороги: асфальт и обочина находятся по точке", w.on_line_road(Vector2(120, 20), -1) and not w.on_line_road(Vector2(120, 24), -1)
 		and w.on_line_road(Vector2(120, 24), -1, true) and not w.on_line_road(Vector2(120, 30), -1, true))
 	check("Дороги: по дороге-линии можно ходить (она не стена)", not w.circle_blocked(120.0, 20.0, GameState.PLAYER_R))
@@ -1261,6 +1275,54 @@ func test_road_lines() -> void:
 			if int(m.uvs[i].x) == Mesher.M_NONE and c3.y > 0.025 and c3.y < 0.4 and (c3.y > 0.06 or not up) and w.on_line_road(Vector2(c3.x, c3.z), -1, true):
 				poke += 1
 	check("Дороги: камешки и травинки не торчат из дороги", poke == 0, "треугольников на дороге: %d" % poke)
+	# перекрёсток (0.44, BF-058): улица пересекает трассу — найден один раз; на подъездах «зебра» и стоп-линии;
+	# внутри перекрёстка нет осевой разметки; кромка трассы рвётся только с той стороны, где примыкает дорога
+	var jx := []
+	for ck2 in w.lines_junc:
+		for jn in w.lines_junc[ck2]:
+			if (jn[1] == 0 and jn[4] == 1) or (jn[1] == 1 and jn[4] == 0):
+				jx.append(jn)
+	var zebra := 0
+	var yel_in := 0
+	if jx.size() == 1:
+		var jp: Vector2 = jx[0][0]
+		var jck := Vector2i(floori(jp.x) / GameWorld.PROP_CHUNK, floori(jp.y) / GameWorld.PROP_CHUNK)
+		for dy in range(-1, 2):
+			for dx in range(-1, 2):
+				var mj := Mesher.new()
+				wm.build_chunk(mj, jck.x + dx, jck.y + dy)
+				for i in range(0, mj.verts.size(), 3):
+					var c3: Vector3 = (mj.verts[i] + mj.verts[i + 1] + mj.verts[i + 2]) / 3.0
+					if absf(c3.y - WorldMesh.LINE_MARK_Y) > 0.001:
+						continue
+					var col: Color = mj.cols[i]
+					var d2 := Vector2(c3.x, c3.z).distance_to(jp)
+					if col.r > 0.8 and col.b > 0.8 and d2 > 3.0 and d2 < 12.0:
+						zebra += 1
+					if col.r > 0.7 and col.b < 0.4 and d2 < 4.0:
+						yel_in += 1
+	# Т-перекрёсток: улица упирается в трассу слева — кромка справа целая
+	var tw := GameWorld.new()
+	var tmd := w.map_data()
+	tmd["lines"] = [["highway", 140.0, 5.0, 140.0, 60.0], ["street", 100.0, 30.0, 140.5, 30.0]]
+	tw.load_map(tmd)
+	var twm := WorldMesh.new(tw)
+	var t_far := 0
+	var t_near := 0
+	for dy in range(-1, 2):
+		var mt := Mesher.new()
+		twm.build_chunk(mt, 14, 3 + dy)
+		for i in range(0, mt.verts.size(), 3):
+			var c3: Vector3 = (mt.verts[i] + mt.verts[i + 1] + mt.verts[i + 2]) / 3.0
+			if absf(c3.y - WorldMesh.LINE_MARK_Y) > 0.001 or absf(c3.z - 30.0) > 2.5:
+				continue
+			if absf(c3.x - (140.0 + 5.625)) < 0.1:
+				t_far += 1
+			if absf(c3.x - (140.0 - 5.625)) < 0.1:
+				t_near += 1
+	check("Дороги: перекрёсток — «зебры» и стоп-линии на подъездах, внутри без осевой; на Т — кромка рвётся только со стороны примыкания",
+		jx.size() == 1 and zebra >= 40 and yel_in == 0 and t_far > 0 and t_near == 0 and tw.lines_junc.size() == 1,
+		"перекрёстков %d, «зебра» %d, осевая внутри %d, Т: кромка справа %d, слева %d" % [jx.size(), zebra, yel_in, t_far, t_near])
 	# редактор: точки, вид, отмена, удаление
 	var ed = load("res://scripts/map_editor.gd").new()
 	ed.headless = true
@@ -1485,6 +1547,25 @@ func test_editor_speed_roads() -> void:
 	check("Редактор: дорога продолжается от конца (и от начала), присоединяется к другой и заканчивается сама",
 		cont and longer and rev and on_axis and ed.road_line == -1 and w.lines.size() == n0 + 2,
 		"%s %s %s, стык %s, дорог %d" % [cont, longer, rev, joint, w.lines.size() - n0])
+	# крутой поворот (0.44, BF-058): трасса «шпилькой» — точка не ставится; поворот 90° с длинными отрезками — ставится
+	ed.road_line = -1
+	ed.road_kind = "highway"
+	for p in [Vector2(20, 50), Vector2(50, 50)]:
+		ed.begin()
+		ed.road_tap(p)
+		ed.end()
+	var hl: int = ed.road_line
+	ed.begin()
+	var msg: String = ed.road_tap(Vector2(25, 53))
+	ed.end()
+	var refused: bool = (w.lines[hl].size() - 1) / 2 == 2 and msg.begins_with("Слишком крутой")
+	ed.begin()
+	ed.road_tap(Vector2(50, 80))
+	ed.end()
+	var ok90: bool = (w.lines[hl].size() - 1) / 2 == 3
+	check("Редактор: слишком крутой поворот дороги не ставится, обычный — ставится", refused and ok90,
+		"шпилька отказана %s («%s»), 90° принят %s" % [refused, msg, ok90])
+	ed.road_kind = "street"
 	ed.queue_free()
 
 func test_big_map() -> void:

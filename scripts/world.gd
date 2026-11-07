@@ -46,7 +46,7 @@ var building_of := PackedInt32Array()
 var spawn := Vector2(50, 50)   # точка появления из файла карты
 var props: Array = []      # объекты карты: [id, x, y, поворот в градусах] (каталог — scripts/props.gd)
 var prop_cols := {}        # клетка → [Vector3(x, y, радиус)] — круги столкновений объектов
-var lines: Array = []      # дороги-линии: [вид, x0, y0, x1, y1, …] — точки, игра сглаживает их в кривую (с 0.38)
+var lines: Array = []      # дороги-линии: [вид, x0, y0, x1, y1, …] — точки; игра строит по ним кривую с дугами на углах (с 0.38, дуги — 0.44)
 
 func _init(width: int = 100, height: int = 100) -> void:
 	w = width
@@ -352,46 +352,104 @@ func index_props() -> void:
 						prop_cols[i].append(c)
 
 # ================== ДОРОГИ-ЛИНИИ ==================
-## Сглаженная кривая через точки линии (Катмулл-Ром), шаг ~LINE_STEP
-static func line_path(e: Array) -> PackedVector2Array:
+## Скругление углов (с 0.44, BF-058): желаемый радиус дуги на углу и наименьший допустимый, м (по оси дороги).
+## Меньше наименьшего — дорога на повороте наезжает сама на себя; редактор такую точку не ставит
+const LINE_TURN_R := {"street": 10.0, "highway": 25.0, "bridge": 15.0}
+const LINE_MIN_R := {"street": 5.0, "highway": 10.0, "bridge": 6.0}
+
+## Опорные точки линии без повторов подряд
+static func line_points(e: Array) -> PackedVector2Array:
 	var pts := PackedVector2Array()
 	for k in range(1, e.size() - 1, 2):
-		pts.append(Vector2(e[k], e[k + 1]))
+		var p := Vector2(e[k], e[k + 1])
+		if pts.is_empty() or pts[pts.size() - 1].distance_to(p) > 0.01:
+			pts.append(p)
+	return pts
+
+## Углы ломаной: [[вершина, направление до, направление после, отступ дуги T, радиус дуги]] по каждой внутренней точке.
+## Отступ T = радиус · tg(поворот/2), но не больше половины соседних отрезков (крайний отрезок — целиком):
+## на коротких отрезках дуга меньше желаемой
+static func line_corners(e: Array) -> Array:
+	var pts := line_points(e)
+	var out := []
+	var n := pts.size()
+	for i in range(1, n - 1):
+		var l1 := pts[i].distance_to(pts[i - 1])
+		var l2 := pts[i + 1].distance_to(pts[i])
+		var d1 := (pts[i] - pts[i - 1]) / l1
+		var d2 := (pts[i + 1] - pts[i]) / l2
+		var th := absf(d1.angle_to(d2))
+		if th < 0.01:
+			out.append([pts[i], d1, d2, 0.0, INF])
+			continue
+		var tn := tan(minf(th, PI - 0.02) * 0.5)
+		var lim := minf(l1 if i == 1 else l1 * 0.5, l2 if i == n - 2 else l2 * 0.5)
+		var t := minf(float(LINE_TURN_R[e[0]]) * tn, lim)
+		out.append([pts[i], d1, d2, t, t / tn])
+	return out
+
+## Радиусы дуг на углах (по порядку точек); INF — угла нет
+static func line_corner_radii(e: Array) -> PackedFloat32Array:
+	var r := PackedFloat32Array()
+	for c in line_corners(e):
+		r.append(c[4])
+	return r
+
+## Кривая линии: прямые между точками, углы скруглены дугами (line_corners), шаг ≤ LINE_STEP.
+## Проходит через первую и последнюю точку; внутренние точки — вершины углов (дорога срезает угол дугой)
+static func line_path(e: Array) -> PackedVector2Array:
+	var pts := line_points(e)
 	var out := PackedVector2Array()
 	if pts.size() < 2:
 		return out
 	out.append(pts[0])
-	for i in pts.size() - 1:
-		var p0 := pts[maxi(i - 1, 0)]
-		var p1 := pts[i]
-		var p2 := pts[i + 1]
-		var p3 := pts[mini(i + 2, pts.size() - 1)]
-		# длина куска кривой не больше ломаной через опорные точки Безье — по ней и число шагов
-		var b1 := p1 + (p2 - p0) / 6.0
-		var b2 := p2 - (p3 - p1) / 6.0
-		# частые точки, из них берём такие, чтобы шаг был не больше LINE_STEP (по параметру шаги неравные)
-		var n := maxi(1, ceili((p1.distance_to(b1) + b1.distance_to(b2) + b2.distance_to(p2)) / LINE_STEP * 4.0))
-		var prev := p1
-		for j in range(1, n + 1):
-			var t := float(j) / n
-			var t2 := t * t
-			var t3 := t2 * t
-			var q := 0.5 * ((2.0 * p1) + (p2 - p0) * t + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2 + (3.0 * p1 - p0 - 3.0 * p2 + p3) * t3)
-			if j == n:
-				if out[out.size() - 1].distance_to(p2) > LINE_STEP and prev != p1:
-					out.append(prev)
-				out.append(p2)
-			elif out[out.size() - 1].distance_to(q) > LINE_STEP * 0.95:
-				out.append(prev)
-			prev = q
+	var cur := pts[0]
+	for c in line_corners(e):
+		var v: Vector2 = c[0]
+		var d1: Vector2 = c[1]
+		var d2: Vector2 = c[2]
+		var t: float = c[3]
+		var a := v - d1 * t
+		_path_line(out, cur, a)
+		if t > 0.0:
+			var sd := signf(d1.cross(d2))
+			var r: float = c[4]
+			var ctr := a + Vector2(-d1.y, d1.x) * sd * r
+			var a0 := (a - ctr).angle()
+			var sweep := d1.angle_to(d2)
+			var k := maxi(maxi(1, ceili(absf(sweep) * r / LINE_STEP)), ceili(absf(sweep) / 0.2))
+			for j in range(1, k + 1):
+				out.append(ctr + Vector2.from_angle(a0 + sweep * j / k) * r)
+			cur = out[out.size() - 1]
+		else:
+			cur = a
+	_path_line(out, cur, pts[pts.size() - 1])
 	return out
+
+## Прямая от a до b шагами ≤ LINE_STEP (a уже в пути)
+static func _path_line(out: PackedVector2Array, a: Vector2, b: Vector2) -> void:
+	var d := a.distance_to(b)
+	if d < 0.01:
+		return
+	var k := maxi(1, ceili(d / LINE_STEP))
+	for j in range(1, k + 1):
+		out.append(a.lerp(b, float(j) / k))
 
 ## Куски кривых по кускам графики: Vector2i → [[вид, A, B, нормаль куска, она же, путь до A, до B, номер линии,
 ## нормаль предыдущего куска или null]]
 var lines_chunk := {}
+## Перекрёстки (с 0.44): кусок графики → [[точка, линия A, путь A, направление A, линия B, путь B, направление B]]
+## — где оси двух дорог (или одной в петле) пересекаются под углом больше ~20°. Стык конец-в-конец — не перекрёсток
+var lines_junc := {}
+var line_len := PackedFloat32Array()   # длина каждой линии по пути (с продлёнными концами), м
+var line_junc := {}                    # номер линии → её перекрёстки (те же записи, что в lines_junc)
 
 func index_lines() -> void:
 	lines_chunk.clear()
+	lines_junc.clear()
+	line_junc.clear()
+	line_len.resize(lines.size())
+	line_len.fill(0.0)
 	for li in lines.size():
 		var e: Array = lines[li]
 		var path := line_path(e)
@@ -421,6 +479,84 @@ func index_lines() -> void:
 			else:
 				lines_chunk[ck] = [rec]
 			s += ds
+		line_len[li] = s
+	_find_junctions()
+
+const JUNC_MIN_SIN := 0.34      # пересечение положе ~20° — не перекрёсток (разметки на нём не рисуем)
+
+## Пересечения осей: куски разложены по сетке 2 м (кусок ≤ ~1 м — пересекающиеся куски в той же или соседней
+## клетке); сравниваются клетка с собой и с половиной соседей — каждая пара один раз. 300 линий — десятки мс
+const JUNC_CELL := 2.0
+
+func _find_junctions() -> void:
+	var grid := {}
+	for ck in lines_chunk:
+		for r in lines_chunk[ck]:
+			var mid: Vector2 = ((r[1] as Vector2) + (r[2] as Vector2)) * 0.5
+			var key := floori(mid.x / JUNC_CELL) * 4096 + floori(mid.y / JUNC_CELL)
+			if grid.has(key):
+				grid[key].append(r)
+			else:
+				grid[key] = [r]
+	var offs := [0, 4096, 4096 + 1, 1, -4096 + 1]
+	for key in grid:
+		var A: Array = grid[key]
+		for o: int in offs:
+			if not grid.has(key + o):
+				continue
+			var B: Array = grid[key + o]
+			for i in A.size():
+				var r1: Array = A[i]
+				for j in range(i + 1 if o == 0 else 0, B.size()):
+					var r2: Array = B[j]
+					if r1[7] == r2[7] and absf(float(r1[5]) - float(r2[5])) < 25.0:
+						continue
+					var x = Geometry2D.segment_intersects_segment(r1[1], r1[2], r2[1], r2[2])
+					if x != null:
+						_add_junction(x, r1, r2)
+
+func _add_junction(x: Vector2, r1: Array, r2: Array) -> void:
+	var t1 := ((r1[2] as Vector2) - (r1[1] as Vector2)).normalized()
+	var t2 := ((r2[2] as Vector2) - (r2[1] as Vector2)).normalized()
+	if absf(t1.cross(t2)) < JUNC_MIN_SIN:
+		return
+	var s1: float = float(r1[5]) + (r1[1] as Vector2).distance_to(x)
+	var s2: float = float(r2[5]) + (r2[1] as Vector2).distance_to(x)
+	# конец одной дороги в конце другой — это угол, не перекрёсток
+	var end1 := s1 < 1.3 or s1 > line_len[r1[7]] - 1.3
+	var end2 := s2 < 1.3 or s2 > line_len[r2[7]] - 1.3
+	if end1 and end2:
+		return
+	# одно пересечение может найтись дважды (по точке на стыке кусков) — повтор ближе 2 м не берём
+	var ck := Vector2i(floori(x.x) / PROP_CHUNK, floori(x.y) / PROP_CHUNK)
+	for dy in range(-1, 2):
+		for dx in range(-1, 2):
+			for f in lines_junc.get(ck + Vector2i(dx, dy), []):
+				if (f[0] as Vector2).distance_to(x) < 2.0 and ((f[1] == r1[7] and f[4] == r2[7]) or (f[1] == r2[7] and f[4] == r1[7])):
+					return
+	var jn := [x, r1[7], s1, t1, r2[7], s2, t2]
+	if lines_junc.has(ck):
+		lines_junc[ck].append(jn)
+	else:
+		lines_junc[ck] = [jn]
+	for li in [r1[7], r2[7]]:
+		if not line_junc.has(li):
+			line_junc[li] = []
+		if line_junc[li].is_empty() or line_junc[li][line_junc[li].size() - 1] != jn:
+			line_junc[li].append(jn)
+
+## Точка на асфальте линии li (с запасом pad), м
+func on_line(p: Vector2, li: int, pad: float = 0.0) -> bool:
+	var ck := Vector2i(floori(p.x) / PROP_CHUNK, floori(p.y) / PROP_CHUNK)
+	for dy in range(-1, 2):
+		for dx in range(-1, 2):
+			for r in lines_chunk.get(ck + Vector2i(dx, dy), []):
+				if r[7] != li:
+					continue
+				var hw: float = float(LINE_ROAD_HW[r[0]]) + pad
+				if Geometry2D.get_closest_point_to_segment(p, r[1], r[2]).distance_squared_to(p) < hw * hw:
+					return true
+	return false
 
 ## Точка на асфальте другой линии (кроме номера skip): там не рисуются тротуары и разметка — перекрёсток.
 ## outer — вместе с тротуарами/обочинами (там не рисуются камешки и травинки клетки под дорогой); pad — запас, м
