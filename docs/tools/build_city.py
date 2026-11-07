@@ -27,27 +27,26 @@ def L(kind, *pts):
 L("highway", 0, 40, 380, 40, 462, 122, 462, 500)          # шоссе: север и восток (объезд)
 AV = [200, 245, 290, 335, 380]                            # даунтаун: авеню (с севера на юг)
 ST = [176, 218, 260, 302]                                 # даунтаун: улицы (с запада на восток)
-L("street", 290, 40, 290, 302)                            # Центральная авеню: от шоссе через центр…
-L("street", 290, 302, 290, 470)                           # …на юг, к вокзалу и Ривер-Сайду
-for x in (200, 245, 335, 380):
+L("street", 290, 40, 290, 470)                            # Центральная авеню: от шоссе через центр на юг (одна линия)
+for x in (200, 245, 380):
     L("street", x, 176, x, 302)
+L("street", 335, 302, 335, 150, 440, 150)                 # авеню 335 переходит в дорогу к фермам
 L("street", 40, 218, 462, 218)                            # Мейн-стрит
 for y in (176, 260, 302):
     L("street", 200, y, 380, y)
-L("street", 175, 110, 400, 110)                           # Промзона: Индастриал-роуд
+L("street", 175, 110, 450, 110)                           # Промзона: Индастриал-роуд, до шоссе (мимо ферм)
 L("street", 100, 40, 100, 218)                            # Оук-Хилл: хребет…
 for y in (78, 118, 158):
     L("street", 22, y, 172, y)                            # …и поперечные улицы
 L("street", 22, 78, 22, 158)
-for y in (360, 405, 450):                                 # Ривер-Сайд
+for y in (360, 450):                                      # Ривер-Сайд
     L("street", 290, y, 462, y)
+L("street", 462, 405, 262, 405)                           # средняя улица Ривер-Сайда идёт дальше к мосту
+# (до 0.50 мост был на 400 — в 5 м от улицы 405: два перекрёстка рядом, две пачки «зебр», BF-064)
 L("street", 375, 360, 375, 488)
-L("street", 290, 400, 262, 400)                           # мост через реку
-L("bridge", 262, 400, 214, 400)
-L("street", 214, 400, 150, 400)
-L("street", 192, 400, 192, 490)                           # за мостом
-L("street", 335, 176, 335, 150)                           # к фермам
-L("street", 335, 150, 440, 150)
+L("bridge", 262, 405, 214, 405)                           # мост через реку
+L("street", 214, 405, 110, 405)                           # к лесным домикам
+L("street", 192, 405, 192, 490)                           # за мостом
 
 def segs(e):
     pts = [(e[i], e[i + 1]) for i in range(1, len(e), 2)]
@@ -252,6 +251,11 @@ SPAWN = (290.5, 342.5)
 T = np.full((N, N), ".", dtype="<U1")
 T[water] = "~"
 props = []
+
+def face(dx, dy):
+    """Поворот объекта (градусы), чтобы его лицевая сторона (у моделей — локальная +z) смотрела в (dx, dy) на карте.
+    Все повороты — только через неё: до 0.50 фонари смотрели от дороги, ящики и светофоры — не туда (BF-065)"""
+    return round(math.degrees(math.atan2(dx, dy))) % 360
 
 def P(pid, x, y, rot=0):
     props.append([pid, round(float(x), 2), round(float(y), 2), int(rot) % 360])
@@ -535,21 +539,24 @@ blocked[on_road] = True
 def free_cell(x, y):
     return 0 <= x < N and 0 <= y < N and not blocked[y, x]
 
-def path_tiles(x, y, dx, dy, ch, maxlen=14):
-    """Дорожка от клетки наружу (dx,dy) до полосы дороги"""
+def path_tiles(x, y, dx, dy, ch=None, maxlen=24):
+    """Дорожка от клетки наружу (dx,dy) до самого края тротуара дороги (клетка касается полосы).
+    None — упёрлась в дом, воду, мебель или край карты; по мощёному и траве идёт.
+    До 0.50 останавливалась за 0.7 м до полосы и молча пропадала, если упиралась, — дорожки не доходили (BF-063)"""
     cells = []
     cx, cy = x, y
     for _ in range(maxlen):
         if not (0 <= cx < N and 0 <= cy < N):
-            return []
-        if on_road[cy, cx]:
+            return None
+        if road_d[cy, cx] < 0.5:
             return cells
-        if T[cy, cx] != "." or (cx, cy) in cells:
-            return []
+        if T[cy, cx] not in (".", "-") or (cx, cy) in cells:
+            return None
         cells.append((cx, cy))
         cx += dx; cy += dy
-    return []
+    return None
 
+no_walk = []
 for h in houses:
     if "door" not in h:
         continue
@@ -559,7 +566,10 @@ for h in houses:
     xs = [r[0] for r in h["rects"]] + [r[2] for r in h["rects"]]
     ys = [r[1] for r in h["rects"]] + [r[3] for r in h["rects"]]
     bx0, bx1, by0, by1 = min(xs), max(xs), min(ys), max(ys)
-    walk = path_tiles(dx0 + fdx, dy0 + fdy, fdx, fdy, "-")
+    walk = path_tiles(dx0 + fdx, dy0 + fdy, fdx, fdy)
+    if walk is None:
+        no_walk.append((h["zone"], h["kind"], h["door"], h["front"]))
+        walk = []
     for (cx, cy) in walk:
         T[cy, cx] = "-"; blocked[cy, cx] = True
     if zone in ("Оук-Хилл", "Ривер-Сайд", "За мостом") and kind == "дом":
@@ -571,7 +581,7 @@ for h in houses:
                 cells = []
                 ok = True
                 for ddx in range(3):
-                    col = path_tiles(sx + ddx, (by0 if fdy < 0 else by1) - fdy * 0, fdx, fdy, "-")
+                    col = path_tiles(sx + ddx, (by0 if fdy < 0 else by1) - fdy * 0, fdx, fdy)
                     if not col:
                         ok = False; break
                     cells += col
@@ -588,7 +598,7 @@ for h in houses:
                 cells = []
                 ok = True
                 for ddy in range(3):
-                    col = path_tiles((bx0 if fdx < 0 else bx1), sy + ddy, fdx, fdy, "-")
+                    col = path_tiles((bx0 if fdx < 0 else bx1), sy + ddy, fdx, fdy)
                     if not col:
                         ok = False; break
                     cells += col
@@ -601,10 +611,11 @@ for h in houses:
                         T[sy + 1, cx] = "c"; T[sy + 1, cx + 1] = "x"
         # почтовый ящик у дорожки, кусты у фасада, дерево во дворе
         if walk:
-            ex, ey = walk[-1]
-            mx, my = ex + fdy, ey + fdx
-            if free_cell(mx, my):
-                P("mailbox", mx + 0.5, my + 0.5, {"N": 0, "S": 180, "W": 270, "E": 90}[h["front"]]); blocked[my, mx] = True
+            ex, ey = walk[-1]                  # сбоку от дорожки у самого тротуара (клетка задевает его — потому
+            mx, my = ex + fdy, ey + fdx        # не free_cell, а своя проверка: трава и центр не на тротуаре)
+            if 0 <= mx < N and 0 <= my < N and T[my, mx] == "." and road_d[my, mx] >= 0.45 and not water[my, mx] \
+                    and occ[my, mx] < 2 and not any(abs(p[1] - mx - 0.5) < 1 and abs(p[2] - my - 0.5) < 1 for p in props[-6:]):
+                P("mailbox", mx + 0.5, my + 0.5, face(fdx, fdy)); blocked[my, mx] = True
         for k in range(random.randint(1, 3)):
             if fdy != 0:
                 cx = random.randint(bx0, bx1); cy = (by0 - 1) if fdy < 0 else (by1 + 1)
@@ -693,8 +704,8 @@ for (x0, y0, x1, y1) in PARKS:
         P("tree", x + 0.5, y0 + 2.5, random.randint(0, 359))
         P("tree", x + 4.5, y1 - 2.5, random.randint(0, 359))
     for x in range(x0 + 8, x1 - 6, 18):
-        P("bench", x + 0.5, py + 1.6, 180)
-        P("lamp", x + 5.5, py - 0.8, 0)
+        P("bench", x + 0.5, py + 1.6, face(0, 1))           # к озеру
+        P("lamp", x + 5.5, py - 0.8, face(0, 1))            # голова над дорожкой
         P("bin", x + 2.5, py + 1.6, 0)
 
 # Площадь мэрии: деревья в углах, скамейки, фонари
@@ -702,14 +713,24 @@ sx0, sy0, sx1, sy1 = SQUARE
 for (tx, ty) in [(sx0 + 2, sy0 + 2), (sx1 - 2, sy0 + 2), (sx0 + 2, sy1 - 2), (sx1 - 2, sy1 - 2)]:
     P("tree", tx + 0.5, ty + 0.5, random.randint(0, 359))
 for x in range(sx0 + 5, sx1 - 4, 6):
-    P("bench", x + 0.5, sy1 - 1.5, 0)
+    P("bench", x + 0.5, sy1 - 1.5, face(0, -1))             # лицом к мэрии
 for (lx, ly) in [(sx0 + 1, (sy0 + sy1) // 2), (sx1 - 1, (sy0 + sy1) // 2)]:
     P("lamp", lx + 0.5, ly + 0.5, 0)
 
 # ======================= УЛИЦЫ: фонари, деревья, гидранты, светофоры, «стоп» =======================
+def on_asphalt(x, y, pad):
+    """Точка на проезжей части какой-нибудь дороги (клетки под линиями — трава, по ним не узнать)"""
+    for e in lines:
+        for a2, b2 in segs(e):
+            if seg_dist(np.array([x]), np.array([y]), a2, b2)[0] < HW[e[0]] + pad:
+                return True
+    return False
+
 def try_prop(pid, x, y, rot, r=0.5):
     cx, cy = int(math.floor(x)), int(math.floor(y))
     if not (1 <= cx < N - 1 and 1 <= cy < N - 1):
+        return False
+    if on_asphalt(x, y, r):            # газетный автомат посреди перекрёстка (до 0.50, BF-065)
         return False
     if T[cy, cx] not in (".", "-", "=") or water[cy, cx]:
         return False
@@ -735,12 +756,11 @@ for e in lines:
             px, py = a[0] + tx * s, a[1] + ty * s
             side = 1 if k % 2 == 0 or kind == "highway" else -1
             off = (OW[kind] - 0.6) if kind != "bridge" else (HW[kind] + 0.4)
-            ang = int(math.degrees(math.atan2(ny * side, nx * side)))
             if kind != "bridge" or True:
                 # фонарь стоит на тротуаре/обочине, голова — к дороге
                 if not any(seg_dist(np.array([px + nx * off * side]), np.array([py + ny * off * side]), a2, b2)[0] < HW[e2[0]] + 0.3
                            for e2 in lines for a2, b2 in segs(e2) if e2 is not e):
-                    P("lamp", px + nx * off * side, py + ny * off * side, (90 - ang) % 360)
+                    P("lamp", px + nx * off * side, py + ny * off * side, face(-nx * side, -ny * side))
             # деревья вдоль улиц посёлков — на газоне за тротуаром
             if kind == "street" and not downtown(px, py):
                 for sd in (-1, 1):
@@ -751,7 +771,7 @@ for e in lines:
             # гидранты и газетные автоматы в центре
             if kind == "street" and downtown(px, py) and k % 3 == 1:
                 try_prop("hydrant", px + nx * (OW[kind] - 0.4), py + ny * (OW[kind] - 0.4), 0)
-                try_prop("newsbox", px + tx * 4 - nx * (OW[kind] - 0.4), py + ty * 4 - ny * (OW[kind] - 0.4), 0)
+                try_prop("newsbox", px + tx * 4 - nx * (OW[kind] - 0.4), py + ty * 4 - ny * (OW[kind] - 0.4), face(nx, ny))
                 try_prop("bin", px + tx * 7 - nx * (OW[kind] - 0.4), py + ty * 7 - ny * (OW[kind] - 0.4), 0)
             s += step
             k += 1
@@ -759,11 +779,12 @@ for e in lines:
 for x in AV:
     for y in ST:
         for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
-            try_prop("light", x + sx * 4.4, y + sy * 4.4, {(-1, -1): 0, (1, -1): 90, (1, 1): 180, (-1, 1): 270}[(sx, sy)])
+            # правостороннее движение: светофор на дальнем правом углу, лицом к подъезжающим
+            try_prop("light", x + sx * 4.4, y + sy * 4.4, face(*{(1, -1): (0, 1), (1, 1): (-1, 0), (-1, 1): (0, -1), (-1, -1): (1, 0)}[(sx, sy)]))
 # телефоны-автоматы и скамейки у площади и вокзала
-for (x, y) in ((250.5, 222.5), (286.5, 257.5)):
-    try_prop("phone", x, y, 0)
-try_prop("busstop", 295.0, 333.5, 90)
+for (x, y, fx, fy) in ((250.5, 222.5, 0, -1), (280.5, 256.2, 0, 1)):
+    try_prop("phone", x, y, face(fx, fy))
+try_prop("busstop", 295.0, 333.5, face(-1, 0))
 
 # ======================= ЗАПИСЬ =======================
 grid_rows = ["".join(T[y]) for y in range(N)]
@@ -771,6 +792,7 @@ data = {"v": 1, "w": N, "h": N, "spawn": [SPAWN[0], SPAWN[1]], "rows": grid_rows
 from collections import Counter
 cnt = Counter(h["zone"] for h in houses)
 print("домов:", len(houses), "с дверью:", ok_doors, dict(cnt))
+print("без дорожки к улице:", len(no_walk), no_walk[:12])
 print("объектов:", len(props), Counter(p[0] for p in props).most_common())
 raw = "/tmp/city_raw.json"
 json.dump(data, open(raw, "w"))

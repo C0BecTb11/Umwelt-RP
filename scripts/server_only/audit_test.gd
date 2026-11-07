@@ -36,6 +36,7 @@ func _ready() -> void:
 	test_stale_draft()
 	test_roofs()
 	test_city_map()
+	test_furniture_collision()
 	test_editor()
 	test_editor_resize()
 	test_remote_door()
@@ -1085,6 +1086,73 @@ func test_city_map() -> void:
 	check("Карта игры: город — не меньше 150 домов, у всех крыша, ко всем наружным дверям можно дойти от точки появления",
 		err == "" and w.buildings.size() >= 150 and noroof == 0 and doors >= w.buildings.size() and lost.is_empty(),
 		"ошибка «%s», домов %d, без крыши %d, дверей %d, недостижимы %s" % [err, w.buildings.size(), noroof, doors, lost.slice(0, 5)])
+	# дорожки (BF-063): у каждого дома хотя бы от одной наружной двери плитка идёт прямо до тротуара дороги
+	var walked := {}
+	for i in n:
+		if w.tiles[i] != W.DOOR or w.building_of[i] < 0:
+			continue
+		var dx0 := i % w.w
+		var dy0 := i / w.w
+		for k in 4:
+			var cx: int = dx0 + W.DX4[k]
+			var cy: int = dy0 + W.DY4[k]
+			var reach := false
+			for step in 26:
+				if not w.inside(cx, cy):
+					break
+				if w.on_line_road(Vector2(cx + 0.5, cy + 0.5), -1, true, 0.5):
+					reach = step > 0 or w.t(cx, cy) == W.SIDEWALK
+					break
+				if w.t(cx, cy) != W.SIDEWALK:
+					break
+				cx += W.DX4[k]
+				cy += W.DY4[k]
+			if reach:
+				walked[w.building_of[i]] = true
+	var nowalk := []
+	for bi in w.buildings.size():
+		if not walked.has(bi):
+			nowalk.append(w.buildings[bi].slice(0, 2))
+	var on_road := []
+	for e in w.props:
+		if w.on_line_road(Vector2(float(e[1]), float(e[2])), -1):
+			on_road.append(e)
+	# BF-065: газетный автомат и урна стояли посреди перекрёстка (клетки под дорогой-линией — трава)
+	check("Карта игры: объекты не стоят на проезжей части (фонарь, автомат, урна — только на тротуаре)",
+		on_road.is_empty(), "на дороге: %d %s" % [on_road.size(), on_road.slice(0, 5)])
+	check("Карта игры: от каждого дома дорожка доходит до тротуара улицы",
+		nowalk.is_empty(), "без дорожки: %d %s" % [nowalk.size(), nowalk.slice(0, 6)])
+
+## Мебель у стены (BF-066): столкновение — до её лицевой стороны, а не вся клетка; лицо в 3D совпадает с FURN_FRONT;
+## мебель посреди комнаты занимает всю клетку
+func test_furniture_collision() -> void:
+	var w := GameWorld.new()
+	var rows := []
+	for y in 30:
+		rows.append(("#" + "w".repeat(10) + "#" if y > 0 and y < 8 else "#".repeat(12)) + ".".repeat(18) if y < 9 else ".".repeat(30))
+	var err := w.load_map({"v": 1, "w": 30, "h": 30, "spawn": [5.5, 4.5], "rows": rows, "props": []})
+	var types := [W.FRIDGE, W.COUNTER, W.WARDROBE, W.SHELF, W.MEDCAB, W.LOCKER, W.STORESHELF]
+	var bad := []
+	var wm := WorldMesh.new(w)
+	for i in types.size():
+		var tt: int = types[i]
+		var y := 1 + i
+		w.set_t(1, y, tt)              # у западной стены — лицом на восток (+x)
+		var front: float = 1.5 + float(W.FURN_FRONT[tt])
+		if w.circle_blocked(front + 0.32, y + 0.5, 0.3) or not w.circle_blocked(front + 0.27, y + 0.5, 0.3):
+			bad.append("столкновение %d" % tt)
+		var m := Mesher.new()
+		wm._furniture(m, 1, y, tt)
+		var mx := -100.0
+		for v in m.verts:
+			mx = maxf(mx, v.x)
+		if absf(mx - front) > 0.04:
+			bad.append("лицо %d: 3D %.2f, FURN_FRONT %.2f" % [tt, mx, front])
+		w.set_t(1, y, W.WOOD)
+	w.set_t(6, 4, W.COUNTER)           # посреди комнаты
+	if not w.circle_blocked(7.28, 4.5, 0.3) or w.circle_blocked(7.32, 4.5, 0.3):
+		bad.append("посреди комнаты")
+	check("Мебель у стены: упираешься в её лицо, а не в невидимую стену; посреди комнаты — вся клетка", err == "" and bad.is_empty(), err + str(bad))
 
 ## Крыши (0.47, BF-060): над недостроенным домом (стены не замкнуты) крыши нет; над закрытым — в пределах стен
 ## со свесом; у дома буквой Г пустой угол рядом не накрыт

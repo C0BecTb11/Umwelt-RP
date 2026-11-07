@@ -266,8 +266,7 @@ func _floor_top(m: Mesher, t: int, x: int, y: int, x0: float, z0: float, x1: flo
 				continue
 			m.flat(x0, cz0, x1, cz1 - 0.01, h, jit(c(0x8E6842), hv * (k + 3), 0.08))
 			m.flat(x0, cz1 - 0.01, x1, cz1, h, c(0x5E4428))
-		if hv % 53 == 0 and x1 - x0 > 0.9:
-			m.flat(x0 + 0.1, z0 + 0.1, x1 - 0.1, z1 - 0.1, h + 0.01, c([0x8A3A30, 0x3A5070, 0x6A5A30][hv % 3]))
+		# до 0.50 тут был случайный «коврик» в каждой ~53-й клетке — на полу выглядел цветным квадратом (BF-062)
 
 func _ground_under_wall(m: Mesher, x: int, y: int) -> void:
 	var out := W.GRASS
@@ -402,17 +401,12 @@ func _seg(m: Mesher, x: int, y: int, horiz: bool, y0: float, y1: float, col: Col
 
 func _furniture(m: Mesher, x: int, y: int, t: int) -> void:
 	# спиной к стене, лицом в комнату (если стен несколько — к той, напротив которой свободно)
+	# направление — то же, по которому считается столкновение (GameWorld.furniture_dir, FURN_FRONT)
 	var yaw := 0.0
-	var best := -1
-	for k in 4:
-		var bt := w.t(x - W.DX4[k], y - W.DY4[k])
-		var front := W.is_floor(w.t(x + W.DX4[k], y + W.DY4[k]))
-		if W.wall_like(bt) or bt == W.WALL:
-			var score := (2 if front else 0) + (1 if bt == W.WALL else 0)
-			if score > best:
-				best = score
-				yaw = rad_to_deg(atan2(W.DX4[k], W.DY4[k]))
-	if best < 0:
+	var best := w.furniture_dir(x, y)
+	if best >= 0:
+		yaw = rad_to_deg(atan2(W.DX4[best], W.DY4[best]))
+	else:
 		for k in 4:
 			if W.is_floor(w.t(x + W.DX4[k], y + W.DY4[k])):
 				yaw = rad_to_deg(atan2(W.DX4[k], W.DY4[k]))

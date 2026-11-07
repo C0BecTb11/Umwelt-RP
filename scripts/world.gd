@@ -80,6 +80,25 @@ func opaque(x: int, y: int) -> bool:
 	var tt := t(x, y)
 	return tt == WALL or tt == DOOR or (is_furniture(tt) and tt != COUNTER)
 
+## Мебель у стены стоит к ней вплотную (world_mesh._furniture), её лицевая сторона — на столько метров
+## от центра клетки в сторону комнаты. Столкновение — от задней кромки клетки до лица, а не вся клетка:
+## иначе перед шкафом была невидимая стена до полуметра (BF-066). Меняешь модель или сдвиг — поправь и тут
+const FURN_FRONT := {FRIDGE: -0.19, COUNTER: -0.12, WARDROBE: -0.30, SHELF: -0.47, MEDCAB: -0.51, LOCKER: -0.37, STORESHELF: -0.04}
+
+## Куда смотрит мебель в клетке: индекс в DX4/DY4 (спиной к стене, лицом в комнату; из нескольких стен —
+## та, напротив которой пол, и лучше глухая). -1 — у стены не стоит (тогда без сдвига, занимает всю клетку)
+func furniture_dir(x: int, y: int) -> int:
+	var best := -1
+	var dir := -1
+	for k in 4:
+		var bt := t(x - DX4[k], y - DY4[k])
+		if wall_like(bt):
+			var score := (2 if is_floor(t(x + DX4[k], y + DY4[k])) else 0) + (1 if bt == WALL else 0)
+			if score > best:
+				best = score
+				dir = k
+	return dir
+
 func circle_blocked(cx: float, cy: float, r: float) -> bool:
 	if not (is_finite(cx) and is_finite(cy)):
 		return true          # нечисловая точка — «занято»: иначе все сравнения ниже ложны и пропускают (BF-028)
@@ -97,8 +116,22 @@ func circle_blocked(cx: float, cy: float, r: float) -> bool:
 					if Vector2(cx - c.x, cy - c.y).length_squared() < (r + c.z) * (r + c.z):
 						return true
 				continue
-			var nx := clampf(cx, x, x + 1.0)
-			var ny := clampf(cy, y, y + 1.0)
+			var rx0 := float(x)
+			var rx1 := x + 1.0
+			var ry0 := float(y)
+			var ry1 := y + 1.0
+			var tt: int = tiles[y * w + x] if inside(x, y) else WALL
+			if is_furniture(tt):
+				var k := furniture_dir(x, y)
+				if k >= 0:
+					var depth: float = maxf(0.5 + float(FURN_FRONT.get(tt, 0.0)), 0.0)
+					match k:
+						0: rx1 = x + depth
+						1: rx0 = x + 1.0 - depth
+						2: ry1 = y + depth
+						3: ry0 = y + 1.0 - depth
+			var nx := clampf(cx, rx0, rx1)
+			var ny := clampf(cy, ry0, ry1)
 			var dx := cx - nx
 			var dy := cy - ny
 			if dx * dx + dy * dy < r * r:
