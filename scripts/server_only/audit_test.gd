@@ -35,6 +35,7 @@ func _ready() -> void:
 	test_overview()
 	test_stale_draft()
 	test_roofs()
+	test_city_map()
 	test_editor()
 	test_editor_resize()
 	test_remote_door()
@@ -1040,6 +1041,50 @@ func test_map_pack() -> void:
 		err == "" and (bp[0] as PackedByteArray).size() < bp[1] / 3 and (t1 - t0) < 500000 and (t2 - t1) < 500000,
 		"ошибка «%s»; %d КБ из %d КБ; сжатие %d мс, распаковка %d мс" % [err, (bp[0] as PackedByteArray).size() / 1024, int(bp[1]) / 1024, (t1 - t0) / 1000, (t2 - t1) / 1000])
 	check("Карта при входе: испорченные данные не роняют игру", GameState.unpack_map(PackedByteArray([1, 2, 3]), 100) == null and GameState.unpack_map(PackedByteArray(), 999999999) == null)
+
+## Карта игры (0.49, город из docs/tools/build_city.py): не меньше 150 домов, у каждого крыша, к каждой наружной
+## двери можно дойти пешком от точки появления (двери открываются; вода — только по мосту)
+func test_city_map() -> void:
+	var w := GameWorld.new()
+	var err := w.load_map(JSON.parse_string(FileAccess.get_file_as_string(GameWorld.MAP_PATH)))
+	var wm := WorldMesh.new(w)
+	var m := Mesher.new()
+	var noroof := 0
+	for bi in w.buildings.size():
+		wm.build_roof(m, bi)
+		if m.verts.size() == 0:
+			noroof += 1
+	var n := w.w * w.h
+	var ok := PackedByteArray()
+	ok.resize(n)
+	for y in w.h:
+		for x in w.w:
+			if w.t(x, y) == W.DOOR or not w.circle_blocked(x + 0.5, y + 0.5, 0.3):
+				ok[y * w.w + x] = 1
+	var seen := PackedByteArray()
+	seen.resize(n)
+	var s0 := int(w.spawn.y) * w.w + int(w.spawn.x)
+	var q := PackedInt32Array([s0])
+	seen[s0] = 1
+	var head := 0
+	while head < q.size():
+		var i := q[head]
+		head += 1
+		var x := i % w.w
+		for nb in [i - 1 if x > 0 else -1, i + 1 if x < w.w - 1 else -1, i - w.w, i + w.w]:
+			if nb >= 0 and nb < n and seen[nb] == 0 and ok[nb] == 1:
+				seen[nb] = 1
+				q.append(nb)
+	var doors := 0
+	var lost := []
+	for i in n:
+		if w.tiles[i] == W.DOOR:
+			doors += 1
+			if seen[i] == 0:
+				lost.append(Vector2i(i % w.w, i / w.w))
+	check("Карта игры: город — не меньше 150 домов, у всех крыша, ко всем наружным дверям можно дойти от точки появления",
+		err == "" and w.buildings.size() >= 150 and noroof == 0 and doors >= w.buildings.size() and lost.is_empty(),
+		"ошибка «%s», домов %d, без крыши %d, дверей %d, недостижимы %s" % [err, w.buildings.size(), noroof, doors, lost.slice(0, 5)])
 
 ## Крыши (0.47, BF-060): над недостроенным домом (стены не замкнуты) крыши нет; над закрытым — в пределах стен
 ## со свесом; у дома буквой Г пустой угол рядом не накрыт
