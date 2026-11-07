@@ -37,6 +37,7 @@ func _ready() -> void:
 	test_roofs()
 	test_city_map()
 	test_furniture_collision()
+	test_attack_walk()
 	test_editor()
 	test_editor_resize()
 	test_remote_door()
@@ -1122,6 +1123,66 @@ func test_city_map() -> void:
 		on_road.is_empty(), "на дороге: %d %s" % [on_road.size(), on_road.slice(0, 5)])
 	check("Карта игры: от каждого дома дорожка доходит до тротуара улицы",
 		nowalk.is_empty(), "без дорожки: %d %s" % [nowalk.size(), nowalk.slice(0, 6)])
+
+## Удар на ходу (0.51, BF-067): ноги идут анимацией ходьбы, удар — только верхом тела; стоя — удар целиком;
+## пошёл посреди удара — удар доигрывает верхом, ноги шагают; добивание ногой — всегда целиком
+func test_attack_walk() -> void:
+	var bad := []
+	var dt := 1.0 / 30.0
+	var step := func(cm: CharModel, moving: float, attack: float) -> void:
+		cm.pose_dt(dt, moving, attack, "fists", false, false)
+		cm.ap.advance(dt)
+	# идёт и бьёт
+	var cm := CharModel.new()
+	cm.setup(GameState.default_look(1, "m"))
+	add_child(cm)
+	cm.speed = 1.6
+	for i in 10:
+		step.call(cm, 1.0, 0.0)
+	var leg := cm.skel.find_bone("UpperLeg.L")
+	var arm := cm.skel.find_bone("UpperArm.R")
+	var legs := []
+	for i in 9:
+		step.call(cm, 1.0, 5.0)
+		legs.append(cm.skel.get_bone_pose_rotation(leg))
+	if cm.layer_anim == "" or cm.ap.current_animation != "Walk":
+		bad.append("на ходу: удар «%s», ноги «%s»" % [cm.layer_anim, cm.ap.current_animation])
+	elif (legs[0] as Quaternion).angle_to(legs[8]) < 0.05:
+		bad.append("ноги не двигаются во время удара")
+	else:
+		var anim := cm.ap.get_animation(cm.layer_anim)
+		var tr := anim.find_track(NodePath("CharacterArmature/Skeleton3D:UpperArm.R"), Animation.TYPE_ROTATION_3D)
+		var want := anim.rotation_track_interpolate(tr, cm.layer_t)
+		if cm.skel.get_bone_pose_rotation(arm).angle_to(want) > 0.05:
+			bad.append("рука не по удару")
+	for i in 40:
+		step.call(cm, 1.0, 5.0)
+	if cm.layer_anim != "":
+		bad.append("удар поверх ходьбы не закончился")
+	cm.queue_free()
+	# стоит и бьёт — анимация целиком; пошёл посреди удара — удар верхом, ноги — шаг
+	var c2 := CharModel.new()
+	c2.setup(GameState.default_look(2, "f"))
+	add_child(c2)
+	c2.speed = 0.0
+	step.call(c2, 0.0, 0.0)
+	step.call(c2, 0.0, 5.0)
+	step.call(c2, 0.0, 5.0)
+	if not c2.ap.current_animation.begins_with("Punch") or c2.layer_anim != "":
+		bad.append("стоя: «%s» / «%s»" % [c2.ap.current_animation, c2.layer_anim])
+	c2.speed = 1.5
+	step.call(c2, 1.0, 5.0)
+	if c2.layer_anim == "" or c2.ap.current_animation != "Walk":
+		bad.append("пошла посреди удара: «%s» / «%s»" % [c2.ap.current_animation, c2.layer_anim])
+	# добивание ногой на ходу — целиком
+	c2.atk_kind = 1
+	for i in 40:
+		step.call(c2, 1.0, 5.0)
+	step.call(c2, 1.0, 9.0)
+	if c2.ap.current_animation != "Kick_Right" or c2.layer_anim != "":
+		bad.append("пинок: «%s» / «%s»" % [c2.ap.current_animation, c2.layer_anim])
+	c2.queue_free()
+	check("Удар на ходу: ноги шагают, удар — верхом тела; стоя — целиком; пинок — целиком", bad.is_empty(), str(bad))
 
 ## Мебель у стены (BF-066): столкновение — до её лицевой стороны, а не вся клетка; лицо в 3D совпадает с FURN_FRONT;
 ## мебель посреди комнаты занимает всю клетку

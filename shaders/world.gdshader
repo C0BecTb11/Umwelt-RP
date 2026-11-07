@@ -4,6 +4,8 @@ render_mode cull_back, diffuse_lambert, specular_disabled;
 uniform vec3 player_pos = vec3(50.0, 0.0, 50.0);
 uniform vec2 cam_back = vec2(0.0, 1.0);
 uniform float cut = 1.0;
+uniform float cut_len = 7.0;   // докуда прорезать стены к камере, м: в доме — далеко (видна комната), на улице — коротко
+uniform float cut_w = 2.2;     // полуширина прорези у игрока, м
 uniform float night = 0.0;
 uniform vec3 sun_dir = vec3(0.3, 0.85, 0.4);   // к солнцу (мировые оси), задаёт world_view.gd — блики на воде
 // текстуры мира: слои 512×512 (assets/tex/world_albedo.png, сборка — docs/tools/build_textures.py)
@@ -43,7 +45,7 @@ void fragment() {
 		vec2 d = wpos.xz - player_pos.xz;
 		float along = dot(d, cam_back);
 		float side = abs(d.x * cam_back.y - d.y * cam_back.x);
-		if (along > 0.2 && along < 7.0 && side < 2.2 + along * 0.25) discard;
+		if (along > 0.2 && along < cut_len && side < cut_w + along * 0.25) discard;
 	}
 	vec3 c = to_linear(COLOR.rgb);
 	// материал: 0 — только цвет; 1.. — слой текстуры + 1. Текстура ложится по мировым координатам

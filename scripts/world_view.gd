@@ -47,6 +47,10 @@ var flashes: Array = []       # [x, z, life]
 var cam_yaw := 35.0
 var cam_d := 15.5            # расстояние камеры (для демо-снимков крупным планом)
 var cam_pitch := 54.0        # наклон камеры (редактор карты смотрит круче)
+const CUT_IN := [7.0, 2.2]     # прорезь стен в доме: длина к камере, полуширина (м)
+const CUT_OUT := [2.4, 0.8]    # на улице
+var cut_len_k := 2.4
+var cut_w_k := 0.8
 var hide_roofs := false      # редактор карты: крыши убраны, видно комнаты
 var cam_x := NAN
 var cam_z := 0.0
@@ -529,6 +533,14 @@ func _place_scene(g: GameState, me: GameState.Player, dt: float) -> void:
 	mat_world.set_shader_parameter("player_pos", Vector3(me.rpos.x, 1.0, me.rpos.y))
 	mat_world.set_shader_parameter("cam_back", Vector2(sin(yaw), cos(yaw)))
 	mat_world.set_shader_parameter("cut", 0.0 if me.dead else 1.0)
+	# прорезь в стенах (BF-068): в доме — широкая и длинная, чтобы видеть комнату; на улице — только там, где стена
+	# правда закрывает человека (камера смотрит круто — дальше ~2 м стена его уже не прячет), иначе у угла дома
+	# пропадал кусок стены, будто заходишь внутрь. Переход плавный
+	var cin := inside_building >= 0
+	cut_len_k = move_toward(cut_len_k, CUT_IN[0] if cin else CUT_OUT[0], dt * 20.0)
+	cut_w_k = move_toward(cut_w_k, CUT_IN[1] if cin else CUT_OUT[1], dt * 6.0)
+	mat_world.set_shader_parameter("cut_len", cut_len_k)
+	mat_world.set_shader_parameter("cut_w", cut_w_k)
 	mat_world.set_shader_parameter("night", dark)
 	# ---------- фонари ----------
 	var lk := smoothstep(0.15, 0.5, dark)
