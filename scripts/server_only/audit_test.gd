@@ -1115,14 +1115,17 @@ func _road_world() -> GameWorld:
 		rows.append(r + ".".repeat(80))
 	md["rows"] = rows
 	md["w"] = int(md["w"]) + 80
-	md["lines"] = [["street", 110.0, 20.0, 130.0, 20.0, 150.0, 30.0, 160.0, 50.0], ["highway", 140.0, 5.0, 142.0, 60.0, 150.0, 95.0]]
+	md["lines"] = [["street", 110.0, 20.0, 130.0, 20.0, 150.0, 30.0, 160.0, 50.0], ["highway", 140.0, 5.0, 142.0, 60.0, 150.0, 95.0],
+		# крутые повороты и петля через саму себя (BF-057: вывернутые треугольники, щели, тротуар поверх асфальта)
+		["street", 110.0, 70.0, 128.0, 70.0, 131.0, 75.0, 116.0, 80.0, 121.0, 62.0],
+		["highway", 160.0, 70.0, 172.0, 72.0, 166.0, 80.0, 158.0, 74.0, 170.0, 64.0]]
 	var w := GameWorld.new()
 	var err := w.load_map(md)
 	return w if err == "" else null
 
 func test_road_lines() -> void:
 	var w := _road_world()
-	check("Дороги: карта с дорогами-линиями грузится", w != null and w.lines.size() == 2)
+	check("Дороги: карта с дорогами-линиями грузится", w != null and w.lines.size() == 4)
 	if w == null:
 		return
 	# туда-обратно через текст файла
@@ -1166,27 +1169,86 @@ func test_road_lines() -> void:
 	check("Дороги: асфальт и обочина находятся по точке", w.on_line_road(Vector2(120, 20), -1) and not w.on_line_road(Vector2(120, 24), -1)
 		and w.on_line_road(Vector2(120, 24), -1, true) and not w.on_line_road(Vector2(120, 30), -1, true))
 	check("Дороги: по дороге-линии можно ходить (она не стена)", not w.circle_blocked(120.0, 20.0, GameState.PLAYER_R))
-	# перекрёсток улицы и трассы: тротуар улицы не ложится на асфальт трассы
+	# что видно сверху (BF-057): на асфальте любой линии сверху — асфальт или разметка (не тротуар и не обочина),
+	# асфальт без дыр, все поверхности дорог смотрят вверх — на перекрёстке, крутых поворотах и петле
 	var wm := WorldMesh.new(w)
 	var m := Mesher.new()
-	var crossing := -1
-	var on_other := 0
+	var holes := 0
+	var side_on_top := 0
+	var down := 0
 	var asphalt := 0
+	var probes := 0
+	var bins := {}             # треугольники дорог всех кусков по клеткам 1×1 (кусок дороги лежит в куске графики по середине)
+	# концы дорог (плоский срез) — у них точки «рядом с отрезком» за срезом не проверяем
+	var ends := []
+	var last := {}
+	for ck in w.lines_chunk:
+		for r in w.lines_chunk[ck]:
+			if float(r[5]) == 0.0:
+				ends.append(r[1])
+			if not last.has(r[7]) or float(r[6]) > float(last[r[7]][6]):
+				last[r[7]] = r
+	for li in last:
+		ends.append(last[li][2])
 	for ck in w.lines_chunk:
 		m.clear()
 		wm.build_chunk(m, ck.x, ck.y)
 		for i in range(0, m.verts.size(), 3):
 			var c3: Vector3 = (m.verts[i] + m.verts[i + 1] + m.verts[i + 2]) / 3.0
+			if c3.y < 0.025 or c3.y > 0.06:
+				continue
+			var nrm3: Vector3 = (m.verts[i + 1] - m.verts[i]).cross(m.verts[i + 2] - m.verts[i])
+			# порядок вершин в Mesher обратный: «лицом вверх» — нормаль по обходу вниз
+			if nrm3.y > 0.0:
+				down += 1
 			var mt := int(m.uvs[i].x)
-			if mt == Mesher.M_ASPHALT and c3.y > 0.015:
+			if mt == Mesher.M_ASPHALT:
 				asphalt += 1
-			if mt == Mesher.M_CONCRETE and absf(c3.y - WorldMesh.LINE_SIDE_Y) < 0.02:
-				var c2 := Vector2(c3.x, c3.z)
-				# тротуар улицы (линия 0) поверх трассы (линия 1), с запасом 0.5 м от края
-				if Geometry2D.get_closest_point_to_segment(c2, Vector2(140, 5), Vector2(142, 60)).distance_to(c2) < GameWorld.LINE_ROAD_HW["highway"] - 0.5:
-					on_other += 1
-	check("Дороги: асфальт строится, на перекрёстке тротуар не лежит поперёк другой дороги", asphalt > 100 and on_other == 0,
-		"асфальт %d, тротуара на трассе %d" % [asphalt, on_other])
+			var t2 := [Vector2(m.verts[i].x, m.verts[i].z), Vector2(m.verts[i + 1].x, m.verts[i + 1].z), Vector2(m.verts[i + 2].x, m.verts[i + 2].z), c3.y, mt]
+			var lo := Vector2(minf(minf(t2[0].x, t2[1].x), t2[2].x), minf(minf(t2[0].y, t2[1].y), t2[2].y))
+			var hi := Vector2(maxf(maxf(t2[0].x, t2[1].x), t2[2].x), maxf(maxf(t2[0].y, t2[1].y), t2[2].y))
+			for by in range(floori(lo.y), floori(hi.y) + 1):
+				for bx in range(floori(lo.x), floori(hi.x) + 1):
+					var bk := Vector2i(bx, by)
+					if bins.has(bk):
+						bins[bk].append(t2)
+					else:
+						bins[bk] = [t2]
+	for ck in w.lines_chunk:
+		for py in range(ck.y * WorldMesh.CHUNK, (ck.y + 1) * WorldMesh.CHUNK):
+			for px in range(ck.x * WorldMesh.CHUNK, (ck.x + 1) * WorldMesh.CHUNK):
+				for o in [Vector2(0.25, 0.25), Vector2(0.75, 0.75)]:
+					var p: Vector2 = Vector2(px, py) + o
+					# точка на асфальте какой-то линии (с запасом 0.1 м от края асфальта)
+					var on := false
+					for r in w.lines_chunk.get(ck, []) + w.lines_chunk.get(ck + Vector2i(1, 0), []) + w.lines_chunk.get(ck + Vector2i(-1, 0), []) + w.lines_chunk.get(ck + Vector2i(0, 1), []) + w.lines_chunk.get(ck + Vector2i(0, -1), []):
+						var hw: float = GameWorld.LINE_ROAD_HW[r[0]] - 0.1
+						if Geometry2D.get_closest_point_to_segment(p, r[1], r[2]).distance_squared_to(p) < hw * hw:
+							on = true
+					for ep in ends:
+						if p.distance_to(ep) < 7.0:
+							on = false
+					if not on:
+						continue
+					probes += 1
+					var top_y := -1.0
+					var top_m := -1
+					for t2 in bins.get(Vector2i(px, py), []):
+						# точка ровно на общей стороне двух треугольников не «внутри» ни одного — сдвиги на ~1 см
+						var inside := false
+						for q in [p, p + Vector2(0.007, 0.011), p + Vector2(-0.009, 0.006)]:
+							if Geometry2D.point_is_inside_triangle(q, t2[0], t2[1], t2[2]):
+								inside = true
+						if inside and t2[3] > top_y:
+							top_y = t2[3]
+							top_m = t2[4]
+					if top_m < 0:
+						holes += 1
+					elif top_m != Mesher.M_ASPHALT and top_m != Mesher.M_NONE:
+						side_on_top += 1
+	check("Дороги: на асфальте сверху — асфальт (не тротуар), без дыр, всё лицом вверх — перекрёсток, крутые повороты, петля",
+		asphalt > 100 and probes > 500 and holes == 0 and side_on_top == 0 and down == 0,
+		"точек %d: дыр %d, тротуар/обочина сверху %d; вывернутых треугольников %d" % [probes, holes, side_on_top, down])
 	# камешки и травинки клеток под дорогой не торчат из асфальта и тротуара (были в первой сборке 0.38)
 	var poke := 0
 	for ck in w.lines_chunk:
@@ -1194,7 +1256,9 @@ func test_road_lines() -> void:
 		wm.build_chunk(m, ck.x, ck.y)
 		for i in range(0, m.verts.size(), 3):
 			var c3: Vector3 = (m.verts[i] + m.verts[i + 1] + m.verts[i + 2]) / 3.0
-			if int(m.uvs[i].x) == Mesher.M_NONE and c3.y > 0.03 and c3.y < 0.4 and w.on_line_road(Vector2(c3.x, c3.z), -1, true):
+			# поверхности дорог — не выше 0.06 и лицом вверх; камешки и травинки — выше или стенками
+			var up := absf(((m.verts[i + 1] - m.verts[i]).cross(m.verts[i + 2] - m.verts[i])).normalized().y) > 0.99
+			if int(m.uvs[i].x) == Mesher.M_NONE and c3.y > 0.025 and c3.y < 0.4 and (c3.y > 0.06 or not up) and w.on_line_road(Vector2(c3.x, c3.z), -1, true):
 				poke += 1
 	check("Дороги: камешки и травинки не торчат из дороги", poke == 0, "треугольников на дороге: %d" % poke)
 	# редактор: точки, вид, отмена, удаление

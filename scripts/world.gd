@@ -386,7 +386,8 @@ static func line_path(e: Array) -> PackedVector2Array:
 			prev = q
 	return out
 
-## Куски кривых по кускам графики: Vector2i → [[вид, A, B, нормаль A, нормаль B, путь до A, до B, номер линии]]
+## Куски кривых по кускам графики: Vector2i → [[вид, A, B, нормаль куска, она же, путь до A, до B, номер линии,
+## нормаль предыдущего куска или null]]
 var lines_chunk := {}
 
 func index_lines() -> void:
@@ -401,18 +402,20 @@ func index_lines() -> void:
 		var t1 := (path[path.size() - 1] - path[path.size() - 2]).normalized()
 		path.insert(0, path[0] + t0 * 0.3)
 		path.append(path[path.size() - 1] + t1 * 0.3)
-		var nrm := PackedVector2Array()
-		for i in path.size():
-			var d := path[mini(i + 1, path.size() - 1)] - path[maxi(i - 1, 0)]
-			nrm.append(Vector2(-d.y, d.x).normalized() if d.length_squared() > 1e-8 else Vector2.UP)
 		var s := 0.0
+		var prev_n = null
 		for i in path.size() - 1:
 			var a := path[i]
 			var b := path[i + 1]
 			var ds := a.distance_to(b)
+			if ds < 1e-4:
+				continue
+			# нормаль самого куска (прямоугольник не выворачивается) и нормаль предыдущего — для клина на стыке
+			var n := Vector2(a.y - b.y, b.x - a.x) / ds
 			var mid := (a + b) * 0.5
 			var ck := Vector2i(floori(mid.x) / PROP_CHUNK, floori(mid.y) / PROP_CHUNK)
-			var rec := [e[0], a, b, nrm[i], nrm[i + 1], s, s + ds, li]
+			var rec := [e[0], a, b, n, n, s, s + ds, li, prev_n]
+			prev_n = n
 			if lines_chunk.has(ck):
 				lines_chunk[ck].append(rec)
 			else:
@@ -421,12 +424,13 @@ func index_lines() -> void:
 
 ## Точка на асфальте другой линии (кроме номера skip): там не рисуются тротуары и разметка — перекрёсток.
 ## outer — вместе с тротуарами/обочинами (там не рисуются камешки и травинки клетки под дорогой); pad — запас, м
-func on_line_road(p: Vector2, skip: int, outer: bool = false, pad: float = 0.0) -> bool:
+func on_line_road(p: Vector2, skip: int, outer: bool = false, pad: float = 0.0, s_self: float = -1.0) -> bool:
 	var ck := Vector2i(floori(p.x) / PROP_CHUNK, floori(p.y) / PROP_CHUNK)
 	for dy in range(-1, 2):
 		for dx in range(-1, 2):
 			for r in lines_chunk.get(ck + Vector2i(dx, dy), []):
-				if r[7] == skip:
+				# своя дорога: пропустить, кроме кусков далеко по пути (петля, s_self >= 0)
+				if r[7] == skip and (s_self < 0.0 or absf((float(r[5]) + float(r[6])) * 0.5 - s_self) < 25.0):
 					continue
 				var hw: float = (LINE_OUTER_HW[r[0]] if outer else LINE_ROAD_HW[r[0]]) + pad
 				if Geometry2D.get_closest_point_to_segment(p, r[1], r[2]).distance_squared_to(p) < hw * hw:

@@ -604,31 +604,73 @@ static func build_door(m: Mesher) -> void:
 	m.box(Vector3(0.72, 1.0, -0.05), Vector3(0.05, 0.05, 0.06), c(0xE0C050, 0))
 
 # ================== ДОРОГИ-ЛИНИИ ==================
-const LINE_ROAD_Y := 0.02      # асфальт линии чуть выше травы и клеточной дороги
-const LINE_SIDE_Y := 0.07      # тротуар линии
-const LINE_MARK_Y := 0.027     # разметка
+## Дорога — стопка «мазков» одной кривой, каждый уже и выше предыдущего: тротуар/обочина → бордюр → асфальт
+## (у трассы ещё белая кромка и асфальт поверх). Мазок = прямоугольник на каждый кусок + клин на стыке кусков,
+## поэтому на крутом повороте нет ни щелей, ни вывернутых треугольников, а где дорога ложится на дорогу
+## (перекрёсток, петля, крутой поворот) — верхний асфальт сам закрывает чужие и свои тротуары (BF-057)
+const LINE_SIDE_Y := 0.03      # тротуар / обочина линии
+const LINE_CURB_Y := 0.035     # полоса бордюра
+const LINE_SHOULDER_Y := 0.0375  # обочина трассы: выше тротуара и бордюра улицы (на въезде улицы на трассу
+                                 # не мерцают вперемешку), но ниже асфальта — асфальт улицы идёт через обочину
+const LINE_ROAD_Y := 0.04      # асфальт
+const LINE_EDGE_Y := 0.045     # трасса: белая кромка
+const LINE_TOP_Y := 0.05       # трасса: асфальт поверх кромки
+const LINE_MARK_Y := 0.056     # разметка
+const LINE_SELF_WIN := 25.0    # своя же дорога дальше этого по пути — как чужая (петля): разметку на ней не рисуем
+const WEDGE_STEP := 0.26       # шаг дуги клина на стыке, рад (~15°)
+const LINE_OVERLAP := 0.05     # мазок заходит на соседние куски на столько (м): швов между кусками нет вовсе
 
 ## Плоский четырёхугольник лицом вверх (порядок точек любой, по кругу)
 static func _up_quad(m: Mesher, a: Vector2, b: Vector2, c: Vector2, d: Vector2, y: float, col: Color) -> void:
+	_up_tri_q(m, a, b, c, y, col)
+	_up_tri_q(m, a, c, d, y, col)
+
+static func _up_tri_q(m: Mesher, a: Vector2, b: Vector2, cc: Vector2, y: float, col: Color) -> void:
 	var A := Vector3(a.x, y, a.y)
 	var B := Vector3(b.x, y, b.y)
-	var C := Vector3(c.x, y, c.y)
-	var D := Vector3(d.x, y, d.y)
-	if (B - A).cross(C - A).y < 0.0:
-		m.quad(A, D, C, B, col)
+	var C := Vector3(cc.x, y, cc.y)
+	var cr := (B - A).cross(C - A).y
+	if absf(cr) < 1e-9:
+		return
+	if cr > 0.0:
+		m.tri(A, B, C, col)
 	else:
-		m.quad(A, B, C, D, col)
+		m.tri(A, C, B, col)
 
-## Полоса вдоль куска кривой между смещениями o1..o2 от оси (м, со знаком)
-static func _band(m: Mesher, r: Array, o1: float, o2: float, y: float, col: Color) -> void:
+## Полоса вдоль куска между смещениями o1..o2 от оси (м, со знаком) — по нормали самого куска
+static func _band(m: Mesher, r: Array, o1: float, o2: float, y: float, col: Color, ext := 0.0) -> void:
 	var a: Vector2 = r[1]
 	var b: Vector2 = r[2]
-	var na: Vector2 = r[3]
-	var nb: Vector2 = r[4]
-	_up_quad(m, a + na * o1, a + na * o2, b + nb * o2, b + nb * o1, y, col)
+	var n: Vector2 = r[3]
+	if ext > 0.0:
+		var t := Vector2(n.y, -n.x) * signf((b - a).dot(Vector2(n.y, -n.x))) * ext
+		a -= t
+		b += t
+	_up_quad(m, a + n * o1, a + n * o2, b + n * o2, b + n * o1, y, col)
 
-## Один кусок (~1 м) дороги-линии: асфальт, края, разметка. На чужом асфальте (перекрёсток) края и разметку
-## не рисуем — иначе тротуар одной дороги лёг бы поперёк другой
+## Мазок шириной 2·hw: прямоугольник куска (чуть заходит на соседей — LINE_OVERLAP) + клинья на стыке
+## с предыдущим куском (с обеих сторон). Без нахлёста стыки кусков давали щели в долю пикселя, и сквозь все слои
+## трассы точками светился светлый тротуар улицы под ней
+static func _stroke(m: Mesher, r: Array, hw: float, y: float, col: Color) -> void:
+	_band(m, r, -hw, hw, y, col, LINE_OVERLAP)
+	var np = r[8]
+	if np == null:
+		return
+	var a: Vector2 = r[1]
+	var n: Vector2 = r[3]
+	var ang := (np as Vector2).angle_to(n)
+	if absf(ang) < 0.002:
+		return
+	var steps := maxi(1, ceili(absf(ang) / WEDGE_STEP))
+	for sd in [1.0, -1.0]:
+		var o: float = sd * hw
+		var prev: Vector2 = a + (np as Vector2) * o
+		for k in range(1, steps + 1):
+			var cur: Vector2 = a + n * o if k == steps else a + (np as Vector2).rotated(ang * k / steps) * o
+			_up_tri_q(m, a, prev, cur, y, col)
+			prev = cur
+
+## Один кусок (~1 м) дороги-линии
 func _line_seg(m: Mesher, r: Array) -> void:
 	var kind: String = r[0]
 	var hw: float = GameWorld.LINE_ROAD_HW[kind]
@@ -636,46 +678,30 @@ func _line_seg(m: Mesher, r: Array) -> void:
 	var a: Vector2 = r[1]
 	var b: Vector2 = r[2]
 	var mid := (a + b) * 0.5
-	var nm: Vector2 = ((r[3] as Vector2) + (r[4] as Vector2)).normalized()
 	var li: int = r[7]
 	var s_mid: float = (float(r[5]) + float(r[6])) * 0.5
-	m.mat = Mesher.M_ASPHALT
-	_band(m, r, -hw, hw, LINE_ROAD_Y, c(0x3C3D40))
-	var free_mid := not w.on_line_road(mid, li)
-	for side in [-1.0, 1.0]:
-		var edge_free := not w.on_line_road(mid + nm * side * (hw + 1.0), li)
-		if not edge_free:
-			continue
-		if kind == "street" or kind == "bridge":
-			m.mat = Mesher.M_CONCRETE
-			_band(m, r, side * hw, side * (hw + 0.18), LINE_SIDE_Y + 0.005, c(0x7C7C76))
-			_band(m, r, side * (hw + 0.18), side * ow, LINE_SIDE_Y, c(0x9C9C96))
-			# бордюр: стенка от асфальта до тротуара
-			var pa: Vector2 = a + (r[3] as Vector2) * side * hw
-			var pb: Vector2 = b + (r[4] as Vector2) * side * hw
-			var A0 := Vector3(pa.x, LINE_ROAD_Y, pa.y)
-			var B0 := Vector3(pb.x, LINE_ROAD_Y, pb.y)
-			var A1 := Vector3(pa.x, LINE_SIDE_Y + 0.005, pa.y)
-			var B1 := Vector3(pb.x, LINE_SIDE_Y + 0.005, pb.y)
-			var face := (B0 - A0).cross(A1 - A0)
-			var toward := Vector3(-nm.x * side, 0.0, -nm.y * side)
-			if face.dot(toward) >= 0.0:
-				m.quad(A0, B0, B1, A1, c(0x6E6E68))
-			else:
-				m.quad(B0, A0, A1, B1, c(0x6E6E68))
-		else:
-			m.mat = Mesher.M_ASPHALT
-			_band(m, r, side * hw, side * ow, LINE_ROAD_Y + 0.002, c(0x5E5E58))
+	if kind == "highway":
+		m.mat = Mesher.M_ASPHALT
+		_stroke(m, r, ow, LINE_SHOULDER_Y, c(0x5E5E58))
+		_stroke(m, r, hw, LINE_ROAD_Y, c(0x3C3D40))
 		m.mat = Mesher.M_NONE
-		if kind == "bridge":
-			_bridge_side(m, r, side, ow)
-		if kind == "highway" and free_mid:
-			_band(m, r, side * (hw - 0.45), side * (hw - 0.3), LINE_MARK_Y, c(0xD8D8D0))
+		_stroke(m, r, hw - 0.3, LINE_EDGE_Y, c(0xD8D8D0))
+		m.mat = Mesher.M_ASPHALT
+		_stroke(m, r, hw - 0.45, LINE_TOP_Y, c(0x3C3D40))
+	else:
+		m.mat = Mesher.M_CONCRETE
+		_stroke(m, r, ow, LINE_SIDE_Y, c(0x9C9C96))
+		_stroke(m, r, hw + 0.18, LINE_CURB_Y, c(0x7C7C76))
+		m.mat = Mesher.M_ASPHALT
+		_stroke(m, r, hw, LINE_ROAD_Y, c(0x3C3D40))
 	m.mat = Mesher.M_NONE
-	if not free_mid:
-		return
 	if kind == "bridge":
+		for side in [-1.0, 1.0]:
+			_bridge_side(m, r, side, ow)
 		_bridge_pillar(m, r, hw)
+	# разметка — не на чужом асфальте и не на своём, если дорога сюда вернулась петлёй
+	if w.on_line_road(mid, li, false, 0.0, s_mid):
+		return
 	var yel := c(0xC8A83A)
 	if kind == "street" or kind == "bridge":
 		if fmod(s_mid, 3.0) < 1.5:
@@ -843,8 +869,8 @@ func _bridge_side(m: Mesher, r: Array, side: float, ow: float) -> void:
 	var a: Vector2 = r[1]
 	var b: Vector2 = r[2]
 	var na: Vector2 = r[3]
-	var nb: Vector2 = r[4]
-	var nm := (na + nb).normalized()
+	var nb: Vector2 = r[3]
+	var nm := na
 	if not _over_water((a + b) * 0.5 + nm * side * (ow + 0.3)):
 		return
 	var rail := c(0xB8B8B0)
