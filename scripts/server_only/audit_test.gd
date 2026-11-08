@@ -41,6 +41,7 @@ func _ready() -> void:
 	test_payday()
 	test_payday_guard()
 	test_world_backup()
+	test_game_log()
 	test_chat()
 	test_editor()
 	test_editor_resize()
@@ -1314,6 +1315,82 @@ func test_world_backup() -> void:
 		bad.append("ключ: %s / %s" % [k1.left(8), k2.left(8)])
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(kp))
 	check("Копия мира для Supabase: разворачивается в тот же мир (200 игроков — %d КБ), испорченная не принимается, ключ постоянный" % kb,
+		bad.is_empty(), str(bad))
+
+## Журнал действий для лог-чекера (0.55): игра пишет события только на сервере (log_on); чат, PayDay, драка,
+## предметы попадают в журнал; поиск по категории, игроку (и как жертва), тексту без учёта регистра, «показать ещё»;
+## прошлые сутки сжимаются, старше 90 дней удаляются; запрос больше 31 дня не принимается; разбор HTTP и cookie
+func test_game_log() -> void:
+	var bad := []
+	var GL = load("res://scripts/server_only/game_log.gd")
+	var AS = load("res://scripts/server_only/admin_site.gd")
+	var g := GameState.new_game(11)
+	g.real_clock = false
+	var a := g.join_player("l-a", "Alex_Brown", 801, "m")
+	var b := g.join_player("l-b", "Bill_Stone", 802, "m")
+	a.pos = Vector2(100, 100)
+	b.pos = Vector2(101, 100)
+	g._do_action(a, {"a": "say", "text": "тест"})
+	if not g.log_buf.is_empty():
+		bad.append("журнал пишется без log_on (офлайн/телефон)")
+	g.log_on = true
+	a.chat_cd = 0.0
+	g._do_action(a, {"a": "say", "text": "Привет, Билл"})
+	g.hit_player(a, b, 30.0)
+	g._use(b, "water")
+	a.hour_play = 1300.0
+	g.payday()
+	var cats := []
+	for e in g.log_buf:
+		cats.append("%s/%s" % [e["c"], e.get("e", "")])
+	for want in ["chat/", "fight/hit", "item/use", "payday/"]:
+		if not cats.has(want):
+			bad.append("нет события %s (есть %s)" % [want, cats])
+	# запись и поиск
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(GL.DIR))
+	for fn in DirAccess.get_files_at(GL.DIR):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(GL.DIR + "/" + fn))
+	var now := Time.get_unix_time_from_system()
+	var st = GL.new()
+	st.write(g.log_buf, now)
+	st.close()
+	var y_day: String = GL.day_of(now - 86400.0)
+	var old_day: String = GL.day_of(now - 95 * 86400.0)
+	var fy := FileAccess.open(GL.path_plain(y_day), FileAccess.WRITE)
+	for i in 150:
+		fy.store_line(JSON.stringify({"t": int((now - 86400.0) * 1000) + i, "c": "chat", "p": 802, "n": "Bill_Stone", "txt": "строка %d" % i}))
+	fy.close()
+	var fo := FileAccess.open(GL.path_plain(old_day), FileAccess.WRITE)
+	fo.store_line("{}")
+	fo.close()
+	GL.housekeeping(now)
+	if FileAccess.file_exists(GL.path_plain(y_day)) or not FileAccess.file_exists(GL.path_gz(y_day)) or FileAccess.file_exists(GL.path_plain(old_day)):
+		bad.append("уборка: вчера сжато %s, старое удалено %s" % [FileAccess.file_exists(GL.path_gz(y_day)), not FileAccess.file_exists(GL.path_plain(old_day))])
+	var today: String = GL.day_of(now)
+	var r1: Dictionary = GL.query({"cats": ["chat"], "from": y_day, "to": today, "player": "", "text": "ПРИВЕТ", "limit": 50})
+	if r1.get("items", []).size() != 1 or r1["items"][0]["txt"] != "Привет, Билл":
+		bad.append("поиск по тексту: %s" % [r1])
+	var r2: Dictionary = GL.query({"cats": [], "from": today, "to": today, "player": "802", "limit": 50})
+	var r2c := []
+	for e in r2.get("items", []):
+		r2c.append(e["c"])
+	if not (r2c.has("fight") and r2c.has("item")):
+		bad.append("игрок как жертва: %s" % [r2c])
+	var r3: Dictionary = GL.query({"cats": ["chat"], "from": y_day, "to": y_day, "player": "bill", "limit": 100})
+	var r4: Dictionary = GL.query({"cats": ["chat"], "from": y_day, "to": y_day, "player": "bill", "limit": 100, "before": int(r3["items"][-1]["t"]) if r3.get("items", []).size() > 0 else 0})
+	if r3.get("items", []).size() != 100 or not r3.get("more", false) or r4.get("items", []).size() != 50 or r4.get("more", true):
+		bad.append("страницы: %d+%d" % [r3.get("items", []).size(), r4.get("items", []).size()])
+	if not GL.query({"from": "2026-01-01", "to": today}).has("error"):
+		bad.append("принят запрос больше 31 дня")
+	for fn in DirAccess.get_files_at(GL.DIR):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(GL.DIR + "/" + fn))
+	# HTTP
+	var rq: Dictionary = AS.parse_request("GET /api/logs?cats=chat&player=Bill%20S&text=a+b HTTP/1.1\r\nHost: x\r\nCookie: a=1; sid=abc\r\nX-Umwelt: 1\r\n\r\n".to_utf8_buffer())
+	if rq.get("path") != "/api/logs" or rq["query"].get("player") != "Bill S" or rq["query"].get("text") != "a b" or AS.cookie_sid(rq["h"]) != "abc" or rq["h"].get("x-umwelt") != "1":
+		bad.append("разбор запроса: %s" % [rq])
+	if not AS.parse_request("POST /api/login HTTP/1.1\r\nContent-Length: 10\r\n\r\n{\"a\"".to_utf8_buffer()).is_empty():
+		bad.append("недошедшее тело принято")
+	check("Журнал действий: только на сервере, все события, поиск и страницы, уборка 90 дней, разбор запросов сайта",
 		bad.is_empty(), str(bad))
 
 ## Чат (0.52): слышат ближе 20 м и сам говорящий; дальше — нет; текст чистится и обрезается; чаще раза в секунду — нет;

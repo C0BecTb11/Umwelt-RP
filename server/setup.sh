@@ -130,6 +130,7 @@ fi
 
 if command -v ufw >/dev/null && ufw status | grep -q "Status: active"; then
   ufw allow $PORT/udp >/dev/null && echo "== открыт порт $PORT/UDP в ufw"
+  ufw allow 8443/tcp >/dev/null && echo "== открыт порт 8443/TCP в ufw (лог-чекер администратора, с 0.55)"
 fi
 
 echo "== скачиваю последнюю сборку"

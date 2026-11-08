@@ -134,6 +134,10 @@ var uids := {}                 # постоянный ID телефона дру
 var real_clock := true         # время = реальное московское; false — идёт само (демо-снимки)
 var chat := {}                 # pid → Array[[id сказавшего, текст, строка чата]] — для этого игрока (уходят в ev "c")
 var payday_hour := -1          # номер часа (минуты МСК / 60) последнего PayDay; -1 — ещё не считали
+# Журнал действий для лог-чекера администратора (с 0.55). Собирает только сервер (log_on), пишет на диск
+# server_only/game_log.gd. Запись: {"t": мс unix, "c": категория, "p": id, "n": имя, …поля категории}
+var log_on := false
+var log_buf: Array = []
 
 func _init(s: int = 0) -> void:
 	seed = s
@@ -257,9 +261,11 @@ func payday() -> void:
 					p.exp -= exp_need(p.level)
 					p.level += 1
 					up = true
+				glog("payday", p, {"ok": true, "min": int(p.hour_play / 60.0), "pay": pay, "lv": p.level, "xp": p.exp, "up": up})
 				msg(p.id, "PayDay! Зарплата $%d зачислена на банковский счёт" % pay)
 				msg(p.id, ("Новый уровень: %d! Опыт %d/%d" if up else "Уровень %d, опыт %d/%d") % [p.level, p.exp, exp_need(p.level)])
 			else:
+				glog("payday", p, {"ok": false, "min": int(p.hour_play / 60.0), "pay": 0, "lv": p.level, "xp": p.exp})
 				msg(p.id, "PayDay: зарплата и опыт не начислены")
 				msg(p.id, "Вы не отыграли минимум 20 минут за час (отыграно %s)" % dur_ru(p.hour_play))
 		p.hour_play = 0.0
@@ -293,6 +299,11 @@ func _say(p: Player, raw: String) -> void:
 	p.chat_cd = CHAT_GAP
 	p.idle = 0.0
 	var line := "%s говорит: %s" % [tag(p), t]
+	var heard := 0
+	for q: Player in players:
+		if q.connected and q != p and q.pos.distance_to(p.pos) <= CHAT_R:
+			heard += 1
+	glog("chat", p, {"txt": t, "h": heard})
 	# запись: [кто сказал, текст — для облачка над головой (0.53), строка — для чата]
 	for q: Player in players:
 		if q.connected and q.pos.distance_to(p.pos) <= CHAT_R:
@@ -304,6 +315,19 @@ func pop_chat(pid: int) -> Array:
 	var c: Array = chat.get(pid, [])
 	chat.erase(pid)
 	return c
+
+## Записать событие в журнал действий (только на сервере; офлайн и на телефоне — ничего)
+func glog(cat: String, p: Player, d: Dictionary = {}) -> void:
+	if not log_on:
+		return
+	d["t"] = int(Time.get_unix_time_from_system() * 1000.0)
+	d["c"] = cat
+	if p != null:
+		d["p"] = p.id
+		d["n"] = p.name
+		d["x"] = snappedf(p.pos.x, 0.1)
+		d["y"] = snappedf(p.pos.y, 0.1)
+	log_buf.append(d)
 
 func msg(pid: int, text: String) -> void:
 	if not messages.has(pid):
@@ -702,11 +726,13 @@ func knock_out(p: Player) -> void:
 	p.respawn_t = RESPAWN_TIME
 	p.move = Vector2.ZERO
 	p.ta_act = null
+	glog("fight", p, {"e": "ko"})
 	msg(p.id, "Ты без сознания…")
 
 func _respawn(p: Player) -> void:
 	p.dead = false
 	p.hp = 60.0
+	glog("fight", p, {"e": "wake"})
 	p.hunger = minf(p.hunger, 50.0)
 	p.thirst = minf(p.thirst, 50.0)
 	push_player(p, spawn_spot(1.0))
@@ -809,6 +835,7 @@ func _perform(p: Player, a: Dictionary) -> void:
 				if p.eq == a["id"]:
 					p.eq = ""
 				p.take(a["id"], n)
+				glog("item", p, {"e": "drop", "id": a["id"], "k": n})
 
 func near_cell(p: Player, cell: int, dist: float) -> bool:
 	if cell < 0 or cell >= world.tiles.size():
@@ -883,6 +910,7 @@ func _in_front(p: Player, at: Vector2) -> bool:
 	return (at - p.pos).dot(p.face) / maxf(d, 0.01) > 0.35
 
 func hit_player(from: Player, q: Player, dmg: float) -> void:
+	glog("fight", from, {"e": "hit", "v": q.id, "vn": q.name, "dmg": roundi(dmg), "w": from.weapon_id(), "ko": q.hp - dmg <= 0.0})
 	q.hp -= dmg
 	q.ta_act = null
 	add_fx(3, q.pos.x, q.pos.y, q.id)
@@ -932,6 +960,7 @@ func _wear(p: Player, id: String) -> void:
 	if p.wear.has(sl):
 		Items.add_to(p.inv, p.wear[sl], 1)
 	p.wear[sl] = id
+	glog("item", p, {"e": "wear", "id": id})
 	msg(p.id, "Надето: " + d["name"].to_lower())
 
 func _unwear(p: Player, sl: String) -> void:
@@ -940,6 +969,7 @@ func _unwear(p: Player, sl: String) -> void:
 	var id: String = p.wear[sl]
 	p.wear.erase(sl)
 	Items.add_to(p.inv, id, 1)
+	glog("item", p, {"e": "unwear", "id": id})
 
 func _use(p: Player, id: String) -> void:
 	var d := Items.def(id)
@@ -948,6 +978,7 @@ func _use(p: Player, id: String) -> void:
 	match d["kind"]:
 		Items.Kind.FOOD, Items.Kind.DRINK:
 			p.take(id)
+			glog("item", p, {"e": "use", "id": id})
 			p.hunger = clampf(p.hunger - d["hunger"], 0.0, 100.0)
 			p.thirst = clampf(p.thirst - d["thirst"], 0.0, 100.0)
 		Items.Kind.MED:
@@ -955,6 +986,7 @@ func _use(p: Player, id: String) -> void:
 				msg(p.id, "Ты и так здоров")
 				return
 			p.take(id)
+			glog("item", p, {"e": "use", "id": id})
 			p.hp = minf(100.0, p.hp + d["heal"])
 			msg(p.id, "Стало легче")
 		Items.Kind.MELEE, Items.Kind.GUN:

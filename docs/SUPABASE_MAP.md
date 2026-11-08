@@ -29,7 +29,7 @@
 | Сервис Supabase | Используется | Как |
 |---|---|---|
 | Auth (почта + пароль) | **да** | регистрация, вход, обновление токена — `account.gd`; проверка токена — игровой сервер |
-| База (PostgREST, `/rest/v1`) | **да** | таблицы `characters`, `map_drafts`; функции `is_admin`, `delete_my_account`, `deleted_accounts`; с 2026-11-08 (0.54) — `register_backup_key`, `put_world_backup`, `get_latest_world_backup` (резервные копии мира игрового сервера) |
+| База (PostgREST, `/rest/v1`) | **да** | таблицы `characters`, `map_drafts`; функции `is_admin`, `delete_my_account`, `deleted_accounts`; с 2026-11-08 (0.54) — `register_backup_key`, `put_world_backup`, `get_latest_world_backup` (резервные копии мира игрового сервера); с 0.55 — `is_log_viewer` (лог-чекер), вход паролем от имени администратора — с игрового сервера (лог-чекер) |
 | Storage | нет | бакетов 0, файлов 0 |
 | Edge Functions | нет | функций 0 |
 | Realtime | нет | публикация `supabase_realtime` пустая (ни одной таблицы) |
@@ -43,7 +43,7 @@
 
 | Схема | Чья | Что там |
 |---|---|---|
-| `public` | **наша** | таблицы игры: `characters`, `admins`, `map_drafts`, `account_deletions`, `backup_keys`, `world_backups`; функции `is_admin()`, `delete_my_account()`, `deleted_accounts()`, `record_account_deletion()` (триггерная), `register_backup_key()`, `put_world_backup()`, `get_latest_world_backup()` |
+| `public` | **наша** | таблицы игры: `characters`, `admins`, `map_drafts`, `account_deletions`, `backup_keys`, `world_backups`, `log_viewers`; функции `is_admin()`, `delete_my_account()`, `deleted_accounts()`, `record_account_deletion()` (триггерная), `register_backup_key()`, `put_world_backup()`, `get_latest_world_backup()`, `is_log_viewer()` |
 | `auth` | Supabase | пользователи, сессии, токены. Таблицы не меняем; ссылаемся на `auth.users(id)`; с 2026-11-04 на `auth.users` висит наш триггер удаления (раздел 6) |
 | `storage` | Supabase | служебные таблицы Storage (пусто) |
 | `realtime` | Supabase | служебные таблицы Realtime (не используется) |
@@ -191,6 +191,18 @@ RLS включён, политик и прав у `anon`/`authenticated` нет.
 Объём: на боевом сервере (карта 500×500) первая копия 2026-11-07 23:30 UTC — 334 КБ мира → 24 КБ в базе; за 7 дней
 ≈ 170 копий ≈ 4 МБ. Ключ сервер зарегистрировал 2026-11-07 23:25 UTC, через 2 минуты после выпуска 0.54 (проверено запросом).
 
+### 3.7. `log_viewers` — кому открыт лог-чекер администратора (с 2026-11-08, 0.55)
+
+| Столбец | Тип | Пусто? | По умолчанию | Назначение |
+|---|---|---|---|---|
+| `user_id` | `uuid` | нет | — | **первичный ключ** → `auth.users(id)` `ON DELETE CASCADE` |
+| `created_at` | `timestamptz` | нет | `now()` | когда допущен |
+
+Отдельно от `admins`: логи — не для всех администраторов (решение владельца). При создании вписан владелец (единственная
+строка `admins` на 2026-11-08) — строк 1 (проверено запросом). RLS включён, политик и прав у `anon`/`authenticated`
+нет. Читает только `is_log_viewer()`. Добавить или убрать человека — SQL владельца базы (через Claude); из игры и
+API — нельзя. Текст — `docs/sql/log_viewers.sql`.
+
 ---
 
 ## 4. Связи
@@ -209,6 +221,8 @@ deleted_accounts()  ──читает──>  account_deletions   ← игро�
 register_backup_key() ──пишет (если пусто)──> backup_keys      ← игровой сервер (anon), при запуске
 put_world_backup()    ──сверяет с backup_keys, пишет/чистит──> world_backups   ← игровой сервер (anon), раз в час
 get_latest_world_backup() ──сверяет с backup_keys, читает──> world_backups      ← игровой сервер без своего мира
+auth.users ──< log_viewers.user_id (1 : 0..1, ON DELETE CASCADE)
+is_log_viewer() ──читает──> log_viewers   ← лог-чекер на игровом сервере (токен входящего администратора)
 ```
 
 Между нашими таблицами прямых внешних ключей нет — всё связано через `auth.users`.
@@ -228,6 +242,7 @@ get_latest_world_backup() ──сверяет с backup_keys, читает─�
 | `public.register_backup_key(key_hash text)` | `boolean` | plpgsql | `anon` (у `PUBLIC`, `authenticated` отозвано) | `SECURITY DEFINER`, `search_path = ''` |
 | `public.put_world_backup(token text, data text, players int, raw_bytes int)` | `text` | plpgsql | `anon` (у `PUBLIC`, `authenticated` отозвано) | `SECURITY DEFINER`, `search_path = ''` |
 | `public.get_latest_world_backup(token text)` | `json` | plpgsql | `anon` (у `PUBLIC`, `authenticated` отозвано) | `SECURITY DEFINER`, `search_path = ''` |
+| `public.is_log_viewer()` | `boolean` | SQL | `authenticated` (у `PUBLIC`, `anon` отозвано) | `STABLE`, `SECURITY DEFINER`, `search_path = ''` |
 
 Тело: `select exists (select 1 from public.admins where user_id = auth.uid())`.
 
@@ -276,6 +291,11 @@ publishable-ключом (`server.gd` `_sync_deleted`, раз в 5 минут, �
 `put_world_backup` (`has_*_privilege`). Через HTTP из рабочей среды Claude проверить нельзя (прокси) — проверка
 на боевом сервере: в журнале «резервные копии в Supabase: ключ сервера принят», в `world_backups` появляется строка.
 
+`is_log_viewer()` (с 2026-11-08, 0.55): `select exists (… log_viewers where user_id = auth.uid())` — только «допущен ли
+**я**», аргументов нет. Вызывает лог-чекер на игровом сервере (`admin_site.gd` `_login`) с токеном того, кто входит.
+Проверено в откатываемой транзакции под ролью `authenticated`: владелец — `true`, другой игрок с персонажем — `false`;
+у `anon` права выполнения нет. Советник Supabase помечает её (WARN) как и `is_admin()` — намеренно.
+
 Других функций в `public` нет.
 
 ---
@@ -306,6 +326,7 @@ publishable-ключом (`server.gd` `_sync_deleted`, раз в 5 минут, �
 | `account_deletions` | вкл. | **нет** | **нет** | никому ничего (читает только `deleted_accounts()`, пишет только триггер) |
 | `backup_keys` | вкл. | **нет** | **нет** | никому ничего (пишет только `register_backup_key()`, читают функции копий) |
 | `world_backups` | вкл. | **нет** | **нет** | никому ничего (только функции копий с ключом сервера) |
+| `log_viewers` | вкл. | **нет** | **нет** | никому ничего (читает только `is_log_viewer()`) |
 
 С 2026-11-04 (миграция `tighten_role_grants`, закрытый аудит Н4, BF-041) у `anon`/`authenticated` только те права,
 которыми пользуется игра (`account.gd`, `map_editor.gd`, `server.gd`); `UPDATE`, `DELETE`, `TRUNCATE`,
@@ -353,6 +374,7 @@ publishable-ключом (`server.gd` `_sync_deleted`, раз в 5 минут, �
 | — (SQL Editor, 2026-11-04) | `account_deletion` | **в истории миграций нет**: запущено владельцем в панели (SQL Editor), т.к. подтверждение изменения из рабочей среды Claude трижды закрывалось само. Создало `account_deletions`, `record_account_deletion()`, триггер `on_auth_user_deleted`, `delete_my_account()`, `deleted_accounts()` и их права (BF-044). Текст — в коммите 0.31 (`docs/sql/account_deletion.sql`) |
 | `20261104183753` | `tighten_role_grants` | права `anon`/`authenticated` урезаны до нужных игре (раздел 7), права по умолчанию для новых таблиц и функций `postgres` — отозваны (Н4, BF-041) |
 | `20261107231751` | `world_backups` | `backup_keys`, `world_backups` (RLS, без прав у `anon`/`authenticated`), индекс, `register_backup_key()`, `put_world_backup()`, `get_latest_world_backup()` и права `anon` на них (0.54; текст — `docs/sql/world_backups.sql`) |
+| `20261108001347` | `log_viewers` | `log_viewers` (RLS, без прав у `anon`/`authenticated`), владелец вписан из `admins`, `is_log_viewer()` и право `authenticated` на неё (0.55; текст — `docs/sql/log_viewers.sql`) |
 
 Описание «что сделала» восстановлено по текущей структуре и журналу руководства; тексты самих миграций
 хранятся в Supabase (`supabase_migrations.schema_migrations`), в репозитории их нет.

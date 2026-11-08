@@ -17,6 +17,10 @@ const WORLD_SEED := 1990
 const BACKUP_KEY_FILE := "user://backup.key"
 const BACKUP_EVERY := 3600.0   # сек. между копиями (база сама не примет чаще раза в 50 минут)
 const BACKUP_FIRST := 300.0    # первая копия — через 5 минут после запуска
+## Журнал действий игроков и лог-чекер администратора (0.55): журнал пишет любой сервер (в свою папку данных),
+## сайт https://<сервер>:8443 — боевой сервер (как копии) или с ключом --admin=ПОРТ (проверки)
+const GameLog = preload("res://scripts/server_only/game_log.gd")
+const AdminSite = preload("res://scripts/server_only/admin_site.gd")
 
 var game: GameState
 var port := Net.DEFAULT_PORT
@@ -39,6 +43,9 @@ var backup_on := false         # копии в Supabase включены (бое
 var backup_key := ""           # 64 hex-символа; в базе — только sha256 от него
 var backup_t := BACKUP_FIRST
 var no_backup := false         # --nobackup
+var log_store                  # game_log.gd
+var admin: Node                # admin_site.gd
+var admin_port := 0            # --admin=ПОРТ
 var refused_ip := 0            # отказано подключениям сверх MAX_PENDING_IP (в журнал раз в минуту)
 var stop_t := 0.0
 var sig_t := 0.0
@@ -112,6 +119,8 @@ func _ready() -> void:
 			stat_t = stat_every
 		elif a == "--noauth":
 			noauth = true          # только для локальных тестов: вход по uid телефона без аккаунта
+		elif a.begins_with("--admin="):
+			admin_port = int(a.substr(8))
 		elif a == "--nobackup":
 			no_backup = true       # тестовый сервер с аккаунтами (CI auth-test): копий в Supabase не слать
 	started_ms = Time.get_ticks_msec()
@@ -139,6 +148,18 @@ func _ready() -> void:
 		var gone := drop_phone_chars(game)
 		if gone > 0:
 			_log("удалены персонажи без аккаунта (по id телефона): %d" % gone)
+	game.log_on = true
+	log_store = GameLog.new()
+	if admin_port == 0 and backup_on:
+		admin_port = AdminSite.DEFAULT_PORT
+	if admin_port > 0:
+		admin = AdminSite.new()
+		admin.game = game
+		admin.store = log_store
+		admin.log_fn = _log
+		add_child(admin)
+		var ok: bool = admin.start(admin_port)
+		_log("лог-чекер: %s" % ("https://<адрес сервера>:%d" % admin_port if ok else ("порт %d пока занят — пробую раз в 10 с" % admin_port if admin.tls_opts != null else "ОШИБКА — нет ключа сайта")))
 	if not Net.I.serve(port, max_clients, Net.server_tls("user://dtls")):
 		_log("ОШИБКА: " + Net.I.status)
 		get_tree().quit(1)
@@ -206,9 +227,14 @@ func _sync_deleted() -> void:
 	for e in d:
 		if e is Dictionary and e.has("h"):
 			hashes.append(str(e["h"]))
+	var names := {}
+	for p0: GameState.Player in game.players:
+		names[p0.id] = p0.name
 	var gone := drop_deleted(game, hashes)
 	if gone.is_empty():
 		return
+	for gid in gone:
+		game.glog("acc", null, {"e": "deleted", "p": gid, "n": names.get(gid, "")})
 	# кто сейчас в игре под удалённым аккаунтом (например, со второго телефона) — отключаем
 	for c: Client in by_peer.values():
 		if gone.has(c.pid):
@@ -346,6 +372,12 @@ func _process(dt: float) -> void:
 		if deleted_t <= 0.0:
 			deleted_t = DELETED_EVERY
 			_sync_deleted()
+	if log_store != null:
+		log_store.write(game.log_buf, Time.get_unix_time_from_system())
+		game.log_buf.clear()
+		log_store.tick(dt)
+	if admin != null:
+		admin.poll(dt)
 	if backup_on:
 		backup_t -= dt
 		if backup_t <= 0.0:
@@ -373,6 +405,7 @@ func _stop() -> void:
 	for c: Client in by_peer.values():
 		Net.I.send({"t": "bye", "why": "Сервер перезапускается — зайди через минуту"}, c.peer)
 	save_world()
+	_close_logs()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(STOP_FILE))
 	_log("остановка по запросу службы: мир сохранён, онлайн был %d" % _online())
 	set_process(false)
@@ -474,6 +507,7 @@ func _handle_net(dt: float) -> void:
 					if c.pid >= 0:
 						var p2 := game.player(c.pid)
 						game.leave_player(c.pid)
+						game.glog("conn", p2, {"e": "out", "on": _online() - 1})
 						_log("вышел %s, онлайн %d" % [p2.name if p2 != null else "?", _online() - 1])
 					by_peer.erase(from)
 					save_world()
@@ -541,6 +575,7 @@ func _enter(c: Client, key: String, pname: String, static_id: int = -1, gender: 
 		map_n = pk[1]
 	Net.I.send({"t": "init", "pid": p.id, "seed": game.seed, "world": game.to_data_for(p.id, false), "mapz": map_z, "mapn": map_n}, c.peer)
 	_log("вошёл %s (%d), подключение %d, онлайн %d" % [p.name, p.id, c.peer, _online()])
+	game.glog("conn", p, {"e": "in", "on": _online()})
 	for other: Client in by_peer.values():
 		if other.pid >= 0 and other.pid != p.id:
 			game.msg(other.pid, "%s в городе" % GameState.tag(p))
@@ -599,3 +634,12 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_PREDELETE:
 		if game != null:
 			save_world()
+		_close_logs()
+
+func _close_logs() -> void:
+	if game != null and log_store != null:
+		log_store.write(game.log_buf, Time.get_unix_time_from_system())
+		game.log_buf.clear()
+		log_store.close()
+	if admin != null:
+		admin.stop()
