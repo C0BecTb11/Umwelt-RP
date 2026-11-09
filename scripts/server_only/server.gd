@@ -124,6 +124,8 @@ func _ready() -> void:
 		elif a == "--nobackup":
 			no_backup = true       # тестовый сервер с аккаунтами (CI auth-test): копий в Supabase не слать
 	started_ms = Time.get_ticks_msec()
+	if not lock_data_dir("user://"):
+		_log("ВНИМАНИЕ: не удалось закрыть папку данных от других пользователей сервера")
 	if FileAccess.file_exists(STOP_FILE):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(STOP_FILE))   # старый запрос от прошлой остановки
 	game = _load_world()
@@ -165,6 +167,17 @@ func _ready() -> void:
 		get_tree().quit(1)
 		return
 	_log("сборка %s, порт %d, мест %d, персонажей в базе %d, канал зашифрован (DTLS)" % [Version.BUILD, port, max_clients, game.players.size()])
+
+## Папка данных сервера (мир, журнал действий, ключи DTLS, лог-чекера и резервных копий) — только для своего
+## пользователя (права 700), чтобы другие службы на той же машине не читали ключи (аудит 2026-11-09, А3).
+## Служба работает от umwelt и владеет папкой — chmod ей разрешён. true — права стоят
+static func lock_data_dir(dir: String) -> bool:
+	var path := ProjectSettings.globalize_path(dir)
+	var own := FileAccess.UNIX_READ_OWNER | FileAccess.UNIX_WRITE_OWNER | FileAccess.UNIX_EXECUTE_OWNER
+	if (FileAccess.get_unix_permissions(path) & 511) == own:
+		return true
+	FileAccess.set_unix_permissions(path, own)
+	return (FileAccess.get_unix_permissions(path) & 511) == own
 
 ## Персонажи «по id телефона» (до аккаунтов) на сервере с аккаунтами больше не нужны: перенос к аккаунту по id
 ## телефона убран (закрытый аудит, Н1; BF-042), а войти в них можно только в --noauth. Убираем их ключи и карточки,

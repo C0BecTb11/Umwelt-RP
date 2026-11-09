@@ -281,7 +281,10 @@ static func clean_chat(raw: String) -> String:
 	for c0 in raw:
 		var ch: String = c0
 		var code := ch.unicode_at(0)
-		if code < 32 or code == 127 or (code >= 0x200B and code <= 0x200F) or code == 0xFEFF:
+		# управляющие и невидимые: переводы строк (в т.ч. U+0085, U+2028/2029), нулевой ширины, знаки направления
+		# текста (U+202A–202E, U+2066–2069, U+061C) — ими можно перевернуть строку и подделать подпись (аудит 2026-11-09, А4)
+		if code < 32 or (code >= 127 and code <= 0x9F) or (code >= 0x200B and code <= 0x200F) or code == 0xFEFF \
+				or (code >= 0x2028 and code <= 0x202E) or (code >= 0x2060 and code <= 0x2069) or code == 0x061C:
 			ch = " "
 		if ch == " ":
 			if sp or out == "":

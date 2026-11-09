@@ -12,26 +12,30 @@ permissions:
 
 env:
   GODOT_VERSION: 4.4.1
+  # SHA-512 файлов Godot из официального SHA512-SUMS.txt релиза 4.4.1 (аудит 2026-11-09, Н9): скачанное сверяется.
+  # Меняешь версию Godot — меняй и суммы (во всех трёх workflow)
+  GODOT_ZIP_SHA512: ef4e76880a514257175544952c61191106fdef3095b909bafed9fcbeb230c3e5533920a0f3012882dd4bbde83028a67549825794e2d2c3cf76eba7918b71370e
+  GODOT_TPZ_SHA512: 8f461c7d6e91a0fbabfc95b1e4ca70ff1732c6f2920956a16b086ec2a85b5f7e238baf4dbce60dcc5630fae3bcb9a1fa2ae2027b92cb495c02d082705715e441
   REPO_URL: https://github.com/${{ github.repository }}
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         with:
           distribution: temurin
           java-version: 17
 
       - name: Cache Godot
         id: godot-cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/godot
             ~/.local/share/godot/export_templates
-          key: godot-${{ env.GODOT_VERSION }}-linux
+          key: godot-${{ env.GODOT_VERSION }}-linux-sha  # -sha: после 2026-11-09 скачать заново со сверкой суммы
 
       - name: Download Godot and export templates
         if: steps.godot-cache.outputs.cache-hit != 'true'
@@ -39,8 +43,10 @@ jobs:
           mkdir -p ~/godot ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
           cd ~/godot
           wget -q https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip
+          echo "$GODOT_ZIP_SHA512  Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip" | sha512sum -c --quiet - || { echo "ОШИБКА: Godot не совпал с контрольной суммой"; exit 1; }
           unzip -q Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip && mv Godot_v${GODOT_VERSION}-stable_linux.x86_64 godot && rm *.zip
           wget -q https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_export_templates.tpz
+          echo "$GODOT_TPZ_SHA512  Godot_v${GODOT_VERSION}-stable_export_templates.tpz" | sha512sum -c --quiet - || { echo "ОШИБКА: шаблоны экспорта не совпали с контрольной суммой"; exit 1; }
           unzip -q Godot_v${GODOT_VERSION}-stable_export_templates.tpz
           mv templates/* ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable/
           rm -rf templates *.tpz
@@ -229,7 +235,7 @@ jobs:
 
       # Сначала пакеты, последним — манифест: телефоны и сервер видят новую сборку, когда файлы уже на месте
       - name: Publish files
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: latest
           name: Последняя сборка
@@ -245,7 +251,7 @@ jobs:
             build/release/umwelt.apk
 
       - name: Publish manifest
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: latest
           files: |

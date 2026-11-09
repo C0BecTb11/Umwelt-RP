@@ -42,6 +42,7 @@ func _ready() -> void:
 	test_payday_guard()
 	test_world_backup()
 	test_game_log()
+	test_admin_guard()
 	test_chat()
 	test_rp_commands()
 	test_editor()
@@ -1321,6 +1322,58 @@ func test_world_backup() -> void:
 ## Журнал действий для лог-чекера (0.55): игра пишет события только на сервере (log_on); чат, PayDay, драка,
 ## предметы попадают в журнал; поиск по категории, игроку (и как жертва), тексту без учёта регистра, «показать ещё»;
 ## прошлые сутки сжимаются, старше 90 дней удаляются; запрос больше 31 дня не принимается; разбор HTTP и cookie
+## Аудит 2026-11-09: лимиты лог-чекера по адресам (А1, А2) и папка данных сервера только для своего пользователя (А3)
+func test_admin_guard() -> void:
+	var bad := []
+	var AS = load("res://scripts/server_only/admin_site.gd")
+	var mk := func(ip: String) -> RefCounted:
+		var c = AS.Conn.new()
+		c.ip = ip
+		return c
+	var open := []
+	for i in AS.PER_IP:
+		if not AS.may_open(open, [], "1.1.1.1"):
+			bad.append("не пустил %d-е подключение" % (i + 1))
+		open.append(mk.call("1.1.1.1"))
+	if AS.may_open(open, [], "1.1.1.1"):
+		bad.append("пустил больше %d с одного адреса" % AS.PER_IP)
+	if not AS.may_open(open, [], "2.2.2.2"):
+		bad.append("не пустил другой адрес")
+	var full := []
+	for i in AS.MAX_CONN:
+		full.append(mk.call("10.0.0.%d" % i))
+	if AS.may_open(full, [], "3.3.3.3"):
+		bad.append("пустил сверх MAX_CONN")
+	var recent := []
+	for i in AS.NEW_PER_IP:
+		recent.append([0.0, "4.4.4.4"])
+	if AS.may_open([], recent, "4.4.4.4") or not AS.may_open([], recent, "5.5.5.5"):
+		bad.append("лимит новых подключений с адреса")
+	recent.clear()
+	for i in AS.NEW_MAX:
+		recent.append([0.0, "6.6.6.%d" % (i % 250)])
+	if AS.may_open([], recent, "7.7.7.7"):
+		bad.append("общий лимит новых подключений")
+	var fl := []
+	for i in AS.FAIL_MAX_IP:
+		fl.append([0.0, "8.8.8.8"])
+	if not AS.login_locked(fl, "8.8.8.8") or AS.login_locked(fl, "9.9.9.9"):
+		bad.append("лимит неудачных входов с адреса")
+	fl.clear()
+	for i in AS.FAIL_MAX:
+		fl.append([0.0, "11.0.0.%d" % i])
+	if not AS.login_locked(fl, "12.12.12.12"):
+		bad.append("общий лимит неудачных входов")
+	# папка данных: chmod 700 (на этой машине — временная папка)
+	var d := "user://audit_lock_test"
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(d))
+	FileAccess.set_unix_permissions(ProjectSettings.globalize_path(d), 493)      # 755
+	var SV = load("res://scripts/server_only/server.gd")
+	if not SV.lock_data_dir(d) or (FileAccess.get_unix_permissions(ProjectSettings.globalize_path(d)) & 511) != 448:
+		bad.append("папка данных не закрылась: %o" % FileAccess.get_unix_permissions(ProjectSettings.globalize_path(d)))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(d))
+	check("Лог-чекер: лимиты подключений и входов по адресам; папка данных сервера — только для своего пользователя", bad.is_empty(), str(bad))
+
 func test_game_log() -> void:
 	var bad := []
 	var GL = load("res://scripts/server_only/game_log.gd")
@@ -1516,7 +1569,11 @@ func test_rp_commands() -> void:
 	# дальше 20 м не слышно
 	if not g.pop_chat(c.id).is_empty():
 		bad.append("слышно дальше 20 м")
-	check("Ролевые команды: /me, /do, /todo (сказал/сказала, сказанное — белым), /try (бросок сервера ~50%), подсказки, пауза, подделать /try нельзя", bad.is_empty(), str(bad))
+	# знаки направления текста и разделители строк — пробел (А4: нельзя перевернуть строку и подделать подпись)
+	var tricky := "a" + char(0x202E) + "b" + char(0x2028) + "c" + char(0x2066) + "d" + char(0x85) + "e" + char(0x061C) + "f" + char(0x2069)
+	if GameState.clean_chat(tricky) != "a b c d e f":
+		bad.append("знаки направления не убраны: %s" % [GameState.clean_chat(tricky).to_utf8_buffer().hex_encode()])
+	check("Ролевые команды: /me, /do, /todo (сказал/сказала, сказанное — белым), /try (бросок сервера ~50%), подсказки, пауза, подделать /try и перевернуть строку нельзя", bad.is_empty(), str(bad))
 
 ## Удар на ходу (0.51, BF-067): ноги идут анимацией ходьбы, удар — только верхом тела; стоя — удар целиком;
 ## пошёл посреди удара — удар доигрывает верхом, ноги шагают; добивание ногой — всегда целиком

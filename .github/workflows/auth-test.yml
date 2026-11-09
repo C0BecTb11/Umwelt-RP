@@ -7,25 +7,33 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+# токену запуска — только чтение кода (аудит 2026-11-09): этим проверкам писать в репозиторий не нужно
+permissions:
+  contents: read
+
 env:
   GODOT_VERSION: 4.4.1
+  # SHA-512 файлов Godot из официального SHA512-SUMS.txt релиза 4.4.1 (аудит 2026-11-09, Н9): скачанное сверяется.
+  # Меняешь версию Godot — меняй и суммы (во всех трёх workflow)
+  GODOT_ZIP_SHA512: ef4e76880a514257175544952c61191106fdef3095b909bafed9fcbeb230c3e5533920a0f3012882dd4bbde83028a67549825794e2d2c3cf76eba7918b71370e
 
 jobs:
   auth:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Cache Godot
         id: godot-cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/godot
-          key: godot-${{ env.GODOT_VERSION }}-editor-only
+          key: godot-${{ env.GODOT_VERSION }}-editor-only-sha  # -sha: после 2026-11-09 скачать заново со сверкой суммы
       - name: Download Godot
         if: steps.godot-cache.outputs.cache-hit != 'true'
         run: |
           mkdir -p ~/godot && cd ~/godot
           wget -q https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip
+          echo "$GODOT_ZIP_SHA512  Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip" | sha512sum -c --quiet - || { echo "ОШИБКА: Godot не совпал с контрольной суммой"; exit 1; }
           unzip -q Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip && mv Godot_v${GODOT_VERSION}-stable_linux.x86_64 godot && rm *.zip
       - name: Server + client login
         env:

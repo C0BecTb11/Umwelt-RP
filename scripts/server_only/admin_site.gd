@@ -14,7 +14,14 @@ const MAX_CONN := 8                 # одновременных подключ�
 const REQ_MAX := 16384              # байт запроса
 const CONN_TIMEOUT := 20.0          # сек. на подключение
 const FAIL_WINDOW := 600.0          # неудачные входы считаем за 10 минут…
-const FAIL_MAX := 10                # …больше — вход закрыт до конца окна (против перебора паролей)
+const FAIL_MAX_IP := 5              # …с одного адреса больше — вход с него закрыт до конца окна (против перебора паролей)
+const FAIL_MAX := 30                # …со всех адресов вместе больше — закрыт для всех (перебор с многих адресов)
+# Против забивания сайта и нагрузки на игру рукопожатиями TLS (аудит 2026-11-09, А1): лишнее подключение
+# закрывается сразу, до TLS. Адреса — только в памяти, на время окна; в журнал не пишутся
+const PER_IP := 3                   # одновременных подключений с одного адреса
+const NEW_WINDOW := 60.0
+const NEW_PER_IP := 30              # новых подключений с одного адреса за минуту
+const NEW_MAX := 120                # новых подключений со всех адресов за минуту
 
 var game: GameState
 var store                           # game_log.gd
@@ -23,7 +30,8 @@ var tcp := TCPServer.new()
 var tls_opts: TLSOptions
 var conns: Array = []
 var sessions := {}                  # sid → {"exp": unix, "who": "Имя (id)"}
-var fails: Array = []               # время неудачных входов
+var fails: Array = []               # [время, адрес] неудачных входов
+var opened: Array = []              # [время, адрес] принятых подключений за NEW_WINDOW
 var job: Thread
 var job_conn: Conn
 var port := DEFAULT_PORT
@@ -31,6 +39,7 @@ var retry_t := 0.0                  # порт ещё занят (после п�
 
 class Conn:
 	var tcp: StreamPeerTCP
+	var ip := ""
 	var tls: StreamPeerTLS
 	var buf := PackedByteArray()
 	var t := 0.0
@@ -81,13 +90,19 @@ func poll(dt: float) -> void:
 			if tcp.listen(port, "*") == OK and log_fn.is_valid():
 				log_fn.call("лог-чекер: порт %d открыт" % port)
 		return
+	var now_c := Time.get_unix_time_from_system()
+	while opened.size() > 0 and opened[0][0] < now_c - NEW_WINDOW:
+		opened.pop_front()
 	while tcp.is_connection_available():
 		var s := tcp.take_connection()
-		if conns.size() >= MAX_CONN:
+		var ip := s.get_connected_host()
+		if not may_open(conns, opened, ip):
 			s.disconnect_from_host()
 			continue
+		opened.append([now_c, ip])
 		var c := Conn.new()
 		c.tcp = s
+		c.ip = ip
 		c.tls = StreamPeerTLS.new()
 		if c.tls.accept_stream(s, tls_opts) != OK:
 			s.disconnect_from_host()
@@ -133,6 +148,32 @@ func poll(dt: float) -> void:
 	for sid in sessions.keys():
 		if sessions[sid]["exp"] < now:
 			sessions.erase(sid)
+
+## Можно ли принять ещё одно подключение с адреса ip (conns — открытые Conn, opened — [время, адрес] за окно)
+static func may_open(open_conns: Array, recent: Array, ip: String) -> bool:
+	if open_conns.size() >= MAX_CONN or recent.size() >= NEW_MAX:
+		return false
+	var same := 0
+	for c in open_conns:
+		if c.ip == ip:
+			same += 1
+	if same >= PER_IP:
+		return false
+	var fresh := 0
+	for r in recent:
+		if r[1] == ip:
+			fresh += 1
+	return fresh < NEW_PER_IP
+
+## Закрыт ли вход: с этого адреса или со всех вместе слишком много неудач за окно
+static func login_locked(fail_list: Array, ip: String) -> bool:
+	if fail_list.size() >= FAIL_MAX:
+		return true
+	var n := 0
+	for f in fail_list:
+		if f[1] == ip:
+			n += 1
+	return n >= FAIL_MAX_IP
 
 ## Разбор HTTP-запроса; {} — ещё не весь пришёл. {"m", "path", "query": {}, "h": {заголовки в нижнем регистре}, "body"}
 static func parse_request(buf: PackedByteArray) -> Dictionary:
@@ -232,9 +273,9 @@ func _route(c: Conn, req: Dictionary) -> void:
 ## Вход: почта и пароль → Supabase → допущен ли (is_log_viewer) → сессия
 func _login(c: Conn, req: Dictionary) -> void:
 	var now := Time.get_unix_time_from_system()
-	while fails.size() > 0 and fails[0] < now - FAIL_WINDOW:
+	while fails.size() > 0 and fails[0][0] < now - FAIL_WINDOW:
 		fails.pop_front()
-	if fails.size() >= FAIL_MAX:
+	if login_locked(fails, c.ip):
 		_send(c, 429, {"error": "Слишком много неудачных попыток — подожди 10 минут"})
 		return
 	var d = JSON.parse_string(str(req["body"]))
@@ -264,7 +305,7 @@ func _login(c: Conn, req: Dictionary) -> void:
 	_send(c, 200, {"ok": true, "who": who}, ["Set-Cookie: sid=%s; Path=/; Max-Age=%d; HttpOnly; Secure; SameSite=Strict" % [sid, int(SESSION_TTL)]])
 
 func _fail(c: Conn, why: String) -> void:
-	fails.append(Time.get_unix_time_from_system())
+	fails.append([Time.get_unix_time_from_system(), c.ip])
 	if game != null:
 		game.glog("admin", null, {"e": "fail", "n": "Неизвестный"})
 	if log_fn.is_valid():
