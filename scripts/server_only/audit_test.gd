@@ -43,6 +43,7 @@ func _ready() -> void:
 	test_world_backup()
 	test_game_log()
 	test_chat()
+	test_rp_commands()
 	test_editor()
 	test_editor_resize()
 	test_remote_door()
@@ -1414,7 +1415,7 @@ func test_chat() -> void:
 	var lc := g.pop_chat(c.id)
 	if la.size() != 1 or lb.size() != 1 or lc.size() != 0:
 		bad.append("кто слышит: %d %d %d" % [la.size(), lb.size(), lc.size()])
-	elif lb[0] != [601, "Привет, как дела?", "Anna_Gray (601) говорит: Привет, как дела?"]:
+	elif lb[0] != [601, "Привет, как дела?", "Anna_Gray (601) говорит: Привет, как дела?", "say"]:
 		bad.append("запись: «%s»" % [lb[0]])
 	if a.idle != 0.0:
 		bad.append("чат не сбрасывает АФК")
@@ -1433,9 +1434,85 @@ func test_chat() -> void:
 	g._account_time(a, 1.1, floori(g.time / 1440.0))
 	g._do_action(a, {"a": "say", "text": "в сеть"})
 	var ev := g.events_for(b.id, false)
-	if not (ev.get("c", []) as Array).has([601, "в сеть", "Anna_Gray (601) говорит: в сеть"]):
+	if not (ev.get("c", []) as Array).has([601, "в сеть", "Anna_Gray (601) говорит: в сеть", "say"]):
 		bad.append("нет в событиях: %s" % [ev])
 	check("Чат: слышат ближе 20 м; текст чистится и обрезается; не чаще раза в секунду; уходит в событиях", bad.is_empty(), str(bad))
+
+## Ролевые команды (0.56): /me, /do, /todo, /try — строку собирает сервер, итог /try бросает сервер,
+## подсказки при ошибке не тратят паузу, вид записи (цвет у телефона) нельзя подделать текстом
+func test_rp_commands() -> void:
+	var bad := []
+	var g := GameState.new_game(7)
+	g.real_clock = false
+	var a := g.join_player("r-a", "Anna_Gray", 701, "f")
+	var b := g.join_player("r-b", "Ben_Cole", 702, "m")
+	var c := g.join_player("r-c", "Carl_Reed", 703, "m")
+	a.pos = Vector2(100, 100)
+	b.pos = Vector2(110, 100)
+	c.pos = Vector2(130, 100)
+	var day := floori(g.time / 1440.0)
+	var say := func(p: GameState.Player, t: String) -> Array:
+		g._account_time(p, 1.1, day)          # пауза между сообщениями прошла
+		g.pop_messages(p.id)
+		g._do_action(p, {"a": "say", "text": t})
+		g.pop_chat(p.id)
+		g.pop_chat(c.id)
+		return g.pop_chat(b.id if p != b else a.id)
+	var e: Array = say.call(a, "/me  достала   телефон ")
+	if e.size() != 1 or e[0] != [701, "достала телефон", "Anna_Gray (701) достала телефон", "me"]:
+		bad.append("/me: %s" % [e])
+	e = say.call(b, "/do В руках телефон.")
+	if e.size() != 1 or e[0] != [702, "В руках телефон.", "В руках телефон. (( Ben_Cole (702) ))", "do"]:
+		bad.append("/do: %s" % [e])
+	e = say.call(a, "/todo Привет*улыбнувшись")
+	if e.size() != 1 or e[0] != [701, "«Привет», улыбнувшись", "«Привет», — сказала Anna_Gray (701), улыбнувшись", "todo"]:
+		bad.append("/todo: %s" % [e])
+	e = say.call(b, "/TODO Держи * протянув руку")
+	if e.size() != 1 or e[0][2] != "«Держи», — сказал Ben_Cole (702), протянув руку":
+		bad.append("/todo (мужской, заглавные): %s" % [e])
+	# /try: бросок на сервере, оба итога встречаются, примерно поровну; текст «| Удачно» в /me — не /try
+	var ok := 0
+	var n := 200
+	for i in n:
+		e = say.call(a, "/try открыть дверь")
+		if e.size() != 1:
+			bad.append("/try не дошёл")
+			break
+		var k: String = e[0][3]
+		if k == "try1":
+			ok += 1
+			if e[0][2] != "Anna_Gray (701) открыть дверь | Удачно" or e[0][1] != "открыть дверь | Удачно":
+				bad.append("/try удачно: %s" % [e])
+				break
+		elif k != "try0" or e[0][2] != "Anna_Gray (701) открыть дверь | Неудачно":
+			bad.append("/try неудачно: %s" % [e])
+			break
+	if ok < n * 0.3 or ok > n * 0.7:
+		bad.append("/try удачно %d из %d" % [ok, n])
+	e = say.call(a, "/me открыла дверь | Удачно")
+	if e.size() != 1 or e[0][3] != "me":
+		bad.append("подделка /try через /me: %s" % [e])
+	# ошибки — подсказка, в чат ничего, паузу не тратят
+	for t in ["/me", "/do   ", "/todo без звёздочки", "/todo *только действие", "/todo фраза*", "/try", "/шепот привет", "/"]:
+		g._account_time(a, 1.1, day)
+		g.pop_messages(a.id)
+		g._do_action(a, {"a": "say", "text": t})
+		var m := " ".join(g.pop_messages(a.id))
+		if not g.pop_chat(b.id).is_empty() or m == "" or m.contains("Не так быстро"):
+			bad.append("ошибка «%s»: %s" % [t, m])
+	g.pop_messages(a.id)
+	g._do_action(a, {"a": "say", "text": "/me"})
+	g._do_action(a, {"a": "say", "text": "/me кивнула"})
+	if g.pop_chat(b.id).size() != 1:
+		bad.append("подсказка потратила паузу")
+	# пауза общая с обычной речью
+	g._do_action(a, {"a": "say", "text": "/me ещё раз"})
+	if not g.pop_chat(b.id).is_empty():
+		bad.append("нет паузы у ролевых")
+	# дальше 20 м не слышно
+	if not g.pop_chat(c.id).is_empty():
+		bad.append("слышно дальше 20 м")
+	check("Ролевые команды: /me, /do, /todo (сказал/сказала), /try (бросок сервера ~50%), подсказки, пауза, подделать /try нельзя", bad.is_empty(), str(bad))
 
 ## Удар на ходу (0.51, BF-067): ноги идут анимацией ходьбы, удар — только верхом тела; стоя — удар целиком;
 ## пошёл посреди удара — удар доигрывает верхом, ноги шагают; добивание ногой — всегда целиком

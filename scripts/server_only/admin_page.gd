@@ -100,7 +100,7 @@ function tag(n, p) { return (n || 'Игрок') + ' (' + p + ')'; }
 function describe(e) {
   switch (e.c) {
     case 'conn': return e.e === 'in' ? 'вошёл в игру' + (e.on ? ' · онлайн ' + e.on : '') : 'вышел из игры' + (e.why ? ' (' + e.why + ')' : '');
-    case 'chat': return '«' + e.txt + '»' + (e.h ? ' · слышали ' + e.h : ' · рядом никого');
+    case 'chat': return '«' + e.txt + '»' + (e.k === 'try' ? (e.ok ? ' · Удачно' : ' · Неудачно') : '') + (e.h ? ' · слышали ' + e.h : ' · рядом никого');
     case 'payday': return e.ok ? 'PayDay засчитан: отыграл ' + e.min + ' мин, зарплата $' + e.pay + ' → уровень ' + e.lv + ', опыт ' + e.xp + (e.up ? ' · НОВЫЙ УРОВЕНЬ' : '') : 'PayDay не засчитан: отыграл ' + e.min + ' мин из 20';
     case 'fight':
       if (e.e === 'hit') return 'ударил ' + tag(e.vn, e.v) + ' · урон ' + e.dmg + ' · ' + item(e.w) + (e.ko ? ' · без сознания' : '');

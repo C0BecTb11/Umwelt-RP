@@ -18,6 +18,10 @@ const AFK_AFTER := 120.0             # секунд без движения, д�
 const CHAT_R := 20.0                 # м
 const CHAT_MAX := 120                # символов в сообщении
 const CHAT_GAP := 1.0                # с между сообщениями одного игрока
+# Ролевые команды (с 0.56, как в SAMP): /me действие, /do описание, /todo фраза*действие, /try действие.
+# Сервер собирает строку сам и пишет вид записи — по нему телефон красит (подделать «/try» текстом нельзя)
+const RP_CMDS := ["me", "do", "todo", "try"]
+const RP_HELP := "Есть команды: /me, /do, /todo, /try"
 
 ## Карточка игрока. ВСЁ, что принадлежит игроку (деньги, счёт, вещи, одежда, позиция, а дальше — права,
 ## фракция, работа, ключи от домов и машин), — поля этой карточки и сохраняются в player_data().
@@ -288,28 +292,68 @@ static func clean_chat(raw: String) -> String:
 		out += ch
 	return out.strip_edges().left(CHAT_MAX).strip_edges()
 
-## Сказать вслух: слышат все в игре ближе CHAT_R (и сам говорящий)
+## Разобрать сообщение (уже очищенное): обычная речь или ролевая команда.
+## Возвращает {"k": вид, "bub": текст облачка, "line": строка чата[, "ok": итог /try]} или {"err": подсказка игроку}.
+## Виды: say — речь, me, do, todo, try1 — «Удачно», try0 — «Неудачно»
+func chat_parse(p: Player, t: String) -> Dictionary:
+	if not t.begins_with("/"):
+		return {"k": "say", "bub": t, "line": "%s говорит: %s" % [tag(p), t]}
+	var cmd := t.get_slice(" ", 0).substr(1).to_lower()
+	var arg := t.substr(cmd.length() + 1).strip_edges()
+	match cmd:
+		"me":
+			if arg == "":
+				return {"err": "Напиши действие: /me достал телефон"}
+			return {"k": "me", "bub": arg, "line": "%s %s" % [tag(p), arg]}
+		"do":
+			if arg == "":
+				return {"err": "Напиши, что происходит: /do В руках телефон"}
+			return {"k": "do", "bub": arg, "line": "%s (( %s ))" % [arg, tag(p)]}
+		"todo":
+			var say := arg.get_slice("*", 0).strip_edges()
+			var act := arg.substr(arg.find("*") + 1).strip_edges() if arg.contains("*") else ""
+			if say == "" or act == "":
+				return {"err": "Напиши фразу и действие через *: /todo Привет*улыбнувшись"}
+			var said := "сказала" if p.gender() == "f" else "сказал"
+			return {"k": "todo", "bub": "«%s», %s" % [say, act], "line": "«%s», — %s %s, %s" % [say, said, tag(p), act]}
+		"try":
+			if arg == "":
+				return {"err": "Напиши попытку: /try открыть дверь"}
+			var ok := rnd.randf() < 0.5          # бросок на сервере (как удары)
+			var res := "Удачно" if ok else "Неудачно"
+			return {"k": "try1" if ok else "try0", "ok": ok, "bub": "%s | %s" % [arg, res], "line": "%s %s | %s" % [tag(p), arg, res]}
+	return {"err": "Нет такой команды /%s. %s" % [cmd.left(16), RP_HELP]}
+
+## Сказать вслух или ролевая команда: слышат все в игре ближе CHAT_R (и сам говорящий)
 func _say(p: Player, raw: String) -> void:
 	var t := clean_chat(raw)
 	if t == "":
+		return
+	var r := chat_parse(p, t)
+	if r.has("err"):
+		msg(p.id, r["err"])          # подсказка не тратит паузу между сообщениями
 		return
 	if p.chat_cd > 0.0:
 		msg(p.id, "Не так быстро — сообщение не отправлено")
 		return
 	p.chat_cd = CHAT_GAP
 	p.idle = 0.0
-	var line := "%s говорит: %s" % [tag(p), t]
 	var heard := 0
 	for q: Player in players:
 		if q.connected and q != p and q.pos.distance_to(p.pos) <= CHAT_R:
 			heard += 1
-	glog("chat", p, {"txt": t, "h": heard})
-	# запись: [кто сказал, текст — для облачка над головой (0.53), строка — для чата]
+	var lg := {"txt": t, "h": heard}
+	if r["k"] != "say":
+		lg["k"] = r["k"].left(3)
+	if r.has("ok"):
+		lg["ok"] = r["ok"]
+	glog("chat", p, lg)
+	# запись: [кто, текст облачка над головой (0.53), строка чата, вид (0.56: цвет)]
 	for q: Player in players:
 		if q.connected and q.pos.distance_to(p.pos) <= CHAT_R:
 			if not chat.has(q.id):
 				chat[q.id] = []
-			chat[q.id].append([p.id, t, line])
+			chat[q.id].append([p.id, r["bub"], r["line"], r["k"]])
 
 func pop_chat(pid: int) -> Array:
 	var c: Array = chat.get(pid, [])

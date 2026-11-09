@@ -15,13 +15,13 @@ static func create(kind: String) -> GameState:
 			g.time = 23 * 60.0
 		"evening":
 			g.time = 19 * 60.0 + 50.0
-		"gear", "outfit", "crowd", "knocked", "armed", "chat", "chatlog":
+		"gear", "outfit", "crowd", "knocked", "armed", "chat", "chatlog", "rp", "rpopen":
 			_open_street(g, p)
 			p.wear = {"torso": "suit_jacket", "legs": "pants", "feet": "shoes"}
 			p.face = Vector2(0, 1)
 			for id in ["hoodie", "jeans", "work_vest", "boots", "medkit"]:
 				Items.add_to(p.inv, id, 1)
-	if kind == "crowd" or kind == "knocked" or kind == "armed" or kind == "chat" or kind == "chatlog":
+	if kind == "crowd" or kind == "knocked" or kind == "armed" or kind == "chat" or kind == "chatlog" or kind == "rp" or kind == "rpopen":
 		var outfits := [{"torso": "hoodie", "legs": "shorts", "feet": "sneakers"}, {"torso": "work_vest", "legs": "work_pants", "feet": "boots"},
 			{"torso": "dress", "feet": "shoes"}, {"torso": "biker_vest", "legs": "jeans", "feet": "boots"}]
 		var genders := ["m", "m", "f", "f"]
@@ -83,6 +83,19 @@ static func create(kind: String) -> GameState:
 		g.chat[p.id] = []
 		for e in said:
 			g.chat[p.id].append([e[0].id, e[1], "%s говорит: %s" % [GameState.tag(e[0]), e[1]]])
+	if kind == "rp" or kind == "rpopen":
+		# ролевые команды (0.56) — строки собирает тот же код, что на сервере (chat_parse)
+		var q1: GameState.Player = g.players[1]
+		var q3: GameState.Player = g.players[3]
+		var said := [[q1, "Есть закурить?", ""], [p, "/me достал из кармана пачку сигарет", ""],
+			[q3, "/do В руке зажигалка Zippo.", ""], [q3, "/todo Держи, прикуривай*протягивая зажигалку", ""],
+			[p, "/try прикурить на ветру", "try0"], [p, "/try прикурить, прикрыв огонь ладонью", "try1"]]
+		g.chat[p.id] = []
+		for e in said:
+			var r := g.chat_parse(e[0], e[1])
+			while e[2] != "" and r["k"] != e[2]:     # для снимка — нужный итог броска
+				r = g.chat_parse(e[0], e[1])
+			g.chat[p.id].append([e[0].id, r["bub"], r["line"], r["k"]])
 	if kind == "chatlog":
 		p.hour_play = 25 * 60      # настоящий PayDay — плашка, как в игре
 		g.payday()

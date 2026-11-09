@@ -4,6 +4,7 @@ extends Node
 ## Запуск клиента:  godot --headless -- --nettest=имя,порт,ожидаемо_других
 ## Клиент входит, 2 с идёт, стоит, проверяет, что видит остальных и что сервер принял его позицию.
 ## С 0.52 ещё говорит в чат (дважды, с паузой) и проверяет, что слышал всех остальных ботов рядом.
+## С 0.56 второе сообщение — ролевая команда /me: проверяет, что от каждого пришла строка вида «me».
 
 var role := ""
 var main: Node
@@ -72,7 +73,7 @@ func _process(dt: float) -> void:
 			_watch(scr)
 			if (said == 0 and t > 0.1) or (said == 1 and t > 2.5):
 				said += 1
-				scr.act({"a": "say", "text": "привет от " + nick})
+				scr.act({"a": "say", "text": "привет от " + nick if said == 1 else "/me машет рукой"})
 			if t > 4.0:
 				var me := scr.me()
 				var moved := me.pos.distance_to(start_pos)
@@ -81,16 +82,19 @@ func _process(dt: float) -> void:
 				var need := minf(free_len, 4.6) * 0.6
 				var heard := {}
 				var mine := false
+				var rp := 0
 				for cl in scr.hud.chat_lines:
 					var line: String = cl[0]
-					var who := line.get_slice(" говорит: привет от ", 1)
+					if cl[2] == "me" and line.ends_with(") машет рукой") and not line.begins_with(nick + " ("):
+						rp += 1
+					var who := line.get_slice(" говорит: привет от ", 1) if line.contains(" говорит: привет от ") else ""
 					if who == nick:
 						mine = true
 					elif who != "":
 						heard[who] = true
-				L("чат: слышал %d других (%s), своё сообщение %s" % [heard.size(), ", ".join(heard.keys()), "пришло" if mine else "НЕ пришло"])
+				L("чат: слышал %d других (%s), своё сообщение %s, /me от других: %d" % [heard.size(), ", ".join(heard.keys()), "пришло" if mine else "НЕ пришло", rp])
 				var ok := saw_max >= expect and rollbacks == 0 and not scr.lost and moved >= need and frozen <= frames * 0.05 \
-					and heard.size() >= expect and mine
+					and heard.size() >= expect and mine and rp >= expect
 				L("прошёл %.2f клетки (нужно ≥ %.2f), откатов %d, видел других: %d (ожидалось %d), кадров с другими %d, из них без движения у бегущих %d" % [moved, need, rollbacks, saw_max, expect, frames, frozen])
 				if reconnect and ok:
 					L("жду обрыва связи и переподключения")

@@ -27,17 +27,22 @@ var panel_last_y := 0.0
 var panel_drag := false
 var update_note := ""     # постоянное напоминание: вышла новая версия
 var msgs: Array = []      # [текст, время]
-# чат (с 0.52): строки [текст, когда пришла (мс)]; поле ввода — LineEdit (клавиатура телефона)
+# чат (с 0.52): строки [текст, когда пришла (мс), вид (0.56)]; поле ввода — LineEdit (клавиатура телефона)
 var chat_lines: Array = []
 var chat_open := false
 var chat_edit: LineEdit
 var chat_send := Rect2()
+var chat_chips: Array = []     # [Rect2, "/me "] — кнопки ролевых команд под полем ввода (0.56)
+const RP_COL := Color(0.80, 0.68, 0.92)      # ролевые команды — сиреневым, как в SAMP
+const TRY_OK := Color(0.45, 0.88, 0.45)
+const TRY_BAD := Color(0.98, 0.42, 0.40)
 const CHAT_KEEP := 40          # строк в истории
 const CHAT_SHOW := 6           # строк на экране, пока чат закрыт
 const CHAT_LIFE := 30.0        # с: строка видна, потом гаснет (в открытом чате — вся история)
-# облачко над головой говорящего (с 0.53): id игрока → [текст, когда сказал (мс), сколько висит (с)]
+# облачко над головой говорящего (с 0.53): id игрока → [текст, когда сказал (мс), сколько висит (с), вид (0.56)]
 var bubbles := {}
 const BUBBLE_W := 210.0        # ширина текста облачка
+var bubble_hold := false       # демо-снимки: облачка не гаснут (под виртуальным экраном кадры идут медленно)
 
 # кнопки: центр и радиус
 var b_attack := [Vector2.ZERO, 50.0]
@@ -70,7 +75,7 @@ func _ready() -> void:
 	chat_edit = LineEdit.new()
 	chat_edit.visible = false
 	chat_edit.max_length = GameState.CHAT_MAX
-	chat_edit.placeholder_text = "Сообщение — слышат те, кто рядом"
+	chat_edit.placeholder_text = "Сообщение или /me, /do, /todo, /try"
 	chat_edit.add_theme_font_size_override("font_size", 18)
 	chat_edit.mouse_filter = Control.MOUSE_FILTER_STOP
 	chat_edit.text_submitted.connect(func(_t: String) -> void: _send_chat())
@@ -106,16 +111,18 @@ func add_msg(s: String) -> void:
 	if msgs.size() > 4:
 		msgs.pop_front()
 
-## Запись чата от сервера: [id сказавшего, текст, строка чата] — строка в чат, текст — облачком над головой
+## Запись чата от сервера: [id сказавшего, текст, строка чата, вид] — строка в чат, текст — облачком над головой.
+## Вид (с 0.56): say — речь, me/do/todo — ролевые (сиреневым), try1/try0 — /try «Удачно»/«Неудачно»
 func on_chat(e) -> void:
 	if not (e is Array) or e.size() < 3:
 		return
-	add_chat(str(e[2]))
+	var k := str(e[3]) if e.size() > 3 else "say"
+	add_chat(str(e[2]), k)
 	var t := str(e[1])
-	bubbles[int(e[0])] = [t, Time.get_ticks_msec(), clampf(3.0 + t.length() * 0.07, 4.0, 10.0)]
+	bubbles[int(e[0])] = [t, Time.get_ticks_msec(), clampf(3.0 + t.length() * 0.07, 4.0, 10.0), k]
 
-func add_chat(s: String) -> void:
-	chat_lines.append([s, Time.get_ticks_msec()])
+func add_chat(s: String, k: String = "say") -> void:
+	chat_lines.append([s, Time.get_ticks_msec(), k])
 	if chat_lines.size() > CHAT_KEEP:
 		chat_lines.pop_front()
 
@@ -127,6 +134,12 @@ func open_chat() -> void:
 	chat_edit.position = Vector2(s.position.x + 14, 60)
 	chat_edit.size = Vector2(w - 120, 44)
 	chat_send = Rect2(s.position.x + 14 + w - 112, 60, 112, 44)
+	chat_chips.clear()
+	var cx := s.position.x + 14
+	for c in ["/me", "/do", "/todo", "/try"]:
+		var cw := _tw(c, 15) + 26
+		chat_chips.append([Rect2(cx, 110, cw, 32), c + " "])
+		cx += cw + 8
 	chat_edit.text = ""
 	chat_edit.visible = true
 	chat_edit.grab_focus()
@@ -136,6 +149,15 @@ func close_chat() -> void:
 	chat_edit.release_focus()
 	chat_edit.visible = false
 	DisplayServer.virtual_keyboard_hide()
+
+## Кнопка команды: поставить её в начало строки (вместо другой команды, если была), текст оставить
+func _chip(cmd: String) -> void:
+	var t := chat_edit.text
+	if t.begins_with("/"):
+		t = t.substr(t.find(" ") + 1) if t.contains(" ") else ""
+	chat_edit.text = cmd + t.strip_edges(true, false)
+	chat_edit.caret_column = chat_edit.text.length()
+	chat_edit.grab_focus()
 
 func _send_chat() -> void:
 	var t := GameState.clean_chat(chat_edit.text)
@@ -176,6 +198,12 @@ func open_demo_panel(kind: String) -> void:
 			panel = Pnl.STATS
 		"chat":
 			open_chat()
+		"rp":
+			bubble_hold = true
+		"rpopen":
+			bubble_hold = true
+			open_chat()
+			chat_edit.text = "/todo Держи*протягивая зажигалку"
 
 # ================== РАСКЛАДКА ==================
 func _safe() -> Rect2:
@@ -245,7 +273,12 @@ func _touch(type: int, id: int, p: Vector2) -> void:
 		if type == 0:
 			if chat_send.has_point(p):
 				_send_chat()
-			elif not Rect2(chat_edit.position, chat_edit.size).has_point(p):
+				return
+			for c in chat_chips:
+				if (c[0] as Rect2).has_point(p):
+					_chip(c[1])
+					return
+			if not Rect2(chat_edit.position, chat_edit.size).has_point(p):
 				close_chat()
 		return
 	if me.dead:
@@ -572,7 +605,7 @@ func _draw_chat(x: float, y: float) -> void:
 	var maxw := minf(W * 0.36, 540.0)
 	var now := Time.get_ticks_msec()
 	var lim := 12 if chat_open else CHAT_SHOW
-	var rows: Array = []          # [строка, прозрачность]
+	var rows: Array = []          # [строка, прозрачность, вид, последняя ли строка записи]
 	for i in range(chat_lines.size() - 1, -1, -1):
 		var e: Array = chat_lines[i]
 		var age := (now - int(e[1])) / 1000.0
@@ -580,21 +613,41 @@ func _draw_chat(x: float, y: float) -> void:
 		if a <= 0.0:
 			break
 		var wr := _wrap(e[0], 14, maxw)
+		var kind := str(e[2]) if e.size() > 2 else "say"
 		for k in range(wr.size() - 1, -1, -1):
-			rows.push_front([wr[k], a])
+			rows.push_front([wr[k], a, kind, k == wr.size() - 1])
 		if rows.size() >= lim:
 			break
 	while rows.size() > lim:
 		rows.pop_front()
 	if chat_open:
-		y = 112.0
+		for c in chat_chips:
+			_rr(c[0], 9, Color(0.30, 0.22, 0.38, 0.92))
+			_text((c[0] as Rect2).get_center() + Vector2(0, 5), (c[1] as String).strip_edges(), 15, RP_COL.lightened(0.3), HORIZONTAL_ALIGNMENT_CENTER)
+		y = 150.0
+		lim = mini(lim, 11)
+		while rows.size() > lim:
+			rows.pop_front()
 		_rr(Rect2(x - 6, y - 4, maxw + 12, maxf(rows.size(), 1) * 19 + 10), 8, Color(0.05, 0.06, 0.07, 0.75))
 		if rows.is_empty():
 			_text(Vector2(x, y + 15), "Сообщений пока нет", 14, Color(1, 1, 1, 0.5))
 		_rr(chat_send, 10, Color(0.24, 0.42, 0.24))
 		_text(chat_send.get_center() + Vector2(0, 6), "Отправить", 15, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER)
 	for r in rows:
-		_text(Vector2(x, y + 15), r[0], 14, Color(1, 1, 1, r[1]), HORIZONTAL_ALIGNMENT_LEFT, true)
+		var kind: String = r[2]
+		var col := Color.WHITE if kind == "say" else RP_COL
+		col.a = r[1]
+		var s: String = r[0]
+		# /try: «Удачно» зелёным, «Неудачно» красным — только у записи с видом try1/try0 от сервера
+		var tail := ("Удачно" if kind == "try1" else "Неудачно") if kind.begins_with("try") and r[3] else ""
+		if tail != "" and s.ends_with(tail):
+			var head := s.left(s.length() - tail.length())
+			_text(Vector2(x, y + 15), head, 14, col, HORIZONTAL_ALIGNMENT_LEFT, true)
+			var tc := TRY_OK if kind == "try1" else TRY_BAD
+			tc.a = r[1]
+			_text(Vector2(x + _tw(head, 14), y + 15), tail, 14, tc, HORIZONTAL_ALIGNMENT_LEFT, true)
+		else:
+			_text(Vector2(x, y + 15), s, 14, col, HORIZONTAL_ALIGNMENT_LEFT, true)
 		y += 19
 
 ## Облачка с речью над головами (с 0.53): над именем (у себя — над головой), до 3 строк, гаснут в конце
@@ -603,6 +656,8 @@ func _bubbles(g: GameState, me: GameState.Player) -> void:
 	for id in bubbles.keys():
 		var b: Array = bubbles[id]
 		var age := (now - int(b[1])) / 1000.0
+		if bubble_hold:
+			age = 1.0
 		if age > b[2]:
 			bubbles.erase(id)
 			continue
@@ -622,12 +677,24 @@ func _bubbles(g: GameState, me: GameState.Player) -> void:
 			tip.y -= 34                  # над кольцом «Ем / Надеваю»
 		var h := lines.size() * 17.0 + 10.0
 		var r := Rect2(tip.x - w / 2 - 9, tip.y - 7 - h, w + 18, h)
-		var bg := Color(0.96, 0.96, 0.94, 0.92 * a)
+		var rp: bool = b.size() > 3 and b[3] != "say"      # ролевые команды — сиреневое облачко (0.56)
+		var bg := (Color(0.89, 0.83, 0.96) if rp else Color(0.96, 0.96, 0.94))
+		bg.a = 0.92 * a
 		_rr(r, 9, bg)
 		draw_colored_polygon(PackedVector2Array([Vector2(tip.x - 6, r.end.y - 0.5), Vector2(tip.x + 6, r.end.y - 0.5), Vector2(tip.x, tip.y)]), bg)
 		var y := r.position.y + 18
-		for l in lines:
-			_text(Vector2(tip.x, y), l, 13, Color(0.08, 0.09, 0.1, a), HORIZONTAL_ALIGNMENT_CENTER)
+		var tc := Color(0.24, 0.12, 0.36, a) if rp else Color(0.08, 0.09, 0.1, a)
+		var tail := ("Удачно" if b[3] == "try1" else "Неудачно") if rp and str(b[3]).begins_with("try") else ""
+		for i in lines.size():
+			var l: String = lines[i]
+			if tail != "" and i == lines.size() - 1 and l.ends_with(tail):
+				# итог /try — зелёным или красным, как в чате
+				var head := l.left(l.length() - tail.length())
+				var x0 := tip.x - _tw(l, 13) / 2.0
+				_text(Vector2(x0, y), head, 13, tc)
+				_text(Vector2(x0 + _tw(head, 13), y), tail, 13, Color(0.10, 0.52, 0.16, a) if b[3] == "try1" else Color(0.75, 0.12, 0.10, a))
+			else:
+				_text(Vector2(tip.x, y), l, 13, tc, HORIZONTAL_ALIGNMENT_CENTER)
 			y += 17
 
 ## Разбить строку по словам на куски не шире w
