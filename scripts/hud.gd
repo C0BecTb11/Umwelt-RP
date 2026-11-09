@@ -605,7 +605,7 @@ func _draw_chat(x: float, y: float) -> void:
 	var maxw := minf(W * 0.36, 540.0)
 	var now := Time.get_ticks_msec()
 	var lim := 12 if chat_open else CHAT_SHOW
-	var rows: Array = []          # [строка, прозрачность, вид, последняя ли строка записи]
+	var rows: Array = []          # [строка, прозрачность, вид, последняя ли строка записи, сколько первых букв — белым]
 	for i in range(chat_lines.size() - 1, -1, -1):
 		var e: Array = chat_lines[i]
 		var age := (now - int(e[1])) / 1000.0
@@ -614,8 +614,14 @@ func _draw_chat(x: float, y: float) -> void:
 			break
 		var wr := _wrap(e[0], 14, maxw)
 		var kind := str(e[2]) if e.size() > 2 else "say"
+		var wend := speech_len(e[0], kind)
+		var starts := []                 # с какой буквы строки записи начинается каждый кусок (куски — через один пробел)
+		var off := 0
+		for piece in wr:
+			starts.append(off)
+			off += (piece as String).length() + 1
 		for k in range(wr.size() - 1, -1, -1):
-			rows.push_front([wr[k], a, kind, k == wr.size() - 1])
+			rows.push_front([wr[k], a, kind, k == wr.size() - 1, clampi(wend - starts[k], 0, (wr[k] as String).length())])
 		if rows.size() >= lim:
 			break
 	while rows.size() > lim:
@@ -646,9 +652,24 @@ func _draw_chat(x: float, y: float) -> void:
 			var tc := TRY_OK if kind == "try1" else TRY_BAD
 			tc.a = r[1]
 			_text(Vector2(x + _tw(head, 14), y + 15), tail, 14, tc, HORIZONTAL_ALIGNMENT_LEFT, true)
+		elif r[4] > 0:
+			# /todo: сказанное — белым, как речь, остальное — сиреневым (0.57)
+			var said := s.left(r[4])
+			_text(Vector2(x, y + 15), said, 14, Color(1, 1, 1, r[1]), HORIZONTAL_ALIGNMENT_LEFT, true)
+			_text(Vector2(x + _tw(said, 14), y + 15), s.substr(r[4]), 14, col, HORIZONTAL_ALIGNMENT_LEFT, true)
 		else:
 			_text(Vector2(x, y + 15), s, 14, col, HORIZONTAL_ALIGNMENT_LEFT, true)
 		y += 19
+
+## /todo (0.57): сколько первых букв строки — сказанное вслух «…» (рисуется как речь). Строка чата —
+## «„фраза“, — сказал…», облачко — «„фраза“, действие»; у остальных видов 0
+static func speech_len(s: String, kind: String) -> int:
+	if kind != "todo" or not s.begins_with("«"):
+		return 0
+	var i := s.find("», — сказал")       # строка чата
+	if i < 0:
+		i = s.find("», ")                # облачко
+	return i + 1 if i > 0 else 0
 
 ## Облачка с речью над головами (с 0.53): над именем (у себя — над головой), до 3 строк, гаснут в конце
 func _bubbles(g: GameState, me: GameState.Player) -> void:
@@ -685,14 +706,23 @@ func _bubbles(g: GameState, me: GameState.Player) -> void:
 		var y := r.position.y + 18
 		var tc := Color(0.24, 0.12, 0.36, a) if rp else Color(0.08, 0.09, 0.1, a)
 		var tail := ("Удачно" if b[3] == "try1" else "Неудачно") if rp and str(b[3]).begins_with("try") else ""
+		var wend := speech_len(b[0], str(b[3])) if rp else 0     # /todo: фраза — цветом речи
+		var off := 0
 		for i in lines.size():
 			var l: String = lines[i]
+			var sw := clampi(wend - off, 0, l.length())
+			off += l.length() + 1
 			if tail != "" and i == lines.size() - 1 and l.ends_with(tail):
 				# итог /try — зелёным или красным, как в чате
 				var head := l.left(l.length() - tail.length())
 				var x0 := tip.x - _tw(l, 13) / 2.0
 				_text(Vector2(x0, y), head, 13, tc)
 				_text(Vector2(x0 + _tw(head, 13), y), tail, 13, Color(0.10, 0.52, 0.16, a) if b[3] == "try1" else Color(0.75, 0.12, 0.10, a))
+			elif sw > 0:
+				var x1 := tip.x - _tw(l, 13) / 2.0
+				var said := l.left(sw)
+				_text(Vector2(x1, y), said, 13, Color(0.08, 0.09, 0.1, a))
+				_text(Vector2(x1 + _tw(said, 13), y), l.substr(sw), 13, tc)
 			else:
 				_text(Vector2(tip.x, y), l, 13, tc, HORIZONTAL_ALIGNMENT_CENTER)
 			y += 17
