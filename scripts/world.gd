@@ -50,20 +50,51 @@ const DISHRACK := 43           # стеллаж-тележка для грязн
 const KITCHENETTE := 44        # тумба с микроволновкой, чайником и кофеваркой
 const PLANT := 45              # растение в кадке
 const NOTICEBOARD := 46        # доска объявлений
+# мебель полицейского участка (модели — scripts/police_furniture.gd)
+const FRONTDESK := 47          # стойка дежурного: клетки подряд — одна длинная; кресло ставится с рабочей стороны
+const WANTEDBOARD := 48        # доска «Разыскиваются»
+const PDESK := 49              # рабочий стол с компьютером или пишущей машинкой
+const OFFICECHAIR := 50        # офисное кресло: у стола само поворачивается к нему
+const COPIER := 51             # копировальный аппарат
+const FAXSTAND := 52           # тумба с факсом и принтером
+const EVIDENCESHELF := 53      # стеллаж с вещдоками
+const CASEBOARD := 54          # доска расследования
+const INTERROTABLE := 55       # стол для допросной: две клетки подряд — один длинный
+const CELLBARS := 56           # решётка камеры: встаёт вдоль ряда решёток и стен, клетка непроходима
+const CELLDOOR := 57           # дверь камеры (решётчатая, закрыта; не открывается)
+const CELLBUNK := 58           # нары: две клетки подряд вдоль стены
+const CELLTOILET := 59         # унитаз с раковиной из нержавейки
+const RIOTRACK := 60           # стойка со спецснаряжением
+const MUGSHOT := 61            # ростомер
+const BOOKING := 62            # стойка оформления задержанных
+const DISPATCH := 63           # пульт диспетчера
+const FLAGSTAND := 64          # флаг на стойке
+const CHIEFDESK := 65          # стол начальника: две клетки подряд — один большой
+const SOFA := 66               # диван: две клетки подряд; одна — кресло
+const PAYPHONE := 67           # телефон-автомат
+const BRIEFBOARD := 68         # доска для инструктажа
+const PODIUM := 69             # трибуна: эмблемой — туда, где больше свободного пола
 
 const DX4 := [1, -1, 0, 0]
 const DY4 := [0, 0, 1, -1]
 
-static func is_furniture(t: int) -> bool: return (t >= FRIDGE and t <= STORESHELF) or (t >= BUNK and t <= NOTICEBOARD)
+static func is_furniture(t: int) -> bool: return (t >= FRIDGE and t <= STORESHELF) or (t >= BUNK and t <= PODIUM)
 ## Низкая мебель: поверх неё видно (как стойка)
 static func is_low_furniture(t: int) -> bool:
 	return t == COUNTER or t == FOOTLOCKER or t == AMMO or t == RADIO or t == MAPTABLE or t == MILDESK \
-		or (t >= DINETABLE and t <= NOTICEBOARD and t != DISHRACK)
+		or (t >= DINETABLE and t <= NOTICEBOARD and t != DISHRACK) \
+		or (t >= FRONTDESK and t <= PODIUM and t != EVIDENCESHELF and t != RIOTRACK)
 ## Мебель на две клетки: соседние клетки одного вида вдоль стены сливаются в один длинный предмет
-static func is_wide_furniture(t: int) -> bool: return t == BUNK or t == MAPTABLE or t == DINETABLE
+static func is_wide_furniture(t: int) -> bool:
+	return t == BUNK or t == MAPTABLE or t == DINETABLE or t == INTERROTABLE or t == CELLBUNK or t == CHIEFDESK or t == SOFA
 ## Сиденья: рядом со столом встают к нему (а не к стене)
-static func is_seat(t: int) -> bool: return t == CHAIR or t == BENCH
-static func is_table(t: int) -> bool: return t == DINETABLE or t == MAPTABLE
+static func is_seat(t: int) -> bool: return t == CHAIR or t == BENCH or t == OFFICECHAIR
+static func is_table(t: int) -> bool:
+	return t == DINETABLE or t == MAPTABLE or t == PDESK or t == INTERROTABLE or t == CHIEFDESK or t == FRONTDESK or t == DISPATCH
+## Решётки камер: стоят по линии, а не у стены
+static func is_bars(t: int) -> bool: return t == CELLBARS or t == CELLDOOR
+## Мебель, которая к стене не прижимается и занимает всю клетку
+static func is_freestanding(t: int) -> bool: return t == CELLBARS or t == CELLDOOR or t == PODIUM
 static func is_door_like(t: int) -> bool: return t == DOOR or t == DOOR_OPEN
 static func is_window_like(t: int) -> bool: return t == WINDOW
 static func is_floor(t: int) -> bool: return t == WOOD or t == TILEFLOOR
@@ -124,19 +155,40 @@ const FURN_FRONT := {FRIDGE: -0.19, COUNTER: -0.12, WARDROBE: -0.30, SHELF: -0.4
 	BUNK: 0.05, FOOTLOCKER: -0.39, GUNRACK: -0.49, GUNSAFE: -0.32, AMMO: -0.24, MILLOCKER: -0.34, RADIO: -0.26, MAPTABLE: -0.01,
 	FILECAB: -0.24, MILDESK: -0.21, GEARSHELF: -0.37, MAPBOARD: -0.5,      # стенд целиком в зазоре у стены: клетка перед ним свободна
 	DINETABLE: -0.01, CHAIR: -0.46, BENCH: -0.5, SERVELINE: -0.05, TRAYSTAND: -0.34, WATERCOOLER: -0.43, STEELTABLE: -0.22, SINK: -0.23,
-	DISHRACK: -0.30, KITCHENETTE: -0.26, PLANT: -0.29, NOTICEBOARD: -0.5}      # скамья и доска у стены — целиком в зазоре
+	DISHRACK: -0.30, KITCHENETTE: -0.26, PLANT: -0.29, NOTICEBOARD: -0.5,      # скамья и доска у стены — целиком в зазоре
+	# полиция: доски, ростомер, телефон и флаг у стены — в зазоре; решётки и трибуна занимают клетку целиком
+	FRONTDESK: -0.13, WANTEDBOARD: -0.5, PDESK: -0.02, OFFICECHAIR: -0.3, COPIER: -0.24, FAXSTAND: -0.34,
+	EVIDENCESHELF: -0.39, CASEBOARD: -0.5, INTERROTABLE: -0.09, CELLBARS: 0.5, CELLDOOR: 0.5, CELLBUNK: -0.16,
+	CELLTOILET: -0.19, RIOTRACK: -0.42, MUGSHOT: -0.5, BOOKING: -0.34, DISPATCH: -0.02, FLAGSTAND: -0.5,
+	CHIEFDESK: -0.02, SOFA: -0.08, PAYPHONE: -0.5, BRIEFBOARD: -0.5, PODIUM: 0.5}
 ## То же для сидений, придвинутых к столу: дальний от стола край сиденья (от центра клетки, в сторону от стола)
-const SEAT_FRONT := {CHAIR: -0.175, BENCH: -0.18}
+const SEAT_FRONT := {CHAIR: -0.175, BENCH: -0.18, OFFICECHAIR: -0.10}
 
 ## Сиденье в клетке придвинуто к столу (k — furniture_dir этой клетки)
 func seat_at_table(x: int, y: int, k: int) -> bool:
 	return k >= 0 and is_seat(t(x, y)) and is_table(t(x - DX4[k], y - DY4[k]))
 
+## На сколько сиденье (в клетке x, y; k — его furniture_dir) задвигается за границу клетки стола. Стол посреди
+## комнаты доходит до границы — 0; стол у стены прижат к ней, его лицо почти в середине клетки — кресло
+## заезжает к нему (и стоит уже в клетке стола)
+func seat_slide(x: int, y: int, k: int) -> float:
+	var tx: int = x - DX4[k]
+	var ty: int = y - DY4[k]
+	if furniture_dir(tx, ty) != k:
+		return 0.0
+	return maxf(0.5 - float(FURN_FRONT.get(t(tx, ty), 0.5)), 0.0)
+
 ## Лицо мебели в клетке для столкновения (см. FURN_FRONT), k — её furniture_dir
 func furniture_front(x: int, y: int, k: int) -> float:
 	var tt := t(x, y)
 	if seat_at_table(x, y, k):
-		return SEAT_FRONT[tt]
+		return float(SEAT_FRONT[tt]) - seat_slide(x, y, k)
+	if k >= 0 and is_table(tt):
+		# стол у стены, к которому придвинуто сиденье: оно стоит в его клетке — клетка занята целиком
+		var sx: int = x + DX4[k]
+		var sy: int = y + DY4[k]
+		if is_seat(t(sx, sy)) and furniture_dir(sx, sy) == k:
+			return 0.5
 	return float(FURN_FRONT.get(tt, 0.0))
 
 ## Длинная мебель (is_wide_furniture): [половина, шаг «вправо» по x, по y]. Половина: 0 — одиночная (пары нет),
@@ -169,6 +221,8 @@ func furniture_half(x: int, y: int) -> int:
 func furniture_dir(x: int, y: int) -> int:
 	var best := -1
 	var dir := -1
+	if is_freestanding(t(x, y)):
+		return -1
 	if is_seat(t(x, y)):               # сиденье у стола — спиной от стола (стол важнее стены)
 		for k in 4:
 			if is_table(t(x - DX4[k], y - DY4[k])):
@@ -319,7 +373,7 @@ func along_y(x: int, y: int) -> bool:
 ## Карта игры — файл maps/city.json (её правят в редакторе карты, в игру она попадает только с выпуском).
 ## Клетки хранятся строками символов: одна строка — один ряд карты, так изменения видны в истории коммитов.
 const MAP_PATH := "res://maps/city.json"
-const MAP_CHARS := ".=-wt#DdO?T!FCWSMLRcvx~bkgGalrmfqeBnhjsyuzipoPN"  # символ = номер клетки (9 и 11 — старые, на карте недопустимы; ~ вода — 0.40)
+const MAP_CHARS := ".=-wt#DdO?T!FCWSMLRcvx~bkgGalrmfqeBnhjsyuzipoPN0123456789AEHIJKQUVXYZ+"  # символ = номер клетки (9 и 11 — старые, на карте недопустимы; ~ вода — 0.40)
 const MAX_SIDE := 500           # клеток по стороне (1 клетка ≈ 1 м); 500×500 проверено тестом test_big_map
 const PROP_CHUNK := 10          # = WorldMesh.CHUNK: объекты разложены по кускам графики (props_chunk)
 const MAX_PROPS := 20000

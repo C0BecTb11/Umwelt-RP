@@ -1644,12 +1644,11 @@ func test_furniture_collision() -> void:
 		rows.append(("#" + "w".repeat(10) + "#" if y > 0 and y < 8 else "#".repeat(12)) + ".".repeat(18) if y < 9 else ".".repeat(30))
 	var err := w.load_map({"v": 1, "w": 30, "h": 30, "spawn": [5.5, 4.5], "rows": rows, "props": []})
 	var types := [W.FRIDGE, W.COUNTER, W.WARDROBE, W.SHELF, W.MEDCAB, W.LOCKER, W.STORESHELF]
-	for mt in range(W.BUNK, W.NOTICEBOARD + 1):   # мебель военной части и столовой — те же правила
+	for mt in range(W.BUNK, W.PODIUM + 1):        # мебель военной части, столовой и полиции — те же правила
 		types.append(mt)
 	var bad := []
-	for mt in range(W.BUNK, W.NOTICEBOARD + 1):
-		if not W.is_furniture(mt) or not W.FURN_FRONT.has(mt) or W.MAP_CHARS.length() <= mt \
-				or not (MilFurniture.BACK.has(mt) or CanteenFurniture.BACK.has(mt)):
+	for mt in range(W.BUNK, W.PODIUM + 1):
+		if not W.is_furniture(mt) or not W.FURN_FRONT.has(mt) or W.MAP_CHARS.length() <= mt or WorldMesh.furn_set(mt) == 0:
 			bad.append("новая мебель %d описана не везде" % mt)
 	var wm := WorldMesh.new(w)
 	for i in types.size():
@@ -1664,7 +1663,9 @@ func test_furniture_collision() -> void:
 		var mx := -100.0
 		for v in m.verts:
 			mx = maxf(mx, v.x)
-		if W.FURN_FRONT[tt] <= -0.5:       # тонкое (стенд, доска, скамья) стоит в зазоре у стены, до своей клетки не доходит
+		if W.is_freestanding(tt):          # решётка, трибуна: к стене не прижимаются, клетка занята целиком
+			pass
+		elif W.FURN_FRONT[tt] <= -0.5:       # тонкое (стенд, доска, скамья) стоит в зазоре у стены, до своей клетки не доходит
 			if mx > front + 0.01:
 				bad.append("%d выступает в клетку: %.2f" % [tt, mx])
 		elif absf(mx - front) > 0.04:
@@ -1721,7 +1722,63 @@ func test_furniture_collision() -> void:
 		w.set_t(5, 3, W.WOOD)
 	for cxy in [[5, 4], [6, 4], [9, 2], [9, 3]]:
 		w.set_t(cxy[0], cxy[1], W.WOOD)
-	if W.opaque_tile(W.MAPTABLE) or not W.opaque_tile(W.GUNSAFE) or W.opaque_tile(W.CHAIR) or not W.opaque_tile(W.DISHRACK):
+	# стол посреди комнаты поворачивается лицом (ящиками) к креслу хозяина; длинный — тоже, оставаясь на своих клетках
+	w.set_t(5, 4, W.PDESK)
+	w.set_t(5, 3, W.OFFICECHAIR)       # кресло на севере
+	w.set_t(5, 5, W.CHAIR)             # стулья посетителей на юге — не перевешивают
+	if wm.table_face(5, 4, W.PDESK) != 3:
+		bad.append("стол не повернулся к креслу: %d" % wm.table_face(5, 4, W.PDESK))
+	var far2: float = 4.0 - (0.5 + float(W.SEAT_FRONT[W.OFFICECHAIR]))
+	if w.circle_blocked(5.5, far2 - 0.32, 0.3) or not w.circle_blocked(5.5, far2 - 0.27, 0.3):
+		bad.append("столкновение кресла у стола")
+	w.set_t(5, 4, W.CHIEFDESK)
+	w.set_t(6, 4, W.CHIEFDESK)
+	var md := Mesher.new()
+	wm._furniture(md, 5, 4, W.CHIEFDESK)
+	var bx := [100.0, -100.0, 100.0, -100.0]
+	for v in md.verts:
+		bx = [minf(bx[0], v.x), maxf(bx[1], v.x), minf(bx[2], v.z), maxf(bx[3], v.z)]
+	if bx[0] < 5.0 or bx[1] > 7.0 or bx[1] - bx[0] < 1.8 or absf(bx[2] - 4.08) > 0.03 or absf(bx[3] - 4.94) > 0.03:
+		bad.append("стол начальника лицом на север: x %.2f..%.2f, z %.2f..%.2f" % bx)
+	for cxy in [[5, 3], [5, 4], [6, 4], [5, 5]]:
+		w.set_t(cxy[0], cxy[1], W.WOOD)
+	# стол у стены и кресло перед ним: кресло заезжает к столу (в его клетку), клетка стола занята целиком, клетка кресла свободна
+	w.set_t(1, 4, W.PDESK)
+	if w.circle_blocked(1.5 + float(W.FURN_FRONT[W.PDESK]) + 0.32, 4.5, 0.3):
+		bad.append("стол у стены без кресла: перед ним должно быть свободно")
+	w.set_t(2, 4, W.OFFICECHAIR)
+	var mc := Mesher.new()
+	wm._furniture(mc, 2, 4, W.OFFICECHAIR)
+	var cx2 := [100.0, -100.0]
+	for v in mc.verts:
+		cx2 = [minf(cx2[0], v.x), maxf(cx2[1], v.x)]
+	if w.furniture_dir(2, 4) != 0 or cx2[0] < 1.3 or cx2[1] > 2.02 or not w.circle_blocked(1.9, 4.5, 0.05) or w.circle_blocked(2.35, 4.5, 0.3):
+		bad.append("кресло у стола у стены: x %.2f..%.2f" % cx2)
+	w.set_t(1, 4, W.WOOD)
+	w.set_t(2, 4, W.WOOD)
+	# стойка дежурного: вся линия смотрит рабочей стороной туда, где кресло
+	for xx in [4, 5, 6]:
+		w.set_t(xx, 4, W.FRONTDESK)
+	w.set_t(6, 3, W.OFFICECHAIR)
+	if wm.table_face(4, 4, W.FRONTDESK) != 3 or wm.table_face(5, 4, W.FRONTDESK) != 3 or wm.table_face(6, 4, W.FRONTDESK) != 3:
+		bad.append("стойка дежурного смотрит вразнобой")
+	for cxy in [[4, 4], [5, 4], [6, 4], [6, 3]]:
+		w.set_t(cxy[0], cxy[1], W.WOOD)
+	# решётка: вдоль ряда, клетка занята целиком, взгляд не закрывает; у стены не «прилипает»
+	for yy in [1, 2, 3]:
+		w.set_t(4, yy, W.CELLBARS)
+	var mb := Mesher.new()
+	wm._furniture(mb, 4, 2, W.CELLBARS)
+	var bb := [100.0, -100.0, 100.0, -100.0]
+	for v in mb.verts:
+		bb = [minf(bb[0], v.x), maxf(bb[1], v.x), minf(bb[2], v.z), maxf(bb[3], v.z)]
+	if w.furniture_dir(4, 1) != -1 or bb[1] - bb[0] > 0.1 or absf(bb[2] - 2.0) > 0.01 or absf(bb[3] - 3.0) > 0.01 \
+			or not w.circle_blocked(3.75, 2.5, 0.3) or W.opaque_tile(W.CELLBARS):
+		bad.append("решётка: %s, направление %d" % [bb, w.furniture_dir(4, 1)])
+	for yy in [1, 2, 3]:
+		w.set_t(4, yy, W.WOOD)
+	if W.opaque_tile(W.MAPTABLE) or not W.opaque_tile(W.GUNSAFE) or W.opaque_tile(W.CHAIR) or not W.opaque_tile(W.DISHRACK) \
+			or W.opaque_tile(W.PDESK) or not W.opaque_tile(W.EVIDENCESHELF):
 		bad.append("низкая мебель должна быть прозрачной для взгляда, высокая — нет")
 	w.set_t(6, 4, W.COUNTER)           # посреди комнаты
 	if not w.circle_blocked(7.28, 4.5, 0.3) or w.circle_blocked(7.32, 4.5, 0.3):
