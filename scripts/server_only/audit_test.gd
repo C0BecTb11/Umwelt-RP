@@ -1644,10 +1644,10 @@ func test_furniture_collision() -> void:
 		rows.append(("#" + "w".repeat(10) + "#" if y > 0 and y < 8 else "#".repeat(12)) + ".".repeat(18) if y < 9 else ".".repeat(30))
 	var err := w.load_map({"v": 1, "w": 30, "h": 30, "spawn": [5.5, 4.5], "rows": rows, "props": []})
 	var types := [W.FRIDGE, W.COUNTER, W.WARDROBE, W.SHELF, W.MEDCAB, W.LOCKER, W.STORESHELF]
-	for mt in range(W.BUNK, W.PODIUM + 1):        # мебель военной части, столовой и полиции — те же правила
+	for mt in range(W.BUNK, W.MORGUE + 1):        # мебель военной части, столовой, полиции и больницы — те же правила
 		types.append(mt)
 	var bad := []
-	for mt in range(W.BUNK, W.PODIUM + 1):
+	for mt in range(W.BUNK, W.MORGUE + 1):
 		if not W.is_furniture(mt) or not W.FURN_FRONT.has(mt) or W.MAP_CHARS.length() <= mt or WorldMesh.furn_set(mt) == 0:
 			bad.append("новая мебель %d описана не везде" % mt)
 	var wm := WorldMesh.new(w)
@@ -1783,7 +1783,71 @@ func test_furniture_collision() -> void:
 	w.set_t(6, 4, W.COUNTER)           # посреди комнаты
 	if not w.circle_blocked(7.28, 4.5, 0.3) or w.circle_blocked(7.32, 4.5, 0.3):
 		bad.append("посреди комнаты")
-	check("Мебель: у стены упираешься в её лицо, а не в невидимую стену; посреди комнаты — вся клетка; длинная — пары; сиденья встают к столу", err == "" and bad.is_empty(), err + str(bad))
+	w.set_t(6, 4, W.WOOD)
+	# больничная койка изголовьем к стене: клетка у стены и клетка перед ней — одна койка от стены в комнату
+	w.set_t(5, 1, W.HOSPBED)
+	w.set_t(5, 2, W.HOSPBED)
+	w.set_t(7, 1, W.HOSPBED)           # а эти две — обычная пара вдоль стены
+	w.set_t(8, 1, W.HOSPBED)
+	var mh := Mesher.new()
+	wm._furniture(mh, 5, 1, W.HOSPBED)
+	var mf := Mesher.new()
+	wm._furniture(mf, 5, 2, W.HOSPBED)
+	var hb := [100.0, -100.0, 100.0, -100.0]
+	for v in mh.verts:
+		hb = [minf(hb[0], v.x), maxf(hb[1], v.x), minf(hb[2], v.z), maxf(hb[3], v.z)]
+	if w.bed_deep(5, 1) != [1, 2] or w.bed_deep(5, 2) != [2, 2] or w.furniture_dir(5, 1) != 2 or w.furniture_dir(5, 2) != -1 \
+			or w.furniture_half(5, 1) != 0 or w.furniture_half(5, 2) != 0 or not mf.verts.is_empty() \
+			or hb[0] < 5.0 or hb[1] > 6.0 or absf(hb[2] - 0.62) > 0.03 or hb[3] < 2.7 or hb[3] > 3.0 \
+			or not w.circle_blocked(5.5, 1.9, 0.05) or not w.circle_blocked(5.5, 2.9, 0.05) or w.circle_blocked(5.5, 3.35, 0.3):
+		bad.append("койка изголовьем к стене: %s %s, 3D x %.2f..%.2f z %.2f..%.2f" % [w.bed_deep(5, 1), w.bed_deep(5, 2), hb[0], hb[1], hb[2], hb[3]])
+	var bh := [w.furniture_half(7, 1), w.furniture_half(8, 1)]
+	if w.bed_deep(7, 1)[0] != 0 or bh.count(1) != 1 or bh.count(2) != 1:
+		bad.append("койки вдоль стены: %s" % [bh])
+	for cxy in [[5, 1], [5, 2], [7, 1], [8, 1]]:
+		w.set_t(cxy[0], cxy[1], W.WOOD)
+	# ширма: вдоль ряда ширм, клетка занята целиком, взгляд закрывает
+	w.set_t(4, 3, W.SCREEN)
+	w.set_t(4, 4, W.SCREEN)
+	var msc := Mesher.new()
+	wm._furniture(msc, 4, 3, W.SCREEN)
+	var sb := [100.0, -100.0, 100.0, -100.0]
+	for v in msc.verts:
+		sb = [minf(sb[0], v.x), maxf(sb[1], v.x), minf(sb[2], v.z), maxf(sb[3], v.z)]
+	if w.furniture_dir(4, 3) != -1 or sb[1] - sb[0] > 0.4 or sb[3] - sb[2] < 0.95 or not w.circle_blocked(3.75, 3.5, 0.3) or not W.opaque_tile(W.SCREEN):
+		bad.append("ширма: x %.2f..%.2f z %.2f..%.2f" % sb)
+	w.set_t(4, 3, W.WOOD)
+	w.set_t(4, 4, W.WOOD)
+	# операционный светильник: плафоном к столу рядом; стойка регистратуры — рабочей стороной к креслу
+	w.set_t(5, 4, W.SURGLIGHT)
+	w.set_t(5, 5, W.OPTABLE)
+	w.set_t(6, 5, W.OPTABLE)
+	var ml := Mesher.new()
+	wm._furniture(ml, 5, 4, W.SURGLIGHT)
+	var lz := -100.0
+	for v in ml.verts:
+		lz = maxf(lz, v.z)
+	if wm.patient_dir(5, 4) != 2 or w.furniture_dir(5, 4) != -1 or lz < 5.3 or lz > 6.0 or w.furniture_wide(5, 5) != [1, 1, 0]:
+		bad.append("операционный светильник: к столу %d, плафон до z %.2f" % [wm.patient_dir(5, 4), lz])
+	for cxy in [[5, 4], [5, 5], [6, 5]]:
+		w.set_t(cxy[0], cxy[1], W.WOOD)
+	for xx in [4, 5]:
+		w.set_t(xx, 4, W.RECEPTION)
+	w.set_t(5, 3, W.OFFICECHAIR)
+	if wm.table_face(4, 4, W.RECEPTION) != 3 or wm.table_face(5, 4, W.RECEPTION) != 3 or w.furniture_dir(5, 3) != 3:
+		bad.append("стойка регистратуры и кресло")
+	for cxy in [[4, 4], [5, 4], [5, 3]]:
+		w.set_t(cxy[0], cxy[1], W.WOOD)
+	if W.opaque_tile(W.HOSPBED) or not W.opaque_tile(W.MEDSHELF) or W.opaque_tile(W.OPTABLE) or not W.opaque_tile(W.MORGUE):
+		bad.append("больница: низкая мебель должна быть прозрачной для взгляда, высокая — нет")
+	# карта с больничной мебелью (кириллические символы) сохраняется и читается без потерь
+	w.set_t(3, 6, W.RECEPTION)
+	w.set_t(4, 6, W.MORGUE)
+	var w2 := GameWorld.new()
+	var err2 := w2.load_map(w.map_data())
+	if err2 != "" or w2.t(3, 6) != W.RECEPTION or w2.t(4, 6) != W.MORGUE or W.MAP_CHARS.length() != W.MORGUE + 1:
+		bad.append("карта с больничной мебелью: %s" % err2)
+	check("Мебель: у стены упираешься в её лицо, а не в невидимую стену; посреди комнаты — вся клетка; длинная — пары; сиденья встают к столу; койка изголовьем к стене, ширма, светильник", err == "" and bad.is_empty(), err + str(bad))
 
 ## Крыши (0.47, BF-060): над недостроенным домом (стены не замкнуты) крыши нет; над закрытым — в пределах стен
 ## со свесом; у дома буквой Г пустой угол рядом не накрыт

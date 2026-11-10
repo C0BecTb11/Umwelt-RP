@@ -168,11 +168,19 @@ func _tile(m: Mesher, x: int, y: int) -> void:
 			W.CAR: _car(m, x, y, true)
 			W.CAR_V: _car(m, x, y, false)
 
+## Пол под мебелью — как у ближайшего пола комнаты: рядом, а если мебель стоит плотно (койка изголовьем
+## к стене, тумбы по бокам) — через клетку-две мебели. Раньше такая клетка всегда была деревянной
 func _floor_near(x: int, y: int) -> int:
-	for k in 4:
-		var n := w.t(x + W.DX4[k], y + W.DY4[k])
-		if W.is_floor(n):
-			return n
+	for r in range(1, 4):
+		for k in 4:
+			var ok := true
+			for q in range(1, r):
+				if not W.is_furniture(w.t(x + W.DX4[k] * q, y + W.DY4[k] * q)):
+					ok = false
+					break
+			var n := w.t(x + W.DX4[k] * r, y + W.DY4[k] * r)
+			if ok and W.is_floor(n):
+				return n
 	return W.WOOD
 
 func _ground(m: Mesher, t: int, x: int, y: int, x0: float, z0: float, x1: float, z1: float) -> void:
@@ -279,12 +287,13 @@ func _ground_under_wall(m: Mesher, x: int, y: int) -> void:
 		var dx := -1 if q % 2 == 0 else 1
 		var dy := -1 if q < 2 else 1
 		var fl := -1
-		for n in [w.t(x + dx, y), w.t(x, y + dy), w.t(x + dx, y + dy)]:
+		for nb in [[x + dx, y], [x, y + dy], [x + dx, y + dy]]:
+			var n := w.t(nb[0], nb[1])
 			if W.is_floor(n):
 				fl = n
 				break
-			if W.is_furniture(n):
-				fl = W.WOOD
+			if W.is_furniture(n) and fl < 0:
+				fl = _floor_near(nb[0], nb[1])     # за мебелью у стены — тот же пол, что в комнате
 		var x0 := x + (0.0 if dx < 0 else 0.5)
 		var z0 := y + (0.0 if dy < 0 else 0.5)
 		if fl >= 0:
@@ -399,17 +408,19 @@ func _seg(m: Mesher, x: int, y: int, horiz: bool, y0: float, y1: float, col: Col
 	else:
 		m.aabb(cx - HALF, y0, y, cx + HALF, y1, y + 1.0, col, cap)
 
-## Мебель из отдельных наборов (военная часть, столовая, полиция): 1, 2, 3; 0 — старая, нарисована ниже
+## Мебель из отдельных наборов (военная часть, столовая, полиция, больница): 1, 2, 3, 4; 0 — старая, нарисована ниже
 static func furn_set(t: int) -> int:
 	if MilFurniture.BACK.has(t):
 		return 1
 	if CanteenFurniture.BACK.has(t):
 		return 2
-	return 3 if PoliceFurniture.BACK.has(t) else 0
+	if PoliceFurniture.BACK.has(t):
+		return 3
+	return 4 if HospitalFurniture.BACK.has(t) else 0
 
 ## Число из описания набора (BACK, FRONT, TUCK) для мебели t
 static func furn_num(t: int, what: String, def: float = 0.0) -> float:
-	for cls in [MilFurniture, CanteenFurniture, PoliceFurniture]:
+	for cls in [MilFurniture, CanteenFurniture, PoliceFurniture, HospitalFurniture]:
 		var d = cls.get(what)
 		if d is Dictionary and d.has(t):
 			return float(d[t])
@@ -423,7 +434,7 @@ func _seat_w(x: int, y: int) -> int:
 ## Куда повернуть лицом стол, стоящий посреди комнаты: к креслу хозяина. Стойка дежурного — вся линия
 ## в одну сторону (туда, где у линии кресла; без кресел — на юг или восток). -1 — сидений рядом нет
 func table_face(x: int, y: int, t: int) -> int:
-	if t == W.FRONTDESK:
+	if W.is_counter(t):
 		for a in [[1, 0], [0, 1]]:
 			var ax: int = a[0]
 			var ay: int = a[1]
@@ -467,6 +478,23 @@ func _bar_like(x: int, y: int) -> bool:
 	var tt := w.t(x, y)
 	return W.wall_like(tt) or W.is_bars(tt)
 
+## Ширма: вдоль ряда ширм; одиночная — от стены в комнату (как перегородка между койками)
+func _screen_vertical(x: int, y: int) -> bool:
+	var hz := W.is_screen(w.t(x - 1, y)) or W.is_screen(w.t(x + 1, y))
+	var vt := W.is_screen(w.t(x, y - 1)) or W.is_screen(w.t(x, y + 1))
+	if hz != vt:
+		return vt
+	hz = W.wall_like(w.t(x - 1, y)) or W.wall_like(w.t(x + 1, y))
+	vt = W.wall_like(w.t(x, y - 1)) or W.wall_like(w.t(x, y + 1))
+	return vt and not hz
+
+## С какой стороны от клетки лежит пациент (койка, каталка, операционный стол, кушетка); -1 — рядом нет
+func patient_dir(x: int, y: int) -> int:
+	for k in 4:
+		if W.is_patient_bed(w.t(x + W.DX4[k], y + W.DY4[k])):
+			return k
+	return -1
+
 func _furniture(m: Mesher, x: int, y: int, t: int) -> void:
 	# спиной к стене, лицом в комнату (если стен несколько — к той, напротив которой свободно)
 	# направление — то же, по которому считается столкновение (GameWorld.furniture_dir, FURN_FRONT)
@@ -474,6 +502,9 @@ func _furniture(m: Mesher, x: int, y: int, t: int) -> void:
 	var flip := false                              # длинный стол посреди комнаты развёрнут к креслу хозяина
 	var best := w.furniture_dir(x, y)
 	var wide: Array = w.furniture_wide(x, y)       # [половина, шаг «вправо»] — длинная мебель на две клетки
+	var deep: Array = w.bed_deep(x, y) if t == W.HOSPBED else [0, -1]    # койка изголовьем к стене
+	if deep[0] == 2:
+		return                                     # изножье: всю койку рисует клетка-изголовье
 	if best >= 0:
 		yaw = rad_to_deg(atan2(W.DX4[best], W.DY4[best]))
 	elif W.is_bars(t):
@@ -481,8 +512,12 @@ func _furniture(m: Mesher, x: int, y: int, t: int) -> void:
 		var hz := _bar_like(x - 1, y) or _bar_like(x + 1, y)
 		var vt := _bar_like(x, y - 1) or _bar_like(x, y + 1)
 		yaw = 90.0 if vt and not hz else 0.0
-	elif t == W.PODIUM:
-		var od := open_dir(x, y)
+	elif W.is_screen(t):
+		yaw = 90.0 if _screen_vertical(x, y) else 0.0
+	elif t == W.PODIUM or t == W.SURGLIGHT:
+		var od := patient_dir(x, y) if t == W.SURGLIGHT else -1      # светильник — плафоном к столу
+		if od < 0:
+			od = open_dir(x, y)
 		yaw = rad_to_deg(atan2(W.DX4[od], W.DY4[od]))
 	elif wide[0] != 0:
 		yaw = 0.0 if wide[1] == 1 else -90.0       # посреди комнаты длинная мебель встаёт вдоль своего ряда
@@ -494,6 +529,8 @@ func _furniture(m: Mesher, x: int, y: int, t: int) -> void:
 			flip = _seat_w(x - fx, y - fy) + _seat_w(x2 - fx, y2 - fy) > _seat_w(x + fx, y + fy) + _seat_w(x2 + fx, y2 + fy)
 	else:
 		var tf := table_face(x, y, t) if W.is_table(t) else -1
+		if tf < 0 and furn_set(t) == 4:
+			tf = patient_dir(x, y)                 # больничные приборы посреди комнаты — лицом к пациенту
 		if tf >= 0:
 			yaw = rad_to_deg(atan2(W.DX4[tf], W.DY4[tf]))
 		else:
@@ -508,6 +545,11 @@ func _furniture(m: Mesher, x: int, y: int, t: int) -> void:
 	if flip:
 		m.rot_y(180)
 		m.translate(Vector3(-1, 0, 0))             # модель тянется на вторую клетку — после разворота вернуть её туда же
+	if deep[0] == 1:
+		m.rot_y(-90)                               # койка вытянута от стены: изголовье у стены, изножье в комнате
+		HospitalFurniture.draw(m, t, hv, false, true)
+		m.identity()
+		return
 	if w.seat_at_table(x, y, best):
 		# сиденье у стола: лицом к столу, передний край — под столешницу
 		m.rot_y(180)
@@ -524,6 +566,7 @@ func _furniture(m: Mesher, x: int, y: int, t: int) -> void:
 				1: MilFurniture.draw(m, t, hv, wide[0] == 1)
 				2: CanteenFurniture.draw(m, t, hv, wide[0] == 1)
 				3: PoliceFurniture.draw(m, t, hv, wide[0] == 1)
+				4: HospitalFurniture.draw(m, t, hv, wide[0] == 1)
 		m.identity()
 		return
 	var wood := c(0x7A5434)

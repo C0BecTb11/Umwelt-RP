@@ -8,7 +8,7 @@
 import json
 import sys
 
-CHARS = ".=-wt#DdO?T!FCWSMLRcvx~"  # как GameWorld.MAP_CHARS
+CHARS = ".=-wt#DdO?T!FCWSMLRcvx~bkgGalrmfqeBnhjsyuzipoPN0123456789AEHIJKQUVXYZ+абвгдежзийклмнопрстуфхцчшщъыьэюяАБВГДЕЖЗИ"  # как GameWorld.MAP_CHARS
 
 
 def num(v):
@@ -27,7 +27,7 @@ def main():
         bad = set(r) - set(CHARS) | (set(r) & set("?!"))
         assert not bad, "ряд %d: неизвестные символы %s" % (y, bad)
     out = '{"v": 1, "w": %d, "h": %d, "spawn": %s,\n"rows": [\n' % (w, h, json.dumps([num(x) for x in d["spawn"]]))
-    out += ",\n".join(json.dumps(r) for r in rows) + "\n],\n\"props\": [\n"
+    out += ",\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n],\n\"props\": [\n"
     out += ",\n".join(json.dumps([p[0], num(p[1]), num(p[2]), int(round(float(p[3])))], ensure_ascii=False) for p in d["props"])
     lines = [l for l in d.get("lines", []) if len(l) >= 5]
     if lines:                         # дороги-линии (с 0.38): вид и точки, по одной дороге на строку

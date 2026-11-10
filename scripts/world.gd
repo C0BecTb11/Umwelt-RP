@@ -74,27 +74,79 @@ const SOFA := 66               # диван: две клетки подряд; �
 const PAYPHONE := 67           # телефон-автомат
 const BRIEFBOARD := 68         # доска для инструктажа
 const PODIUM := 69             # трибуна: эмблемой — туда, где больше свободного пола
+# мебель больницы (модели — scripts/hospital_furniture.gd)
+const RECEPTION := 70          # стойка регистратуры: клетки подряд — одна длинная; кресло — с рабочей стороны
+const WHEELCHAIR := 71         # кресло-каталка
+const DIRECTORY := 72          # указатель отделений
+const MAGTABLE := 73           # журнальный столик
+const VENDING := 74            # автомат с закусками
+const GURNEY := 75             # каталка: две клетки подряд — одна длинная
+const HOSPBED := 76            # больничная койка: две клетки вдоль стены или изголовьем к стене (вторая клетка — перед первой)
+const BEDSIDE := 77            # прикроватная тумба
+const IVSTAND := 78            # стойка капельницы
+const SCREEN := 79             # ширма: клетки подряд — одна длинная; клетка непроходима, взгляд закрывает
+const PATMONITOR := 80         # монитор пациента
+const OPTABLE := 81            # операционный стол: две клетки подряд
+const SURGLIGHT := 82          # операционный светильник: плафоном к столу рядом; клетка занята целиком
+const ANESTHESIA := 83         # наркозный аппарат
+const INSTRTABLE := 84         # инструментальный столик
+const SCRUBSINK := 85          # хирургическая мойка
+const XRAYVIEW := 86           # негатоскоп со снимками
+const STERILIZER := 87         # стерилизатор
+const DEFIB := 88              # тележка с дефибриллятором
+const OXYGEN := 89             # баллоны с кислородом
+const BIOBINS := 90            # контейнеры для медицинских отходов
+const SURGCAB := 91            # шкаф с инструментами
+const EXAMTABLE := 92          # смотровая кушетка: две клетки подряд
+const SCALE := 93              # весы с ростомером
+const MEDCART := 94            # процедурная тележка
+const MEDSHELF := 95           # стеллаж с медикаментами
+const MEDFRIDGE := 96          # холодильник для лекарств
+const SUPPLYBOXES := 97        # коробки с расходниками
+const NARCSAFE := 98           # сейф для сильнодействующих препаратов
+const BOOKCASE := 99           # книжный шкаф
+const DIPLOMAS := 100          # дипломы в рамках
+const SKELETON := 101          # анатомический скелет
+const CONFTABLE := 102         # стол для совещаний: клетки подряд — один длинный
+const PROJSCREEN := 103        # экран для проектора
+const OHPROJECTOR := 104       # кодоскоп на тележке
+const WHITEBOARD := 105        # маркерная доска
+const COATRACK := 106          # вешалка с халатами
+const TVSTAND := 107           # телевизор на тумбе
+const CHARTRACK := 108         # стойка с историями болезни
+const LABBENCH := 109          # лабораторный стол
+const MORGUE := 110            # холодильные камеры морга
 
 const DX4 := [1, -1, 0, 0]
 const DY4 := [0, 0, 1, -1]
 
-static func is_furniture(t: int) -> bool: return (t >= FRIDGE and t <= STORESHELF) or (t >= BUNK and t <= PODIUM)
+static func is_furniture(t: int) -> bool: return (t >= FRIDGE and t <= STORESHELF) or (t >= BUNK and t <= MORGUE)
 ## Низкая мебель: поверх неё видно (как стойка)
 static func is_low_furniture(t: int) -> bool:
 	return t == COUNTER or t == FOOTLOCKER or t == AMMO or t == RADIO or t == MAPTABLE or t == MILDESK \
 		or (t >= DINETABLE and t <= NOTICEBOARD and t != DISHRACK) \
-		or (t >= FRONTDESK and t <= PODIUM and t != EVIDENCESHELF and t != RIOTRACK)
+		or (t >= FRONTDESK and t <= PODIUM and t != EVIDENCESHELF and t != RIOTRACK) \
+		or (t >= RECEPTION and t <= MORGUE and t != VENDING and t != SCREEN and t != SURGCAB and t != MEDSHELF \
+			and t != MEDFRIDGE and t != BOOKCASE and t != MORGUE)
 ## Мебель на две клетки: соседние клетки одного вида вдоль стены сливаются в один длинный предмет
 static func is_wide_furniture(t: int) -> bool:
-	return t == BUNK or t == MAPTABLE or t == DINETABLE or t == INTERROTABLE or t == CELLBUNK or t == CHIEFDESK or t == SOFA
+	return t == BUNK or t == MAPTABLE or t == DINETABLE or t == INTERROTABLE or t == CELLBUNK or t == CHIEFDESK or t == SOFA \
+		or t == GURNEY or t == HOSPBED or t == OPTABLE or t == EXAMTABLE or t == CONFTABLE
 ## Сиденья: рядом со столом встают к нему (а не к стене)
 static func is_seat(t: int) -> bool: return t == CHAIR or t == BENCH or t == OFFICECHAIR
 static func is_table(t: int) -> bool:
-	return t == DINETABLE or t == MAPTABLE or t == PDESK or t == INTERROTABLE or t == CHIEFDESK or t == FRONTDESK or t == DISPATCH
+	return t == DINETABLE or t == MAPTABLE or t == PDESK or t == INTERROTABLE or t == CHIEFDESK or t == FRONTDESK or t == DISPATCH \
+		or t == RECEPTION or t == CONFTABLE
+## Стойки (дежурного, регистратуры): вся линия смотрит рабочей стороной в одну сторону
+static func is_counter(t: int) -> bool: return t == FRONTDESK or t == RECEPTION
+## Ширмы: стоят по линии, как решётки
+static func is_screen(t: int) -> bool: return t == SCREEN
+## То, у чего лежит пациент: приборы посреди комнаты поворачиваются к нему лицом
+static func is_patient_bed(t: int) -> bool: return t == HOSPBED or t == GURNEY or t == OPTABLE or t == EXAMTABLE
 ## Решётки камер: стоят по линии, а не у стены
 static func is_bars(t: int) -> bool: return t == CELLBARS or t == CELLDOOR
 ## Мебель, которая к стене не прижимается и занимает всю клетку
-static func is_freestanding(t: int) -> bool: return t == CELLBARS or t == CELLDOOR or t == PODIUM
+static func is_freestanding(t: int) -> bool: return t == CELLBARS or t == CELLDOOR or t == PODIUM or t == SCREEN or t == SURGLIGHT
 static func is_door_like(t: int) -> bool: return t == DOOR or t == DOOR_OPEN
 static func is_window_like(t: int) -> bool: return t == WINDOW
 static func is_floor(t: int) -> bool: return t == WOOD or t == TILEFLOOR
@@ -160,7 +212,14 @@ const FURN_FRONT := {FRIDGE: -0.19, COUNTER: -0.12, WARDROBE: -0.30, SHELF: -0.4
 	FRONTDESK: -0.13, WANTEDBOARD: -0.5, PDESK: -0.02, OFFICECHAIR: -0.3, COPIER: -0.24, FAXSTAND: -0.34,
 	EVIDENCESHELF: -0.39, CASEBOARD: -0.5, INTERROTABLE: -0.09, CELLBARS: 0.5, CELLDOOR: 0.5, CELLBUNK: -0.16,
 	CELLTOILET: -0.19, RIOTRACK: -0.42, MUGSHOT: -0.5, BOOKING: -0.34, DISPATCH: -0.02, FLAGSTAND: -0.5,
-	CHIEFDESK: -0.02, SOFA: -0.08, PAYPHONE: -0.5, BRIEFBOARD: -0.5, PODIUM: 0.5}
+	CHIEFDESK: -0.02, SOFA: -0.08, PAYPHONE: -0.5, BRIEFBOARD: -0.5, PODIUM: 0.5,
+	# больница: указатель, негатоскоп, доски, экран и баллоны у стены — в зазоре; ширма и светильник занимают клетку целиком
+	RECEPTION: 0.02, WHEELCHAIR: -0.02, DIRECTORY: -0.5, MAGTABLE: -0.32, VENDING: -0.15, GURNEY: -0.15, HOSPBED: 0.04,
+	BEDSIDE: -0.40, IVSTAND: -0.44, SCREEN: 0.5, PATMONITOR: -0.48, OPTABLE: -0.12, SURGLIGHT: 0.5, ANESTHESIA: -0.12,
+	INSTRTABLE: -0.34, SCRUBSINK: -0.35, XRAYVIEW: -0.5, STERILIZER: -0.25, DEFIB: -0.38, OXYGEN: -0.5, BIOBINS: -0.46,
+	SURGCAB: -0.42, EXAMTABLE: -0.24, SCALE: -0.34, MEDCART: -0.42, MEDSHELF: -0.40, MEDFRIDGE: -0.18, SUPPLYBOXES: -0.35,
+	NARCSAFE: -0.34, BOOKCASE: -0.44, DIPLOMAS: -0.5, SKELETON: -0.48, CONFTABLE: 0.02, PROJSCREEN: -0.5, OHPROJECTOR: -0.42,
+	WHITEBOARD: -0.5, COATRACK: -0.46, TVSTAND: -0.36, CHARTRACK: -0.42, LABBENCH: -0.22, MORGUE: -0.02}
 ## То же для сидений, придвинутых к столу: дальний от стола край сиденья (от центра клетки, в сторону от стола)
 const SEAT_FRONT := {CHAIR: -0.175, BENCH: -0.18, OFFICECHAIR: -0.10}
 
@@ -189,7 +248,44 @@ func furniture_front(x: int, y: int, k: int) -> float:
 		var sy: int = y + DY4[k]
 		if is_seat(t(sx, sy)) and furniture_dir(sx, sy) == k:
 			return 0.5
+	if tt == HOSPBED and bed_deep(x, y)[0] == 1:
+		return 0.5                     # койка изголовьем к стене занимает обе свои клетки целиком
 	return float(FURN_FRONT.get(tt, 0.0))
+
+## Койка изголовьем к стене (HOSPBED): за клеткой стена, а перед ней — ещё одна клетка койки. Тогда это одна
+## койка на две клетки, вытянутая от стены в комнату. Куда тянется койка из клетки-изголовья; -1 — не изголовье
+func _bed_head_k(x: int, y: int) -> int:
+	if t(x, y) != HOSPBED:
+		return -1
+	for k in 4:
+		if wall_like(t(x - DX4[k], y - DY4[k])) and t(x + DX4[k], y + DY4[k]) == HOSPBED:
+			return k
+	return -1
+
+## Клетка — изножье такой койки: направление койки или -1. Спорные случаи (две клетки между двух стен)
+## решаются порядком направлений, чтобы у клетки был один хозяин
+func _bed_foot_k(x: int, y: int) -> int:
+	if t(x, y) != HOSPBED:
+		return -1
+	var own := _bed_head_k(x, y)
+	for k in 4:
+		if _bed_head_k(x - DX4[k], y - DY4[k]) == k and (own < 0 or k < own):
+			return k
+	return -1
+
+## [роль, направление]: 1 — изголовье (рисует всю койку), 2 — изножье (ничего не рисует), 0 — обычная клетка
+func bed_deep(x: int, y: int) -> Array:
+	var fk := _bed_foot_k(x, y)
+	if fk >= 0:
+		return [2, fk]
+	var hk := _bed_head_k(x, y)
+	if hk >= 0 and _bed_foot_k(x + DX4[hk], y + DY4[hk]) == hk:
+		return [1, hk]
+	return [0, -1]
+
+## Клетка годится в пару длинной мебели вида tt с направлением k
+func _wide_mate(x: int, y: int, tt: int, k: int) -> bool:
+	return t(x, y) == tt and furniture_dir(x, y) == k and (tt != HOSPBED or bed_deep(x, y)[0] == 0)
 
 ## Длинная мебель (is_wide_furniture): [половина, шаг «вправо» по x, по y]. Половина: 0 — одиночная (пары нет),
 ## 1 — левая (рисует весь предмет на две клетки), 2 — правая (ничего не рисует). У стены пары считаются подряд
@@ -197,7 +293,7 @@ func furniture_front(x: int, y: int, k: int) -> float:
 ## комнаты — подряд с запада на восток, а если соседей по этой оси нет — с севера на юг
 func furniture_wide(x: int, y: int) -> Array:
 	var tt := t(x, y)
-	if not is_wide_furniture(tt):
+	if not is_wide_furniture(tt) or (tt == HOSPBED and bed_deep(x, y)[0] != 0):
 		return [0, 1, 0]
 	var k := furniture_dir(x, y)
 	var axes := [[DY4[k], -DX4[k]]] if k >= 0 else [[1, 0], [0, 1]]
@@ -205,11 +301,11 @@ func furniture_wide(x: int, y: int) -> Array:
 		var ax: int = a[0]
 		var ay: int = a[1]
 		var n := 0                     # сколько таких же подряд слева
-		while t(x - ax * (n + 1), y - ay * (n + 1)) == tt and furniture_dir(x - ax * (n + 1), y - ay * (n + 1)) == k:
+		while _wide_mate(x - ax * (n + 1), y - ay * (n + 1), tt, k):
 			n += 1
 		if n % 2 == 1:
 			return [2, ax, ay]
-		if t(x + ax, y + ay) == tt and furniture_dir(x + ax, y + ay) == k:
+		if _wide_mate(x + ax, y + ay, tt, k):
 			return [1, ax, ay]
 	return [0, 1, 0]
 
@@ -223,6 +319,10 @@ func furniture_dir(x: int, y: int) -> int:
 	var dir := -1
 	if is_freestanding(t(x, y)):
 		return -1
+	if t(x, y) == HOSPBED:
+		var bd := bed_deep(x, y)
+		if bd[0] != 0:
+			return bd[1] if bd[0] == 1 else -1     # изножье у стены не стоит — клетка занята целиком
 	if is_seat(t(x, y)):               # сиденье у стола — спиной от стола (стол важнее стены)
 		for k in 4:
 			if is_table(t(x - DX4[k], y - DY4[k])):
@@ -373,7 +473,7 @@ func along_y(x: int, y: int) -> bool:
 ## Карта игры — файл maps/city.json (её правят в редакторе карты, в игру она попадает только с выпуском).
 ## Клетки хранятся строками символов: одна строка — один ряд карты, так изменения видны в истории коммитов.
 const MAP_PATH := "res://maps/city.json"
-const MAP_CHARS := ".=-wt#DdO?T!FCWSMLRcvx~bkgGalrmfqeBnhjsyuzipoPN0123456789AEHIJKQUVXYZ+"  # символ = номер клетки (9 и 11 — старые, на карте недопустимы; ~ вода — 0.40)
+const MAP_CHARS := ".=-wt#DdO?T!FCWSMLRcvx~bkgGalrmfqeBnhjsyuzipoPN0123456789AEHIJKQUVXYZ+абвгдежзийклмнопрстуфхцчшщъыьэюяАБВГДЕЖЗИ"  # символ = номер клетки (9 и 11 — старые, на карте недопустимы; ~ вода — 0.40)
 const MAX_SIDE := 500           # клеток по стороне (1 клетка ≈ 1 м); 500×500 проверено тестом test_big_map
 const PROP_CHUNK := 10          # = WorldMesh.CHUNK: объекты разложены по кускам графики (props_chunk)
 const MAX_PROPS := 20000

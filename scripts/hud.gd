@@ -185,7 +185,7 @@ func tick(dt: float) -> void:
 		i -= 1
 
 func open_demo_panel(kind: String) -> void:
-	if kind.begins_with("mil") or kind.begins_with("din") or kind.begins_with("pol") or kind.begins_with("jail"):
+	if kind.begins_with("mil") or kind.begins_with("din") or kind.begins_with("pol") or kind.begins_with("jail") or kind.begins_with("hos"):
 		visible = false                   # витрина мебели — без кнопок
 		return
 	match kind:

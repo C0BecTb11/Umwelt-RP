@@ -162,6 +162,76 @@ static func create(kind: String) -> GameState:
 		p.rpos = p.pos
 		p.face = Vector2(0, -1)
 		p.wear = {"torso": "shirt", "legs": "pants", "feet": "shoes"}
+	if kind.begins_with("hos"):
+		# витрины мебели больницы по отделам: hos1 — холл, 2 — палата, 3 — операционная, 4 — процедурная и склад,
+		# 5 — кабинет главного врача, 6 — зал собраний, 7 — комната персонала, 8 — лаборатория и морг
+		_open_street(g, p)
+		var w := g.world
+		var scenes := {
+			1: ["вдuXXгXXP.ббее",
+				"..............",
+				"....3..3......",
+				"...ааааа......",
+				".............."],
+			2: ["жжз.йзжи.йкжз.",
+				"....й.ж..й.ж..",
+				"..............",
+				".............."],
+			3: ["пп.рхс.туф..",
+				"............",
+				"....мк......",
+				"...нлло.....",
+				"............"],
+			4: ["ццчш.щщщъыьы",
+				"............",
+				"............"],
+			5: ["ээюяP.XX.5U.",
+				"............",
+				"....3.......",
+				"...VV.......",
+				"...h........",
+				"............"],
+			6: ["P.Г.Б..Г..u.",
+				"............",
+				"....В.......",
+				"...3333.....",
+				"..3АААА3....",
+				"...3333.....",
+				"............"],
+			7: ["ДLLoF.Е.XгX.Жu",
+				"..............",
+				"....hh........",
+				"....nn........",
+				"....hh........",
+				".............."],
+			8: ["ЗЗЗ.щ.ИИИ.ее",
+				"............",
+				"............"]}
+		var num := int(kind.substr(3)) if kind.length() > 3 else 1
+		var rows: Array = scenes.get(num, scenes[1])
+		var floor_t := GameWorld.WOOD if num == 5 or num == 6 else GameWorld.TILEFLOOR
+		var cols := 14                     # у всех витрин больницы одна ширина — одна и та же стена
+		var x0 := int(p.pos.x) - cols / 2
+		var y0 := int(p.pos.y) - 4
+		for i in range(-1, cols + 1):
+			w.set_t(x0 + i, y0, GameWorld.WALL)
+			for dy in range(1, 10):
+				w.set_t(x0 + i, y0 + dy, floor_t)
+		for r in rows.size():
+			for i in rows[r].length():
+				if rows[r][i] != ".":
+					w.set_t(x0 + i, y0 + 1 + r, GameWorld.MAP_CHARS.find(rows[r][i]))
+		var keep := []
+		for e in w.props:
+			if absf(e[1] - (x0 + cols / 2)) > 14 or absf(e[2] - (y0 + 4)) > 10:
+				keep.append(e)
+		w.props = keep
+		w.index_props()
+		w.compute_buildings()
+		p.pos = Vector2(x0 + cols * 0.5, y0 + rows.size() + 1.9)
+		p.rpos = p.pos
+		p.face = Vector2(0, -1)
+		p.wear = {"torso": "shirt", "legs": "pants", "feet": "shoes"}
 	if kind == "menu" or kind == "stats":
 		# пример статистики для снимка: 1 уровень, 1 из 4 очков, сегодня 2 ч 33 мин и 7 мин АФК
 		p.level = 1
