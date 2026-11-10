@@ -47,6 +47,7 @@ var flashes: Array = []       # [x, z, life]
 var cam_yaw := 35.0
 var cam_d := 15.5            # расстояние камеры (для демо-снимков крупным планом)
 var cam_pitch := 54.0        # наклон камеры (редактор карты смотрит круче)
+var cam_shift := Vector3.ZERO  # демо-снимки: сдвиг точки, на которую смотрит камера (--shift=x,y,z)
 const CUT_IN := [7.0, 2.2]     # прорезь стен в доме: длина к камере, полуширина (м)
 const CUT_OUT := [2.4, 0.8]    # на улице
 var cut_len_k := 2.4
@@ -487,7 +488,7 @@ func _place_scene(g: GameState, me: GameState.Player, dt: float) -> void:
 		cam.projection = Camera3D.PROJECTION_PERSPECTIVE
 		cam.far = 140.0
 	var sh := shake * shake * 0.25
-	var t := Vector3(cam_x + (randf() - 0.5) * sh, 0.6, cam_z + (randf() - 0.5) * sh)
+	var t := Vector3(cam_x + (randf() - 0.5) * sh, 0.6, cam_z + (randf() - 0.5) * sh) + cam_shift
 	var eye := t + Vector3(sin(yaw) * cos(pitch) * D, sin(pitch) * D, cos(yaw) * cos(pitch) * D)
 	if not _ov_on:
 		cam.position = eye

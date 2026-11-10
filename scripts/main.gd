@@ -7,6 +7,8 @@ var shot_frames := 0
 var shot_list: Array = []      # несколько кадров подряд: --shots=40,44,48
 var demo_yaw := NAN
 var demo_zoom := NAN
+var demo_pitch := NAN
+var demo_shift := Vector3.ZERO
 
 func _ready() -> void:
 	Profile.load_profile()
@@ -29,6 +31,12 @@ func _ready() -> void:
 			shot = a.substr(7)
 		elif a.begins_with("--zoom="):
 			demo_zoom = float(a.substr(7))
+		elif a.begins_with("--pitch="):
+			demo_pitch = float(a.substr(8))
+		elif a.begins_with("--shift="):
+			var sp := a.substr(8).split(",")
+			if sp.size() == 3:
+				demo_shift = Vector3(float(sp[0]), float(sp[1]), float(sp[2]))
 		elif a.begins_with("--yaw="):
 			demo_yaw = float(a.substr(6))
 		elif a.begins_with("--shots="):
@@ -127,6 +135,10 @@ func _process(dt: float) -> void:
 			screen.view.cam_yaw = demo_yaw
 		if not is_nan(demo_zoom) and screen != null and screen.view != null:
 			screen.view.cam_d = demo_zoom
+		if screen != null and screen.view != null:
+			if not is_nan(demo_pitch):
+				screen.view.cam_pitch = demo_pitch
+			screen.view.cam_shift = demo_shift
 		if shot_list.size() > 0:
 			if shot_frames in shot_list:
 				await RenderingServer.frame_post_draw

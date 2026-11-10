@@ -24,11 +24,29 @@ const CAR := 19
 const CAR_V := 20
 const CAR_TAIL := 21
 const WATER := 22              # вода (с 0.40): не пройти, кроме моста-линии над ней
+# мебель военной части (модели — scripts/mil_furniture.gd)
+const BUNK := 23               # двухъярусная койка: две клетки подряд вдоль стены — одна длинная койка
+const FOOTLOCKER := 24         # армейский сундук
+const GUNRACK := 25            # оружейная пирамида
+const GUNSAFE := 26            # оружейный шкаф
+const AMMO := 27               # ящики с боеприпасами
+const MILLOCKER := 28          # армейский шкаф
+const RADIO := 29              # стол связи с радиостанцией
+const MAPTABLE := 30           # штабной стол с картой: две клетки подряд — один длинный стол
+const FILECAB := 31            # картотечные шкафы
+const MILDESK := 32            # стол дежурного
+const GEARSHELF := 33          # стеллаж со снаряжением
+const MAPBOARD := 34           # стенд с тактической картой
 
 const DX4 := [1, -1, 0, 0]
 const DY4 := [0, 0, 1, -1]
 
-static func is_furniture(t: int) -> bool: return t >= FRIDGE and t <= STORESHELF
+static func is_furniture(t: int) -> bool: return (t >= FRIDGE and t <= STORESHELF) or (t >= BUNK and t <= MAPBOARD)
+## Низкая мебель: поверх неё видно (как стойка)
+static func is_low_furniture(t: int) -> bool:
+	return t == COUNTER or t == FOOTLOCKER or t == AMMO or t == RADIO or t == MAPTABLE or t == MILDESK
+## Мебель на две клетки: соседние клетки одного вида вдоль стены сливаются в один длинный предмет
+static func is_wide_furniture(t: int) -> bool: return t == BUNK or t == MAPTABLE
 static func is_door_like(t: int) -> bool: return t == DOOR or t == DOOR_OPEN
 static func is_window_like(t: int) -> bool: return t == WINDOW
 static func is_floor(t: int) -> bool: return t == WOOD or t == TILEFLOOR
@@ -76,14 +94,35 @@ func solid(x: int, y: int) -> bool:
 		return true
 	return is_furniture(tt) or is_car(tt)
 
+static func opaque_tile(tt: int) -> bool:
+	return tt == WALL or tt == DOOR or (is_furniture(tt) and not is_low_furniture(tt))
+
 func opaque(x: int, y: int) -> bool:
-	var tt := t(x, y)
-	return tt == WALL or tt == DOOR or (is_furniture(tt) and tt != COUNTER)
+	return opaque_tile(t(x, y))
 
 ## Мебель у стены стоит к ней вплотную (world_mesh._furniture), её лицевая сторона — на столько метров
 ## от центра клетки в сторону комнаты. Столкновение — от задней кромки клетки до лица, а не вся клетка:
 ## иначе перед шкафом была невидимая стена до полуметра (BF-066). Меняешь модель или сдвиг — поправь и тут
-const FURN_FRONT := {FRIDGE: -0.19, COUNTER: -0.12, WARDROBE: -0.30, SHELF: -0.47, MEDCAB: -0.51, LOCKER: -0.37, STORESHELF: -0.04}
+const FURN_FRONT := {FRIDGE: -0.19, COUNTER: -0.12, WARDROBE: -0.30, SHELF: -0.47, MEDCAB: -0.51, LOCKER: -0.37, STORESHELF: -0.04,
+	BUNK: 0.05, FOOTLOCKER: -0.39, GUNRACK: -0.49, GUNSAFE: -0.32, AMMO: -0.24, MILLOCKER: -0.34, RADIO: -0.26, MAPTABLE: -0.01,
+	FILECAB: -0.24, MILDESK: -0.21, GEARSHELF: -0.37, MAPBOARD: -0.5}      # стенд целиком в зазоре у стены: клетка перед ним свободна
+
+## Длинная мебель (is_wide_furniture): какая половина в клетке. 0 — одиночная (пары нет), 1 — левая (рисует весь
+## предмет на две клетки), 2 — правая (ничего не рисует). Пары считаются подряд вдоль стены, слева направо,
+## если смотреть на мебель с лица; у клеток пары должно совпадать направление (furniture_dir)
+func furniture_half(x: int, y: int) -> int:
+	var tt := t(x, y)
+	var k := furniture_dir(x, y)
+	if not is_wide_furniture(tt) or k < 0:
+		return 0
+	var ax: int = DY4[k]           # «вправо» для мебели, которая смотрит по DX4/DY4[k]
+	var ay: int = -DX4[k]
+	var n := 0                     # сколько таких же подряд слева
+	while t(x - ax * (n + 1), y - ay * (n + 1)) == tt and furniture_dir(x - ax * (n + 1), y - ay * (n + 1)) == k:
+		n += 1
+	if n % 2 == 1:
+		return 2
+	return 1 if t(x + ax, y + ay) == tt and furniture_dir(x + ax, y + ay) == k else 0
 
 ## Куда смотрит мебель в клетке: индекс в DX4/DY4 (спиной к стене, лицом в комнату; из нескольких стен —
 ## та, напротив которой пол, и лучше глухая). -1 — у стены не стоит (тогда без сдвига, занимает всю клетку)
@@ -236,7 +275,7 @@ func along_y(x: int, y: int) -> bool:
 ## Карта игры — файл maps/city.json (её правят в редакторе карты, в игру она попадает только с выпуском).
 ## Клетки хранятся строками символов: одна строка — один ряд карты, так изменения видны в истории коммитов.
 const MAP_PATH := "res://maps/city.json"
-const MAP_CHARS := ".=-wt#DdO?T!FCWSMLRcvx~"  # символ = номер клетки (9 и 11 — старые, на карте недопустимы; ~ вода — 0.40)
+const MAP_CHARS := ".=-wt#DdO?T!FCWSMLRcvx~bkgGalrmfqeB"  # символ = номер клетки (9 и 11 — старые, на карте недопустимы; ~ вода — 0.40)
 const MAX_SIDE := 500           # клеток по стороне (1 клетка ≈ 1 м); 500×500 проверено тестом test_big_map
 const PROP_CHUNK := 10          # = WorldMesh.CHUNK: объекты разложены по кускам графики (props_chunk)
 const MAX_PROPS := 20000

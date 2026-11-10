@@ -66,6 +66,31 @@ static func create(kind: String) -> GameState:
 			q.wear = looks[k][1]
 			q.name = ""
 			g.players.append(q)
+	if kind.begins_with("mil"):
+		# витрина мебели военной части: стена, перед ней пол, мебель в ряд; milN — игрок у N-го участка
+		_open_street(g, p)
+		var w := g.world
+		var row := "bbklegGarmmBfq"
+		var x0 := int(p.pos.x) - 7
+		var y0 := int(p.pos.y) - 3
+		for i in range(-1, row.length() + 1):
+			w.set_t(x0 + i, y0, GameWorld.WALL)
+			for dy in range(1, 6):
+				w.set_t(x0 + i, y0 + dy, GameWorld.TILEFLOOR)
+		for i in row.length():
+			w.set_t(x0 + i, y0 + 1, GameWorld.MAP_CHARS.find(row[i]))
+		var keep := []                     # фонари и прочие объекты улицы с витрины убрать
+		for e in w.props:
+			if absf(e[1] - (x0 + 7)) > 12 or absf(e[2] - (y0 + 3)) > 8:
+				keep.append(e)
+		w.props = keep
+		w.index_props()
+		w.compute_buildings()
+		var sect := int(kind.substr(3)) if kind.length() > 3 else 0
+		p.pos = Vector2(x0 + 7.0, y0 + (4.6 if sect > 0 else 3.2))
+		p.rpos = p.pos
+		p.face = Vector2(0, -1)
+		p.wear = {"head": "swat_helmet", "torso": "tactical", "legs": "tactical_pants", "feet": "combat_boots"}
 	if kind == "menu" or kind == "stats":
 		# пример статистики для снимка: 1 уровень, 1 из 4 очков, сегодня 2 ч 33 мин и 7 мин АФК
 		p.level = 1

@@ -198,6 +198,8 @@ func open_demo_panel(kind: String) -> void:
 			panel = Pnl.STATS
 		"chat":
 			open_chat()
+		"mil", "mil1", "mil2", "mil3", "mil4":
+			visible = false               # витрина мебели — без кнопок
 		"rp":
 			bubble_hold = true
 		"rpopen":

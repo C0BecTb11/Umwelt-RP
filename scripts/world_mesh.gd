@@ -418,7 +418,15 @@ func _furniture(m: Mesher, x: int, y: int, t: int) -> void:
 	if best >= 0:
 		# вплотную к стене: стена стоит по центру своей клетки, без сдвига оставалась щель ~0.45
 		var back: float = {W.FRIDGE: 0.38, W.COUNTER: 0.44, W.WARDROBE: 0.43, W.SHELF: 0.31, W.MEDCAB: 0.40, W.LOCKER: 0.40}.get(t, 0.42)
+		if MilFurniture.BACK.has(t):
+			back = MilFurniture.BACK[t]
 		m.translate(Vector3(0, 0, -(1.0 - HALF - 0.5 - 0.01) - (0.5 - back)))
+	if MilFurniture.BACK.has(t):
+		var half := w.furniture_half(x, y)
+		if half != 2:
+			MilFurniture.draw(m, t, hv, half == 1)
+		m.identity()
+		return
 	var wood := c(0x7A5434)
 	match t:
 		W.FRIDGE:

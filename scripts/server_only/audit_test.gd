@@ -1644,11 +1644,16 @@ func test_furniture_collision() -> void:
 		rows.append(("#" + "w".repeat(10) + "#" if y > 0 and y < 8 else "#".repeat(12)) + ".".repeat(18) if y < 9 else ".".repeat(30))
 	var err := w.load_map({"v": 1, "w": 30, "h": 30, "spawn": [5.5, 4.5], "rows": rows, "props": []})
 	var types := [W.FRIDGE, W.COUNTER, W.WARDROBE, W.SHELF, W.MEDCAB, W.LOCKER, W.STORESHELF]
+	for mt in range(W.BUNK, W.MAPBOARD + 1):      # мебель военной части — те же правила
+		types.append(mt)
 	var bad := []
+	for mt in range(W.BUNK, W.MAPBOARD + 1):
+		if not W.is_furniture(mt) or not W.FURN_FRONT.has(mt) or not MilFurniture.BACK.has(mt) or W.MAP_CHARS.length() <= mt:
+			bad.append("военная мебель %d описана не везде" % mt)
 	var wm := WorldMesh.new(w)
 	for i in types.size():
 		var tt: int = types[i]
-		var y := 1 + i
+		var y := 1 + i % 7
 		w.set_t(1, y, tt)              # у западной стены — лицом на восток (+x)
 		var front: float = 1.5 + float(W.FURN_FRONT[tt])
 		if w.circle_blocked(front + 0.32, y + 0.5, 0.3) or not w.circle_blocked(front + 0.27, y + 0.5, 0.3):
@@ -1658,9 +1663,30 @@ func test_furniture_collision() -> void:
 		var mx := -100.0
 		for v in m.verts:
 			mx = maxf(mx, v.x)
-		if absf(mx - front) > 0.04:
+		if tt == W.MAPBOARD:               # тонкий стенд стоит в зазоре у стены, до своей клетки не доходит
+			if mx > front + 0.01:
+				bad.append("стенд выступает в клетку: %.2f" % mx)
+		elif absf(mx - front) > 0.04:
 			bad.append("лицо %d: 3D %.2f, FURN_FRONT %.2f" % [tt, mx, front])
 		w.set_t(1, y, W.WOOD)
+	# длинная мебель: две клетки подряд вдоль стены — один предмет (левая рисует, правая пустая), третья — одиночная
+	for yy in [2, 3, 4]:
+		w.set_t(1, yy, W.BUNK)
+	var halves := [w.furniture_half(1, 2), w.furniture_half(1, 3), w.furniture_half(1, 4)]
+	var m2 := Mesher.new()
+	wm._furniture(m2, 1, 3, W.BUNK)
+	var m1 := Mesher.new()
+	wm._furniture(m1, 1, 2, W.BUNK)
+	var zmax := -100.0
+	for v in m1.verts:
+		zmax = maxf(zmax, v.z)
+	# смотрит на восток: «вправо» для неё — на север (−y)… пара считается от дальнего левого края
+	if halves.count(1) != 1 or halves.count(2) != 1 or halves.count(0) != 1 or not m2.verts.is_empty() and halves[1] == 2:
+		bad.append("половины длинной мебели: %s" % [halves])
+	for yy in [2, 3, 4]:
+		w.set_t(1, yy, W.WOOD)
+	if W.opaque_tile(W.MAPTABLE) or not W.opaque_tile(W.GUNSAFE):
+		bad.append("низкая мебель должна быть прозрачной для взгляда, высокая — нет")
 	w.set_t(6, 4, W.COUNTER)           # посреди комнаты
 	if not w.circle_blocked(7.28, 4.5, 0.3) or w.circle_blocked(7.32, 4.5, 0.3):
 		bad.append("посреди комнаты")
