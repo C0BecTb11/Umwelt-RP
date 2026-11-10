@@ -496,9 +496,10 @@ func patient_dir(x: int, y: int) -> int:
 	return -1
 
 ## Где на мебели в клетке можно сесть или лечь — в координатах мира (точки модели — RestSpots). Каждое место:
-## "k" 1 сидеть / 2 лежать; "pos" — куда приходит таз (x, y карты); "h" — высота сиденья или постели над полом;
-## "face" — куда человек смотрит, пока стоит перед мебелью (сидя — туда же); для «лежать» ещё "axis" — от головы
-## к ногам, "deep" и "up" (см. RestSpots). Лечь можно только с той стороны, где перед постелью свободный пол
+## "k" 1 сидеть / 2 лежать; "h" — высота сиденья или постели над полом; "face" — куда человек смотрит, пока стоит
+## перед мебелью (сидя — туда же); "o" — остальное описание места для позы (CharPoses.sit и lie).
+## Сидеть: "pos" — куда приходит таз (x, y карты). Лежать: "pos" — опорная точка постели (изгиб изголовья или
+## подушка), "axis" — от головы к ногам. Лечь можно только с той стороны, где перед постелью свободный пол
 func rest_spots(x: int, y: int) -> Array:
 	var out := []
 	var t := w.t(x, y)
@@ -508,21 +509,25 @@ func rest_spots(x: int, y: int) -> Array:
 	var how := _furniture(m, x, y, t, true)
 	if how == 0:
 		return out                             # вторая половина длинной мебели: места — у первой
-	for sp: Dictionary in RestSpots.local(t, how):
+	for sp: Dictionary in RestSpots.local(t, how, hash2(x, y)):
 		var lp: Vector3 = sp["p"]
 		var wp: Vector3 = m.xf * Vector3(lp.x, 0, lp.z)
+		var o := {}
+		for key: String in sp:
+			if key != "p" and key != "k" and key != "sides":
+				o[key] = sp[key]
 		if int(sp["k"]) == 1:
 			var f: Vector3 = m.xf.basis * Vector3.BACK
-			out.append({"k": 1, "pos": Vector2(wp.x, wp.z), "h": lp.y, "face": Vector2(f.x, f.z).normalized()})
+			out.append({"k": 1, "pos": Vector2(wp.x, wp.z), "h": lp.y, "face": Vector2(f.x, f.z).normalized(), "o": o})
 			continue
 		var ax: Vector3 = m.xf.basis * Vector3.RIGHT
 		for sg: int in sp["sides"]:
 			var n: Vector3 = m.xf.basis * Vector3(0, 0, sg)
-			var stand := Vector2(wp.x + n.x * float(sp["deep"]), wp.z + n.z * float(sp["deep"]))
+			var stand := Vector2(wp.x + ax.x * 0.4 + n.x * float(sp["deep"]), wp.z + ax.z * 0.4 + n.z * float(sp["deep"]))
 			if w.circle_blocked(stand.x, stand.y, 0.05):
 				continue                           # с этой стороны стена или другая мебель
 			out.append({"k": 2, "pos": Vector2(wp.x, wp.z), "h": lp.y, "face": Vector2(n.x, n.z).normalized(),
-				"axis": Vector2(ax.x, ax.z).normalized(), "deep": float(sp["deep"]), "up": float(sp["up"])})
+				"axis": Vector2(ax.x, ax.z).normalized(), "o": o})
 			break
 	return out
 

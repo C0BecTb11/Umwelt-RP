@@ -418,16 +418,18 @@ func _place_rest(cm: CharModel, spot: Dictionary) -> void:
 	else:
 		var face: Vector2 = spot["face"]
 		var pos: Vector2 = spot["pos"]
-		var d := {"k": int(spot["k"]), "h": float(spot["h"])}
+		var d: Dictionary = (spot.get("o", {}) as Dictionary).duplicate()
+		d["k"] = int(spot["k"])
+		d["h"] = float(spot["h"])
+		var ref := CharPoses.ref_for(cm.gender, cm.skel, cm.ap.get_animation("Idle"))
 		var away := 0.0
 		if d["k"] == 2:
 			var ax: Vector2 = spot["axis"]
-			away = float(spot["deep"])
-			d["deep"] = away
+			away = float(d["deep"])
 			d["side"] = 1 if ax.dot(Vector2(face.y, -face.x)) > 0.0 else -1
-			d["raise"] = float(spot.get("up", 0.0))
+			pos += ax * CharPoses.lie_shift(ref, d)     # опорная точка постели — изгиб изголовья или подушка; таз — дальше к ногам
 		else:
-			away = CharPoses.sit_back(CharPoses.ref_for(cm.gender, cm.skel, cm.ap.get_animation("Idle")), d["h"])
+			away = CharPoses.sit_back(ref, d["h"], d)
 		cm.set_rest(d)
 		cm.set_meta("rest_at", [pos + face * away, atan2(face.x, face.y)])
 	if cm.has_meta("rest_at"):
@@ -470,8 +472,8 @@ func _ground_at(x: float, z: float) -> float:
 	var tt := world.t(floori(x), floori(z))
 	if tt == W.SIDEWALK:
 		return 0.12
-	if W.is_floor(tt) or W.is_door_like(tt) or W.is_window_like(tt):
-		return 0.1
+	if W.is_floor(tt) or W.is_door_like(tt) or W.is_window_like(tt) or W.is_furniture(tt):
+		return 0.1                 # под мебелью — тот же пол комнаты: к ней подходят вплотную (BF-066), на ней сидят (BF-075)
 	return 0.0
 
 func _add_blood(x: float, z: float, size: float) -> void:

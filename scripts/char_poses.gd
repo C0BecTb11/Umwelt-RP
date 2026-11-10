@@ -7,10 +7,11 @@ extends RefCounted
 ## Всё в координатах модели: +z — лицо, y — вверх, начало — точка, где человек стоял перед тем как сесть.
 
 const SIT_TIME := 1.15         # с, сесть
+const SIT_HIGH_TIME := 1.6     # с, сесть на высокое (край койки) или в кресло-каталку
 const LIE_TIME := 2.5          # с, лечь
 const THIGH_R := 0.09          # бедро лежит на сиденье: сустав выше сиденья на столько
-const LIE_HIP := 0.125         # лёжа на спине: тазобедренный сустав выше постели на столько
-const LIE_HEEL := 0.055        # и пятка
+const LIE_HEEL := 0.07         # лёжа на спине: сустав стопы выше постели на столько
+const PILLOW_ARM := 0.085      # голова на подушке: подъём затылка на 1 рад наклона шеи и головы, м
 const FEET_Z := 0.03           # где стоят стопы, когда человек встал ровно (в стойке одна нога впереди, другая позади)
 const SPINE := ["Body", "Hips", "Abdomen", "Torso", "Chest", "Neck", "Head"]
 
@@ -33,6 +34,8 @@ class Ref:
 	var arm_hinge := [Vector3.LEFT, Vector3.LEFT]        # ось локтя
 	var foot_in_shin := [Vector3.ZERO, Vector3.ZERO]     # опора стопы в осях голени
 	var moves := {}                # кости, у которых поза задаёт и положение (таз, стопы)
+	var lie_hip := 0.125           # лёжа на спине: тазобедренный сустав выше постели на столько (тело у моделей разной толщины)
+	var lie_dip := 0.0             # и на сколько градусов опустить спину, чтобы лопатки легли на постель
 	var stand: Spec
 
 ## Описание позы — то, что плавно меняется при переходе
@@ -156,6 +159,9 @@ static func ref_for(gender: String, skel: Skeleton3D, idle: Animation) -> Ref:
 		st.arm_u[s] = au
 		st.arm_l[s] = al
 	r.stand = st
+	if gender == "f":
+		r.lie_hip = 0.11
+		r.lie_dip = 7.0
 	for nm in ["Body", "Foot.L", "Foot.R"]:
 		r.moves[r.idx[nm]] = true
 	_refs[gender] = r
@@ -282,43 +288,59 @@ static func _square(r: Ref, feet_z: float) -> Spec:
 		s.knee_yaw[sd] = 5.0 if sd == 0 else -5.0
 	return s
 
-## На сколько сиденье позади точки, где человек стоял: чтобы стопы, когда он сядет, остались на месте
-static func sit_back(r: Ref, h: float) -> float:
-	var hy := h + THIGH_R
-	var ky := minf(hy, r.stand.foot[0].y + r.shin)
-	return sqrt(maxf(r.thigh * r.thigh - (hy - ky) * (hy - ky), 0.0)) + 0.02 - FEET_Z
+## Высокое сиденье (край больничной койки, кушетки, каталки): ноги до пола не достают — бёдра лежат ровно,
+## голени свисают. На обычном сиденье стопы стоят на полу
+static func _dangle(r: Ref, h: float) -> bool:
+	return h + THIGH_R - (r.stand.foot[0].y + r.shin) > 0.15
 
-## Сидит на сиденье высотой h (верх сиденья над полом)
-static func sit(r: Ref, h: float) -> Spec:
-	var back := sit_back(r, h)
+## На сколько сиденье позади точки, где человек стоял: чтобы стопы, когда он сядет, остались на месте.
+## o — описание места (см. CharModel.rest): "gap" — стоять на столько дальше (перед подножками кресла-каталки)
+static func sit_back(r: Ref, h: float, o: Dictionary = {}) -> float:
+	var hy := h + THIGH_R
+	var ky := hy if _dangle(r, h) else minf(hy, r.stand.foot[0].y + r.shin)
+	return sqrt(maxf(r.thigh * r.thigh - (hy - ky) * (hy - ky), 0.0)) + 0.02 - FEET_Z + float(o.get("gap", 0.0))
+
+## Сидит. o: "h" — верх сиденья над полом; "gap" — см. sit_back; "fx", "fy", "fz" — подножки: полрасстояния
+## между стопами, высота подножки над полом и на сколько она впереди таза
+static func sit(r: Ref, o: Dictionary) -> Spec:
+	var h := float(o.get("h", 0.46))
+	var gap := float(o.get("gap", 0.0))
+	var back := sit_back(r, h, o)
 	var s := _square(r, FEET_Z)
 	s.hip = Vector3(0, h + THIGH_R, -back)
 	s.p_body = -9.0
 	s.p_torso = -5.0
 	s.p_chest = -1.0
 	s.p_head = 0.0
-	var hang := h + THIGH_R - (r.thigh + r.shin) > -0.06     # высокое сиденье: ноги почти не достают до пола
+	var dang := _dangle(r, h)
+	var footrest := o.has("fy")
 	for sd in 2:
 		var k := 1.0 if sd == 0 else -1.0
-		if hang:
-			s.foot[sd].y = h + THIGH_R - (r.thigh + r.shin) * 0.98
-			s.foot_flat[sd] = 0.35
+		s.foot[sd].x *= 1.12
+		s.foot[sd].z = FEET_Z - gap
+		var kn := Vector3(s.foot[sd].x, minf(s.hip.y, s.foot[sd].y + r.shin), s.foot[sd].z + 0.02)      # колено
+		if footrest:
+			s.foot[sd] = Vector3(float(o.get("fx", 0.12)) * k, float(o["fy"]) + r.stand.foot[sd].y, s.hip.z + float(o.get("fz", 0.42)))
+			kn = Vector3(s.foot[sd].x, s.hip.y + 0.03, s.hip.z + r.thigh * 0.95)
+		elif dang:
+			s.foot[sd].y = s.hip.y - r.shin * 0.985
+			s.foot_flat[sd] = 0.3
+			kn = Vector3(s.foot[sd].x, s.hip.y, s.hip.z + r.thigh)
 		s.arm_u[sd] = Vector3(0.10 * k, -0.99, -0.04)
 		s.arm_l[sd] = Vector3(-0.14 * k, -0.46, 0.88)
 		s.arm_tw[sd] = 70.0 * k
 		s.knee_yaw[sd] = 9.0 * k
-		s.foot[sd].x *= 1.12
 		# кисть лежит на бедре
-		var kn: Vector3 = Vector3(s.foot[sd].x, minf(s.hip.y, s.foot[sd].y + r.shin), s.foot[sd].z + 0.02)
 		var hj := Vector3(s.foot[sd].x / 1.12, s.hip.y, s.hip.z)
 		s.hand[sd] = hj.lerp(kn, 0.58) + Vector3(-0.015 * k, THIGH_R + 0.03, 0)
 		s.hand_w[sd] = 1.0
 	return s
 
-## Наклонился и опускается на сиденье (середина перехода)
-static func _lower(r: Ref, h: float) -> Spec:
-	var end := sit(r, h)
-	var s := mix(_square(r, FEET_Z), end, 0.5)
+## Наклонился и опускается на сиденье (середина перехода): стопы ещё на полу
+static func _lower(r: Ref, o: Dictionary) -> Spec:
+	var end := sit(r, o)
+	var sq := _square(r, FEET_Z)
+	var s := mix(sq, end, 0.5)
 	s.hip = Vector3(0, lerpf(r.stand.hip.y, end.hip.y, 0.55), lerpf(FEET_Z, end.hip.z, 0.62))
 	var deep_k := clampf((r.stand.hip.y - end.hip.y) / 0.36, 0.25, 1.0)      # на высокое сиденье наклоняться почти не надо
 	s.p_body = 30.0 * deep_k
@@ -327,48 +349,68 @@ static func _lower(r: Ref, h: float) -> Spec:
 	s.p_head = 8.0 * deep_k
 	for sd in 2:
 		var k := 1.0 if sd == 0 else -1.0
-		s.foot[sd] = end.foot[sd]
+		s.foot[sd] = Vector3(sq.foot[sd].x * 1.12, sq.foot[sd].y, FEET_Z)
+		s.foot_flat[sd] = 1.0
 		s.hand_w[sd] = 0.0
 		s.arm_u[sd] = Vector3(0.12 * k, -0.9, 0.1)
 		s.arm_l[sd] = Vector3(0.02 * k, -0.85, 0.5)
 	return s
 
-## Лежит на спине на постели высотой h. Постель позади: её середина в deep за спиной; side = 1 — головой
-## влево от себя (−x), −1 — вправо; up — на сколько градусов приподнято изголовье (больничная койка)
-static func lie(r: Ref, h: float, deep: float, side: int, up: float = 0.0) -> Spec:
+## Сустав, в котором тело сгибается на приподнятом изголовье: "bend" 1 — в пояснице (Torso), 2 — в груди (Chest)
+static func _joint_up(r: Ref, nm: String) -> float:
+	return (r.glob[r.idx[nm]] as Transform3D).origin.y - r.stand.hip.y
+
+## Лёжа: на сколько таз дальше (к ногам) от опорной точки постели. Опорная точка — место, где начинается подъём
+## изголовья (там тело сгибается), а у ровной постели — середина подушки (там голова)
+static func lie_shift(r: Ref, o: Dictionary) -> float:
+	match int(o.get("bend", 0)):
+		1: return _joint_up(r, "Torso")
+		2: return _joint_up(r, "Chest")
+	return _joint_up(r, "Head") + 0.1
+
+## Лежит на спине. o: "h" — верх постели над полом; "deep" — середина постели на столько позади места, где человек
+## стоял; "side" 1 — головой влево от себя (−x), −1 — вправо; "raise" — подъём изголовья в градусах и "bend" — где
+## тело сгибается (см. lie_shift); "pillow" — толщина подушки под головой, м; "feet" — на сколько приподняты стопы;
+## "room" — сколько места от опорной точки до спинки в ногах: если ноги не помещаются, колени чуть согнуты
+static func lie(r: Ref, o: Dictionary) -> Spec:
+	var h := float(o.get("h", 0.5))
+	var deep := float(o.get("deep", 0.7))
+	var up := float(o.get("raise", 0.0))
+	var bend := int(o.get("bend", 0))
 	var s := _square(r, FEET_Z)
-	var k := float(side)
-	var leg := (r.thigh + r.shin) * 0.992
+	var k := float(int(o.get("side", 1)))
+	var leg := minf((r.thigh + r.shin) * 0.992, float(o.get("room", 9.0)) - lie_shift(r, o) - 0.06)
 	var along := Vector3(k, 0, 0)                  # от головы к ногам
+	var tilt := rad_to_deg(float(o.get("pillow", 0.0)) / PILLOW_ARM)       # голова на подушке приподнята
 	s.yaw = 90.0 * k
 	s.p_body = -90.0
-	s.p_torso = -90.0 + up
-	s.p_chest = -88.0 + up
-	s.p_head = -74.0 + up * 0.8
-	s.hip = Vector3(0, h + LIE_HIP, -deep)
+	s.p_torso = -90.0 - r.lie_dip + (up if bend == 1 else 0.0)
+	s.p_chest = -90.0 - r.lie_dip + (up if bend >= 1 else 0.0)
+	s.p_head = -75.0 + (up if bend >= 1 else 0.0) + tilt
+	s.hip = Vector3(0, h + r.lie_hip, -deep)
 	var hw := absf((r.loc[r.idx["UpperLeg.L"]] as Transform3D).origin.x)
 	for sd in 2:
 		var sx := 1.0 if sd == 0 else -1.0
 		# левая нога лежащего — со стороны −z·k (он развёрнут на 90°)
 		var lat := Vector3(0, 0, -sx * k) * (hw + 0.035)
-		s.foot[sd] = s.hip + lat + along * leg + Vector3(0, LIE_HEEL - LIE_HIP, 0)
+		s.foot[sd] = s.hip + lat + along * leg + Vector3(0, LIE_HEEL - r.lie_hip + float(o.get("feet", 0.0)), 0)
 		s.foot_flat[sd] = 0.0
 		s.knee_yaw[sd] = 14.0 * sx
 		s.arm_u[sd] = Vector3(0.26 * sx, -0.92, -0.26)
 		s.arm_l[sd] = Vector3(-0.5 * sx, -0.78, 0.3)
 		s.arm_tw[sd] = 60.0 * sx
 		# кисть лежит на животе (в осях тела: вверх по спине — к голове, вперёд — вверх от постели)
-		s.hand[sd] = s.hip + _rot(s.yaw, lerpf(s.p_body, s.p_torso, 0.5)) * Vector3(0.07 * sx, 0.12, 0.15)
+		s.hand[sd] = s.hip + _rot(s.yaw, -90.0) * Vector3(0.07 * sx, 0.1, 0.15)
 		s.hand_w[sd] = 1.0
 		s.elbow[sd] = Vector3(1.0 * sx, -0.25, -0.3)
 	return s
 
 ## Сел на край постели, разворачивается и заносит ноги (середина перехода «лечь»)
-static func _swing(r: Ref, h: float, deep: float, side: int, up: float = 0.0) -> Spec:
-	var end := lie(r, h, deep, side, up)
-	var edge := sit(r, h)
+static func _swing(r: Ref, o: Dictionary, edge: Spec) -> Spec:
+	var end := lie(r, o)
+	var h := float(o.get("h", 0.5))
 	var s := mix(edge, end, 0.5)
-	var k := float(side)
+	var k := float(int(o.get("side", 1)))
 	s.yaw = 52.0 * k
 	s.p_body = -38.0
 	s.p_torso = -30.0
@@ -388,14 +430,23 @@ static func _swing(r: Ref, h: float, deep: float, side: int, up: float = 0.0) ->
 		s.arm_l[sd] = Vector3(0.1 * sx, -0.9, -0.3) if prop else Vector3(-0.2 * sx, -0.6, 0.7)
 	return s
 
-## Опорные позы перехода: [[доля времени, Spec], …]. kind: 1 — сесть, 2 — лечь
-static func keys(r: Ref, kind: int, h: float, deep: float = 0.7, side: int = 1, up: float = 0.0) -> Array:
+## Опорные позы перехода: [[доля времени, Spec], …]. o["k"]: 1 — сесть, 2 — лечь
+static func keys(r: Ref, o: Dictionary) -> Array:
 	var sq := _square(r, FEET_Z)
-	if kind == 2:
-		var edge := sit(r, h)
-		edge.hip.z = maxf(edge.hip.z, -deep + 0.2)
-		return [[0.0, r.stand], [0.13, sq], [0.26, _lower(r, h)], [0.42, edge], [0.7, _swing(r, h, deep, side, up)], [1.0, lie(r, h, deep, side, up)]]
-	return [[0.0, r.stand], [0.27, sq], [0.62, _lower(r, h)], [1.0, sit(r, h)]]
+	if int(o.get("k", 1)) == 2:
+		var eo := {"h": float(o.get("h", 0.5))}      # сначала садится на край постели
+		var edge := sit(r, eo)
+		edge.hip.z = maxf(edge.hip.z, -float(o.get("deep", 0.7)) + 0.2)
+		return [[0.0, r.stand], [0.13, sq], [0.26, _lower(r, eo)], [0.42, edge], [0.7, _swing(r, o, edge)], [1.0, lie(r, o)]]
+	if o.has("fy") or _dangle(r, float(o.get("h", 0.46))):
+		# сначала садится (стопы ещё на полу), потом поднимает ноги — на подножки или свесив
+		var down := sit(r, o)
+		for sd in 2:
+			down.foot[sd] = Vector3(sq.foot[sd].x * 1.12, sq.foot[sd].y, FEET_Z)
+			down.foot_flat[sd] = 1.0
+			down.hand_w[sd] = 0.0
+		return [[0.0, r.stand], [0.22, sq], [0.5, _lower(r, o)], [0.76, down], [1.0, sit(r, o)]]
+	return [[0.0, r.stand], [0.27, sq], [0.62, _lower(r, o)], [1.0, sit(r, o)]]
 
 static func _at(ks: Array, u: float) -> Spec:
 	u = clampf(u, 0.0, 1.0)
@@ -412,6 +463,8 @@ static func at(ks: Array, u: float) -> Spec:
 	var w := minf(0.07, minf(e, 1.0 - e))
 	var s := mix(_at(ks, e - w), _at(ks, e + w), 0.5)
 	s = mix(s, _at(ks, e), 0.5)
+	for sd in 2:                                   # стопа, повёрнутая носком вниз, не уходит под пол
+		s.foot[sd].y = maxf(s.foot[sd].y, ks[0][1].foot[sd].y + (1.0 - clampf(s.foot_flat[sd], 0.0, 1.0)) * 0.08)
 	# шаг: пока стопа переставляется, она приподнята
 	var st: Spec = ks[0][1]
 	var sq: Spec = ks[1][1]
@@ -425,5 +478,8 @@ static func at(ks: Array, u: float) -> Spec:
 			s.foot_yaw[sd] = lerpf(st.foot_yaw[sd], sq.foot_yaw[sd], ph)
 	return s
 
-static func duration(kind: int) -> float:
-	return LIE_TIME if kind == 2 else SIT_TIME
+## Сколько длится переход: на высокое сиденье и в кресло-каталку — дольше (сначала садится, потом поднимает ноги)
+static func duration(o: Dictionary) -> float:
+	if int(o.get("k", 1)) == 2:
+		return LIE_TIME
+	return SIT_HIGH_TIME if o.has("fy") or float(o.get("h", 0.46)) > 0.6 else SIT_TIME

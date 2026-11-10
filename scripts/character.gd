@@ -42,7 +42,7 @@ var layer_anim := ""                # удар поверх ходьбы: имя
 var layer_t := 0.0
 var _last_ms := -1
 # Сидит или лежит: поза считается по скелету (CharPoses) поверх анимации стойки — записанных анимаций для этого нет
-var rest := {}                      # {} — нет; иначе {"k": 1 сидит / 2 лежит, "h": высота сиденья или постели, "deep", "side"}
+var rest := {}                      # {} — нет; иначе {"k": 1 сидит / 2 лежит, "h": высота сиденья или постели, …} — см. CharPoses.sit и lie
 var rest_u := 0.0                   # доля перехода: 0 — стоит, 1 — сидит или лежит
 var rest_to := 0                    # куда идёт переход: 1 — садится или ложится, 0 — встаёт
 var _rest_keys: Array = []
@@ -258,7 +258,7 @@ func _apply_rest() -> void:
 		return
 	var r := CharPoses.ref_for(gender, skel, ap.get_animation("Idle"))
 	if _rest_keys.is_empty():
-		_rest_keys = CharPoses.keys(r, int(rest.get("k", 1)), float(rest.get("h", 0.46)), float(rest.get("deep", 0.7)), int(rest.get("side", 1)), float(rest.get("raise", 0.0)))
+		_rest_keys = CharPoses.keys(r, rest)
 	var sp := CharPoses.at(_rest_keys, rest_u)
 	if rest_u >= 1.0:
 		_breath += fixed_dt if fixed_dt > 0.0 else get_process_delta_time()
@@ -319,7 +319,7 @@ func pose_dt(dt: float, moving: float, attack: float, weapon_id: String, lying: 
 		return
 	# сидит или лежит (и переходы): тело ведёт CharPoses, под ним — обычная стойка
 	if not rest.is_empty():
-		var rt := CharPoses.duration(int(rest.get("k", 1)))
+		var rt := CharPoses.duration(rest)
 		if fresh and rest_to == 1:
 			rest_u = 1.0                                    # уже сидел, когда мы его увидели
 		rest_u = move_toward(rest_u, float(rest_to), dt / (rt if rest_to == 1 else rt * 0.85))

@@ -354,7 +354,7 @@ static func _gurney(m: Mesher, hv: int, wide: bool) -> void:
 static func _hospbed(m: Mesher, hv: int, L: float, cx: float) -> void:
 	var x0 := cx - L * 0.5
 	var x1 := x0 + L
-	var hl := minf(0.72, L * 0.36)                                                # длина поднятой секции
+	var hl := minf(0.5, L * 0.36)                                                 # длина поднятой секции (от неё — место лежащего: RestSpots)
 	for lx in [x0 + 0.16, x1 - 0.16]:
 		for lz in [-0.36, 0.36]:
 			_caster(m, Vector3(lx, 0, lz))
@@ -372,7 +372,7 @@ static func _hospbed(m: Mesher, hv: int, L: float, cx: float) -> void:
 	m.translate(Vector3(fx0, 0.56, 0))
 	m.rot_z(-24)
 	m.box(Vector3(-hl * 0.5, 0.065, 0), Vector3(hl, 0.13, 0.82), c(0xE8E6DC))
-	m.box(Vector3(-hl * 0.55, 0.17, 0), Vector3(hl * 0.5, 0.08, 0.52), c(WHITE))
+	m.box(Vector3(-hl * 0.8, 0.16, 0), Vector3(hl * 0.38, 0.06, 0.5), c(WHITE))
 	m.pop()
 	var bl: int = [0x6E9E97, 0x7F95B5, 0xA9B88A][hv % 3]
 	var bx0 := fx0 + 0.12
@@ -806,10 +806,10 @@ static func _examtable(m: Mesher, wide: bool) -> void:
 	m.rot_z(-20)
 	m.box(Vector3(-hl * 0.5, 0.05, 0), Vector3(hl, 0.1, 0.62), c(0x3F6B6A))        # подголовник
 	m.box(Vector3(-hl * 0.5, 0.103, 0), Vector3(hl - 0.04, 0.006, 0.5), c(WHITE))
+	m.box(Vector3(-hl * 0.62, 0.131, 0), Vector3(hl * 0.44, 0.05, 0.36), c(WHITE))   # подушка
 	m.pop()
 	m.box(Vector3((fx0 + x1 - 0.1) * 0.5, 0.703, 0), Vector3(x1 - 0.1 - fx0, 0.006, 0.5), c(WHITE))        # бумажная простыня
 	_cyl_z(m, Vector3(x0 + 0.02, 0.56, -0.26), 0.52, 0.06, c(WHITE), 8)            # рулон бумаги
-	m.box(Vector3(x0 + 0.03 + hl * 0.45, 0.6 + hl * 0.36 + 0.08, 0), Vector3(0.2, 0.06, 0.34), c(WHITE))   # подушка
 
 ## Весы с ростомером
 static func _scale(m: Mesher) -> void:
