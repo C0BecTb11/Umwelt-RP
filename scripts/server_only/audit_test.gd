@@ -1644,12 +1644,13 @@ func test_furniture_collision() -> void:
 		rows.append(("#" + "w".repeat(10) + "#" if y > 0 and y < 8 else "#".repeat(12)) + ".".repeat(18) if y < 9 else ".".repeat(30))
 	var err := w.load_map({"v": 1, "w": 30, "h": 30, "spawn": [5.5, 4.5], "rows": rows, "props": []})
 	var types := [W.FRIDGE, W.COUNTER, W.WARDROBE, W.SHELF, W.MEDCAB, W.LOCKER, W.STORESHELF]
-	for mt in range(W.BUNK, W.MAPBOARD + 1):      # мебель военной части — те же правила
+	for mt in range(W.BUNK, W.NOTICEBOARD + 1):   # мебель военной части и столовой — те же правила
 		types.append(mt)
 	var bad := []
-	for mt in range(W.BUNK, W.MAPBOARD + 1):
-		if not W.is_furniture(mt) or not W.FURN_FRONT.has(mt) or not MilFurniture.BACK.has(mt) or W.MAP_CHARS.length() <= mt:
-			bad.append("военная мебель %d описана не везде" % mt)
+	for mt in range(W.BUNK, W.NOTICEBOARD + 1):
+		if not W.is_furniture(mt) or not W.FURN_FRONT.has(mt) or W.MAP_CHARS.length() <= mt \
+				or not (MilFurniture.BACK.has(mt) or CanteenFurniture.BACK.has(mt)):
+			bad.append("новая мебель %d описана не везде" % mt)
 	var wm := WorldMesh.new(w)
 	for i in types.size():
 		var tt: int = types[i]
@@ -1663,9 +1664,9 @@ func test_furniture_collision() -> void:
 		var mx := -100.0
 		for v in m.verts:
 			mx = maxf(mx, v.x)
-		if tt == W.MAPBOARD:               # тонкий стенд стоит в зазоре у стены, до своей клетки не доходит
+		if W.FURN_FRONT[tt] <= -0.5:       # тонкое (стенд, доска, скамья) стоит в зазоре у стены, до своей клетки не доходит
 			if mx > front + 0.01:
-				bad.append("стенд выступает в клетку: %.2f" % mx)
+				bad.append("%d выступает в клетку: %.2f" % [tt, mx])
 		elif absf(mx - front) > 0.04:
 			bad.append("лицо %d: 3D %.2f, FURN_FRONT %.2f" % [tt, mx, front])
 		w.set_t(1, y, W.WOOD)
@@ -1685,12 +1686,47 @@ func test_furniture_collision() -> void:
 		bad.append("половины длинной мебели: %s" % [halves])
 	for yy in [2, 3, 4]:
 		w.set_t(1, yy, W.WOOD)
-	if W.opaque_tile(W.MAPTABLE) or not W.opaque_tile(W.GUNSAFE):
+	# столы посреди комнаты: пара с запада на восток, а без соседей по этой оси — с севера на юг
+	w.set_t(5, 4, W.DINETABLE)
+	w.set_t(6, 4, W.DINETABLE)
+	w.set_t(9, 2, W.DINETABLE)
+	w.set_t(9, 3, W.DINETABLE)
+	if w.furniture_wide(5, 4) != [1, 1, 0] or w.furniture_wide(6, 4) != [2, 1, 0] or w.furniture_wide(9, 2) != [1, 0, 1] or w.furniture_wide(9, 3) != [2, 0, 1]:
+		bad.append("столы посреди комнаты: %s %s %s %s" % [w.furniture_wide(5, 4), w.furniture_wide(6, 4), w.furniture_wide(9, 2), w.furniture_wide(9, 3)])
+	var mt2 := Mesher.new()
+	wm._furniture(mt2, 9, 2, W.DINETABLE)
+	var zr := [100.0, -100.0]
+	for v in mt2.verts:
+		zr = [minf(zr[0], v.z), maxf(zr[1], v.z)]
+	if zr[0] < 2.0 or zr[1] > 4.0 or zr[1] - zr[0] < 1.8:
+		bad.append("стол север—юг занимает %.2f..%.2f" % zr)
+	# сиденья у стола: лицом к столу (а не к стене), задвинуты под край; занято — от стола до спинки
+	for seat in [W.CHAIR, W.BENCH]:
+		w.set_t(5, 3, seat)
+		var sk := w.furniture_dir(5, 3)
+		if sk != 3 or not w.seat_at_table(5, 3, sk):
+			bad.append("сиденье %d не повернулось к столу (%d)" % [seat, sk])
+		var far: float = 4.0 - (0.5 + float(W.SEAT_FRONT[seat]))  # стол на юге (y = 4.0), сиденье тянется от него на север
+		if w.circle_blocked(5.5, far - 0.32, 0.3) or not w.circle_blocked(5.5, far - 0.27, 0.3):
+			bad.append("столкновение сиденья %d у стола" % seat)
+		var ms := Mesher.new()
+		wm._furniture(ms, 5, 3, seat)
+		var zmin := 100.0
+		var zmx := -100.0
+		for v in ms.verts:
+			zmin = minf(zmin, v.z)
+			zmx = maxf(zmx, v.z)
+		if absf(zmin - far) > 0.04 or zmx < 4.0 or zmx > 4.15:
+			bad.append("сиденье %d у стола: 3D %.2f..%.2f, ждали от %.2f до края стола" % [seat, zmin, zmx, far])
+		w.set_t(5, 3, W.WOOD)
+	for cxy in [[5, 4], [6, 4], [9, 2], [9, 3]]:
+		w.set_t(cxy[0], cxy[1], W.WOOD)
+	if W.opaque_tile(W.MAPTABLE) or not W.opaque_tile(W.GUNSAFE) or W.opaque_tile(W.CHAIR) or not W.opaque_tile(W.DISHRACK):
 		bad.append("низкая мебель должна быть прозрачной для взгляда, высокая — нет")
 	w.set_t(6, 4, W.COUNTER)           # посреди комнаты
 	if not w.circle_blocked(7.28, 4.5, 0.3) or w.circle_blocked(7.32, 4.5, 0.3):
 		bad.append("посреди комнаты")
-	check("Мебель у стены: упираешься в её лицо, а не в невидимую стену; посреди комнаты — вся клетка", err == "" and bad.is_empty(), err + str(bad))
+	check("Мебель: у стены упираешься в её лицо, а не в невидимую стену; посреди комнаты — вся клетка; длинная — пары; сиденья встают к столу", err == "" and bad.is_empty(), err + str(bad))
 
 ## Крыши (0.47, BF-060): над недостроенным домом (стены не замкнуты) крыши нет; над закрытым — в пределах стен
 ## со свесом; у дома буквой Г пустой угол рядом не накрыт

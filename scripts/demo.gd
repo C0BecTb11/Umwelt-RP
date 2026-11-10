@@ -91,6 +91,36 @@ static func create(kind: String) -> GameState:
 		p.rpos = p.pos
 		p.face = Vector2(0, -1)
 		p.wear = {"head": "swat_helmet", "torso": "tactical", "legs": "tactical_pants", "feet": "combat_boots"}
+	if kind.begins_with("din"):
+		# витрина мебели столовой: у стены — раздача и кухня, в зале — столы со стульями и скамьями
+		_open_street(g, p)
+		var w := g.world
+		var rows := ["hhNuPoizssyp",       # у стены
+			"............",
+			".hh..jj..hh.",
+			".nn..nn..nn.",
+			".hh..jj.....",
+			"............"]
+		var x0 := int(p.pos.x) - 6
+		var y0 := int(p.pos.y) - 4
+		for i in range(-1, 13):
+			w.set_t(x0 + i, y0, GameWorld.WALL)
+			for dy in range(1, 9):
+				w.set_t(x0 + i, y0 + dy, GameWorld.TILEFLOOR)
+		for r in rows.size():
+			for i in 12:
+				if rows[r][i] != ".":
+					w.set_t(x0 + i, y0 + 1 + r, GameWorld.MAP_CHARS.find(rows[r][i]))
+		var keep := []
+		for e in w.props:
+			if absf(e[1] - (x0 + 6)) > 12 or absf(e[2] - (y0 + 4)) > 10:
+				keep.append(e)
+		w.props = keep
+		w.index_props()
+		w.compute_buildings()
+		p.pos = Vector2(x0 + 6.0, y0 + (7.6 if kind.length() > 3 else 6.5))
+		p.rpos = p.pos
+		p.face = Vector2(0, -1)
 	if kind == "menu" or kind == "stats":
 		# пример статистики для снимка: 1 уровень, 1 из 4 очков, сегодня 2 ч 33 мин и 7 мин АФК
 		p.level = 1

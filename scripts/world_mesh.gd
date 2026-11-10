@@ -411,20 +411,31 @@ func _furniture(m: Mesher, x: int, y: int, t: int) -> void:
 			if W.is_floor(w.t(x + W.DX4[k], y + W.DY4[k])):
 				yaw = rad_to_deg(atan2(W.DX4[k], W.DY4[k]))
 				break
+	var wide: Array = w.furniture_wide(x, y)       # [половина, шаг «вправо»] — длинная мебель на две клетки
+	if best < 0 and wide[0] != 0:
+		yaw = 0.0 if wide[1] == 1 else -90.0       # посреди комнаты длинная мебель встаёт вдоль своего ряда
 	var hv := hash2(x, y)
 	m.identity()
 	m.translate(Vector3(x + 0.5, 0.1, y + 0.5))
 	m.rot_y(yaw)
-	if best >= 0:
+	if w.seat_at_table(x, y, best):
+		# сиденье у стола: лицом к столу, передний край — под столешницу
+		m.rot_y(180)
+		m.translate(Vector3(0, 0, 0.5 + CanteenFurniture.TUCK[t] - CanteenFurniture.FRONT[t]))
+	elif best >= 0:
 		# вплотную к стене: стена стоит по центру своей клетки, без сдвига оставалась щель ~0.45
 		var back: float = {W.FRIDGE: 0.38, W.COUNTER: 0.44, W.WARDROBE: 0.43, W.SHELF: 0.31, W.MEDCAB: 0.40, W.LOCKER: 0.40}.get(t, 0.42)
 		if MilFurniture.BACK.has(t):
 			back = MilFurniture.BACK[t]
+		elif CanteenFurniture.BACK.has(t):
+			back = CanteenFurniture.BACK[t]
 		m.translate(Vector3(0, 0, -(1.0 - HALF - 0.5 - 0.01) - (0.5 - back)))
-	if MilFurniture.BACK.has(t):
-		var half := w.furniture_half(x, y)
-		if half != 2:
-			MilFurniture.draw(m, t, hv, half == 1)
+	if MilFurniture.BACK.has(t) or CanteenFurniture.BACK.has(t):
+		if wide[0] != 2:
+			if MilFurniture.BACK.has(t):
+				MilFurniture.draw(m, t, hv, wide[0] == 1)
+			else:
+				CanteenFurniture.draw(m, t, hv, wide[0] == 1)
 		m.identity()
 		return
 	var wood := c(0x7A5434)

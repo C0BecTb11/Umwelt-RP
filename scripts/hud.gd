@@ -185,6 +185,9 @@ func tick(dt: float) -> void:
 		i -= 1
 
 func open_demo_panel(kind: String) -> void:
+	if kind.begins_with("mil") or kind.begins_with("din"):
+		visible = false                   # витрина мебели — без кнопок
+		return
 	match kind:
 		"inv":
 			panel = Pnl.INV
@@ -198,8 +201,6 @@ func open_demo_panel(kind: String) -> void:
 			panel = Pnl.STATS
 		"chat":
 			open_chat()
-		"mil", "mil1", "mil2", "mil3", "mil4":
-			visible = false               # витрина мебели — без кнопок
 		"rp":
 			bubble_hold = true
 		"rpopen":
