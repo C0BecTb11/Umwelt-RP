@@ -1865,13 +1865,15 @@ func test_rest_poses() -> void:
 			3: PoliceFurniture.draw(m, t, 3, mode == 2)
 			4: HospitalFurniture.draw(m, t, 3, mode == 2, mode == 3)
 		return m
-	# верх мебели под точкой (x, z): flat — только ровные грани (сиденья), иначе и наклонные (изголовье)
-	var top_at := func(m: Mesher, x: float, z: float, flat: bool) -> float:
+	# верх мебели под точкой (x, z) не выше ceil: flat — только ровные грани (сиденья), иначе и наклонные (изголовье)
+	var top_at := func(m: Mesher, x: float, z: float, flat: bool, ceil: float) -> float:
 		var top := -1.0
 		for i in range(0, m.verts.size(), 3):
 			var a := m.verts[i]
 			var b := m.verts[i + 1]
 			var c := m.verts[i + 2]
+			if maxf(a.y, maxf(b.y, c.y)) > ceil:
+				continue                           # то, что выше (верхний ярус над нижним), не в счёт
 			var a2 := Vector2(a.x, a.z)
 			var b2 := Vector2(b.x, b.z)
 			var c2 := Vector2(c.x, c.z)
@@ -1943,8 +1945,10 @@ func test_rest_poses() -> void:
 			if not okl:
 				bad.append("%s: лежит (сторона %d): голова %s, стопа %s" % [gd, side, head, foot])
 		# переходы: в начале — обычная стойка, дальше без рывков; стопы ни разу не уходят под пол
+		var low_o := {"k": 2, "h": 0.5, "deep": 0.62, "side": 1, "low": 1, "pillow": 0.065, "room": 1.7}       # нижний ярус
+		var climb_o := {"k": 2, "h": 1.32, "dx": 0.8, "deep": -0.775, "side": -1, "lad": CharPoses.LADDER_GAP, "rungs": [0.3, 0.64, 0.98], "pillow": 0.065, "room": 1.7}
 		var trans := [{"k": 1, "h": 0.48}, {"k": 1, "h": 0.72}, wopt.merged({"k": 1}), {"k": 2, "h": 0.72, "deep": 0.7, "side": 1, "raise": 24.0, "bend": 1},
-			{"k": 2, "h": 0.86, "deep": 0.62, "side": -1, "pillow": 0.055}]
+			{"k": 2, "h": 0.86, "deep": 0.62, "side": -1, "pillow": 0.055}, low_o, climb_o]
 		for to: Dictionary in trans:
 			var ks := CharPoses.keys(r, to)
 			var prev: Dictionary = fk.call(CharPoses.at(ks, 0.0))
@@ -1952,33 +1956,47 @@ func test_rest_poses() -> void:
 				bad.append("%s: начало перехода %s — не стойка" % [gd, to])
 			var worst := 0.0
 			var low := 9.0
+			var head_in := 0.0                     # нижний ярус: как высоко поднималась голова под верхним ярусом
 			var steps := roundi(CharPoses.duration(to) * 60.0)        # кадр — 1/60 с
 			for i in range(1, steps + 1):
 				var cur: Dictionary = fk.call(CharPoses.at(ks, float(i) / steps))
 				for nm in joints:
 					worst = maxf(worst, ((cur[nm] as Vector3) - (prev[nm] as Vector3)).length())
 				low = minf(low, minf((cur["Foot.L"] as Vector3).y, (cur["Foot.R"] as Vector3).y))
+				var hp: Vector3 = cur["Head"]
+				if absf(hp.z + float(to.get("deep", 0.0))) < 0.4:
+					head_in = maxf(head_in, hp.y)
 				prev = cur
+			if to.has("low") and head_in > 1.14 - 0.12:      # низ верхнего яруса — 1,14; над суставом головы ещё макушка
+				bad.append("%s: ложась на нижний ярус, задевает головой верхний: %.2f" % [gd, head_in])
+			if to.has("rungs") and ((prev["Head"] as Vector3).x < 1.2 or absf((prev["UpperLeg.L"] as Vector3).y - 1.32 - r.lie_hip) > 0.02):
+				bad.append("%s: забрался на верхний ярус не туда: голова %s" % [gd, prev["Head"]])
 			if worst > 0.07:
 				bad.append("%s: рывок в переходе %s: %.3f м за кадр" % [gd, to, worst])
 			if low < floor_y - 0.004:
 				bad.append("%s: стопа под полом в переходе %s: %.3f" % [gd, to, low - floor_y])
 		# лежит на каждой постели: суставы спины, головы и ног — над поверхностью под ними, не в ней и не высоко над ней
-		for tm in [[W.CELLBUNK, 2], [W.HOSPBED, 2], [W.HOSPBED, 3], [W.GURNEY, 2], [W.EXAMTABLE, 2], [W.OPTABLE, 2]]:
-			var sp: Dictionary = RestSpots.local(tm[0], tm[1], 3)[0]
-			var lp: Vector3 = sp["p"]
-			var o := sp.duplicate()
-			o["h"] = lp.y
-			o["side"] = 1
-			var m: Mesher = draw.call(tm[0], tm[1])
-			var org := Vector3(lp.x + CharPoses.lie_shift(r, o), 0, lp.z + float(sp["deep"]))      # где стоит модель, в осях мебели
-			var l2: Dictionary = fk.call(CharPoses.lie(r, o))
-			for nm in ["Head", "Chest", "Torso", "UpperLeg.L", "LowerLeg.L", "Foot.L"]:
-				var v: Vector3 = (l2[nm] as Vector3) + org
-				var gap: float = v.y - (top_at.call(m, v.x, v.z, false) as float)
-				var lim := [0.07, 0.24] if nm == "Head" else ([0.03, 0.24 if sp.has("room") and nm == "LowerLeg.L" else 0.16] if nm.contains("Leg") or nm == "Foot.L" else [0.06, 0.25])
-				if gap < lim[0] or gap > lim[1]:
-					bad.append("%s лежит на %d (вид %d): %s на %.3f над постелью" % [gd, tm[0], tm[1], nm, gap])
+		for tm in [[W.BUNK, 2], [W.CELLBUNK, 2], [W.HOSPBED, 2], [W.HOSPBED, 3], [W.GURNEY, 2], [W.EXAMTABLE, 2], [W.OPTABLE, 2]]:
+			for sp: Dictionary in RestSpots.local(tm[0], tm[1], 3):
+				var lp: Vector3 = sp["p"]
+				var o := sp.duplicate()
+				o["h"] = lp.y
+				o["side"] = 1
+				var m: Mesher = draw.call(tm[0], tm[1])
+				var org := Vector3(lp.x + CharPoses.lie_shift(r, o), 0, lp.z + float(sp["deep"]))      # где стоит модель, в осях мебели
+				var l2: Dictionary = fk.call(CharPoses.lie(r, o))
+				for nm in ["Head", "Chest", "Torso", "UpperLeg.L", "LowerLeg.L", "Foot.L"]:
+					var v: Vector3 = (l2[nm] as Vector3) + org
+					var gap: float = v.y - (top_at.call(m, v.x, v.z, false, v.y + 0.12) as float)
+					var lim := [0.05, 0.24] if nm == "Head" else ([0.03, 0.26 if sp.has("room") and nm == "LowerLeg.L" else 0.16] if nm.contains("Leg") or nm == "Foot.L" else [0.06, 0.25])
+					if gap < lim[0] or gap > lim[1]:
+						bad.append("%s лежит на %d (вид %d, высота %.2f): %s на %.3f над постелью" % [gd, tm[0], tm[1], lp.y, nm, gap])
+		# «на спине» в записи «с живота, перевернувшись» (так кончается подъём на верхний ярус) — та же поза
+		var la: Dictionary = fk.call(CharPoses.lie(r, climb_o))
+		var lb: Dictionary = fk.call(CharPoses._supine_from_prone(CharPoses.lie(r, climb_o)))
+		for nm in joints:
+			if ((la[nm] as Vector3) - (lb[nm] as Vector3)).length() > 0.003:
+				bad.append("%s: поза после переворота отличается: %s %s / %s" % [gd, nm, la[nm], lb[nm]])
 		# модель: сел и встал — поза приходит и уходит, после «встать» ничего не остаётся
 		cm.fresh = false
 		cm.set_rest({"k": 1, "h": 0.48})
@@ -2001,7 +2019,7 @@ func test_rest_poses() -> void:
 				var p: Vector3 = sp["p"]
 				var lying := int(sp["k"]) == 2
 				var bent := lying and int(sp.get("bend", 0)) > 0
-				var top: float = top_at.call(m, p.x + (0.12 if bent else 0.0), p.z, true)
+				var top: float = top_at.call(m, p.x + (0.12 if bent else 0.0), p.z, true, p.y + 0.2)
 				var want := p.y + (float(sp.get("pillow", 0.0)) if lying and not bent else 0.0)
 				if absf(top - want) > 0.05:
 					bad.append("место на мебели %d (вид %d): высота %.3f, у модели %.3f" % [t, mode, want, top])
@@ -2039,6 +2057,16 @@ func test_rest_poses() -> void:
 	var sn: Array = wm.rest_spots(1, 6) + wm.rest_spots(1, 5)
 	if sn.size() != 1 or int(sn[0]["k"]) != 2 or (sn[0]["face"] as Vector2).distance_to(Vector2(1, 0)) > 0.01:
 		bad.append("нары у стены: %s" % [sn])
+	w.set_t(6, 7, W.BUNK)              # двухъярусная койка вдоль южной стены: нижний ярус — из комнаты, верхний — от лесенки
+	w.set_t(7, 7, W.BUNK)
+	var sk2: Array = wm.rest_spots(6, 7) + wm.rest_spots(7, 7)
+	var oku: bool = sk2.size() == 2 and not sk2[0].has("from") and sk2[1].has("from") and int(sk2[0]["o"].get("low", 0)) == 1 and sk2[1]["o"].has("rungs")
+	if oku:
+		var fr: Vector2 = sk2[1]["from"]
+		oku = (sk2[0]["face"] as Vector2).distance_to(Vector2(0, -1)) < 0.01 and (sk2[1]["face"] as Vector2).distance_to(Vector2(0, 1)) < 0.01 \
+			and not w.circle_blocked(fr.x, fr.y, 0.05) and fr.y < (sk2[1]["pos"] as Vector2).y - 0.6 and absf(fr.x - (sk2[1]["pos"] as Vector2).x) > 0.8
+	if not oku:
+		bad.append("двухъярусная койка: %s" % [sk2])
 	# пол под мебелью — на высоте пола комнаты: человек у шкафа и на стуле не уходит в пол на 10 см (BF-075)
 	var view := WorldView.new()
 	view.world = w
@@ -2046,7 +2074,7 @@ func test_rest_poses() -> void:
 	view.free()
 	if gy != [0.1, 0.1, 0.1, 0.0]:
 		bad.append("высота пола под мебелью: %s" % [gy])
-	check("Позы «сидит» и «лежит»: таз на сиденье, стопы на полу и не под ним, лежащий на постели, а не в ней; переход без рывков; места совпадают с мебелью", err == "" and bad.is_empty(), err + str(bad))
+	check("Позы «сидит» и «лежит»: таз на сиденье, стопы на полу и не под ним, лежащий на постели, а не в ней; переход без рывков; двухъярусная койка — оба яруса; места совпадают с мебелью", err == "" and bad.is_empty(), err + str(bad))
 
 ## Крыши (0.47, BF-060): над недостроенным домом (стены не замкнуты) крыши нет; над закрытым — в пределах стен
 ## со свесом; у дома буквой Г пустой угол рядом не накрыт

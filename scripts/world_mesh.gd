@@ -499,7 +499,8 @@ func patient_dir(x: int, y: int) -> int:
 ## "k" 1 сидеть / 2 лежать; "h" — высота сиденья или постели над полом; "face" — куда человек смотрит, пока стоит
 ## перед мебелью (сидя — туда же); "o" — остальное описание места для позы (CharPoses.sit и lie).
 ## Сидеть: "pos" — куда приходит таз (x, y карты). Лежать: "pos" — опорная точка постели (изгиб изголовья или
-## подушка), "axis" — от головы к ногам. Лечь можно только с той стороны, где перед постелью свободный пол
+## подушка), "axis" — от головы к ногам. Лечь можно только с той стороны, где перед постелью свободный пол.
+## Верхний ярус: "from" — где человек стоит перед лесенкой (лицом к ней, "face" — в сторону койки)
 func rest_spots(x: int, y: int) -> Array:
 	var out := []
 	var t := w.t(x, y)
@@ -524,10 +525,20 @@ func rest_spots(x: int, y: int) -> Array:
 		for sg: int in sp["sides"]:
 			var n: Vector3 = m.xf.basis * Vector3(0, 0, sg)
 			var stand := Vector2(wp.x + ax.x * 0.4 + n.x * float(sp["deep"]), wp.z + ax.z * 0.4 + n.z * float(sp["deep"]))
+			if sp.has("climb"):
+				var lad: Vector3 = sp["climb"]
+				var lw: Vector3 = m.xf * Vector3(lad.x, 0, lad.z + sg * CharPoses.LADDER_GAP)
+				stand = Vector2(lw.x, lw.z)
 			if w.circle_blocked(stand.x, stand.y, 0.05):
 				continue                           # с этой стороны стена или другая мебель
-			out.append({"k": 2, "pos": Vector2(wp.x, wp.z), "h": lp.y, "face": Vector2(n.x, n.z).normalized(),
-				"axis": Vector2(ax.x, ax.z).normalized(), "o": o})
+			var e := {"k": 2, "pos": Vector2(wp.x, wp.z), "h": lp.y, "face": Vector2(n.x, n.z).normalized(),
+				"axis": Vector2(ax.x, ax.z).normalized(), "o": o}
+			if sp.has("climb"):
+				e["from"] = stand
+				e["face"] = -(e["face"] as Vector2)
+				o["lad"] = CharPoses.LADDER_GAP
+				o.erase("climb")
+			out.append(e)
 			break
 	return out
 

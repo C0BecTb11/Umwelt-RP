@@ -423,15 +423,22 @@ func _place_rest(cm: CharModel, spot: Dictionary) -> void:
 		d["h"] = float(spot["h"])
 		var ref := CharPoses.ref_for(cm.gender, cm.skel, cm.ap.get_animation("Idle"))
 		var away := 0.0
+		var stand := pos
 		if d["k"] == 2:
 			var ax: Vector2 = spot["axis"]
 			away = float(d["deep"])
 			d["side"] = 1 if ax.dot(Vector2(face.y, -face.x)) > 0.0 else -1
 			pos += ax * CharPoses.lie_shift(ref, d)     # опорная точка постели — изгиб изголовья или подушка; таз — дальше к ногам
+			stand = pos + face * away
+			if spot.has("from"):
+				# верхний ярус: человек стоит перед лесенкой, а таз ляжет в стороне и впереди
+				stand = spot["from"]
+				d["dx"] = (pos - stand).dot(Vector2(face.y, -face.x))
+				d["deep"] = -(pos - stand).dot(face)
 		else:
-			away = CharPoses.sit_back(ref, d["h"], d)
+			stand = pos + face * CharPoses.sit_back(ref, d["h"], d)
 		cm.set_rest(d)
-		cm.set_meta("rest_at", [pos + face * away, atan2(face.x, face.y)])
+		cm.set_meta("rest_at", [stand, atan2(face.x, face.y)])
 	if cm.has_meta("rest_at"):
 		var at: Array = cm.get_meta("rest_at")
 		cm.position = Vector3(at[0].x, _ground_at(at[0].x, at[0].y), at[0].y)

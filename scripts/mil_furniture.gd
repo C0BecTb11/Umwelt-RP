@@ -72,7 +72,8 @@ static func _bunk(m: Mesher, hv: int, wide: bool) -> void:
 		var bx0 := x0 + L * 0.3
 		m.box(Vector3((bx0 + x1 - 0.06) * 0.5, by + 0.155, 0), Vector3(x1 - 0.06 - bx0, 0.04, 0.84), bl)
 		m.box(Vector3(bx0 + 0.07, by + 0.165, 0), Vector3(0.14, 0.045, 0.84), c(0xE8E6DC))
-		m.box(Vector3(x0 + L * 0.15, by + 0.19, 0), Vector3(L * 0.2, 0.1, 0.5), c(0xF0EFE8))
+		var pl := minf(0.28, L * 0.2)                 # подушка — под головой, плечи лежат на матрасе (место лежащего — RestSpots)
+		m.box(Vector3(x0 + 0.08 + pl * 0.5, by + 0.19, 0), Vector3(pl, 0.1, 0.5), c(0xF0EFE8))
 	# лесенка на верхний ярус — у ног, с лица
 	var lx := x1 - 0.2
 	for dx in [-0.13, 0.13]:
