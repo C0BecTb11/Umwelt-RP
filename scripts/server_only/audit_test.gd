@@ -37,6 +37,7 @@ func _ready() -> void:
 	test_roofs()
 	test_city_map()
 	test_furniture_collision()
+	test_rest_poses()
 	test_attack_walk()
 	test_payday()
 	test_payday_guard()
@@ -1848,6 +1849,146 @@ func test_furniture_collision() -> void:
 	if err2 != "" or w2.t(3, 6) != W.RECEPTION or w2.t(4, 6) != W.MORGUE or W.MAP_CHARS.length() != W.MORGUE + 1:
 		bad.append("карта с больничной мебелью: %s" % err2)
 	check("Мебель: у стены упираешься в её лицо, а не в невидимую стену; посреди комнаты — вся клетка; длинная — пары; сиденья встают к столу; койка изголовьем к стене, ширма, светильник", err == "" and bad.is_empty(), err + str(bad))
+
+## Позы «сидит» и «лежит» (CharPoses) и места на мебели (RestSpots): таз — на сиденье, стопы — на полу, лежащий —
+## на постели головой к подушке; переход без рывков; места мебели совпадают с её моделью
+func test_rest_poses() -> void:
+	var bad := []
+	var joints := ["Head", "Wrist.L", "Wrist.R", "LowerLeg.L", "LowerLeg.R", "Foot.L", "Foot.R", "UpperLeg.L", "UpperLeg.R"]
+	for gd in ["m", "f"]:
+		var cm := CharModel.new()
+		cm.setup({"g": gd, "sk": 0})
+		var r := CharPoses.ref_for(gd, cm.skel, cm.ap.get_animation("Idle"))
+		var fk := func(sp: CharPoses.Spec) -> Dictionary:
+			var pose := CharPoses.solve(r, sp)
+			var g := []
+			for b in r.n:
+				var l: Transform3D = pose.get(b, r.loc[b])
+				g.append(l if r.parent[b] < 0 else (g[r.parent[b]] as Transform3D) * l)
+			var o := {}
+			for nm in joints:
+				o[nm] = (g[r.idx[nm]] as Transform3D).origin
+			return o
+		# сидит на стуле: суставы бёдер над сиденьем, стопы на полу перед стулом, кисти на бёдрах, колени впереди
+		var h := 0.48
+		var s: Dictionary = fk.call(CharPoses.sit(r, h))
+		var hip: Vector3 = (s["UpperLeg.L"] + s["UpperLeg.R"]) * 0.5
+		var back := CharPoses.sit_back(r, h)
+		if absf(hip.y - (h + CharPoses.THIGH_R)) > 0.01 or absf(hip.z + back) > 0.01 or absf(hip.x) > 0.01:
+			bad.append("%s: таз сидящего %s" % [gd, hip])
+		for ft in ["Foot.L", "Foot.R"]:
+			var f: Vector3 = s[ft]
+			if absf(f.y - r.stand.foot[0].y) > 0.02 or absf(f.z - CharPoses.FEET_Z) > 0.03:
+				bad.append("%s: стопа сидящего %s %s" % [gd, ft, f])
+		for kn in ["LowerLeg.L", "LowerLeg.R"]:
+			if (s[kn] as Vector3).z < hip.z + 0.3 or (s[kn] as Vector3).y > hip.y + 0.01:
+				bad.append("%s: колено сидящего %s" % [gd, s[kn]])
+		for wr in ["Wrist.L", "Wrist.R"]:
+			var wv: Vector3 = s[wr]
+			if wv.y < h + CharPoses.THIGH_R + 0.04 or wv.y > h + 0.3 or wv.z < hip.z or wv.z > 0.05:
+				bad.append("%s: кисть сидящего %s" % [gd, wv])
+		if (s["Head"] as Vector3).y < h + 0.55:
+			bad.append("%s: голова сидящего %s" % [gd, s["Head"]])
+		# лежит: всё тело — над постелью и в её пределах, голова — в сторону side, ноги — в другую
+		for side in [1, -1]:
+			var hb := 0.72
+			var l: Dictionary = fk.call(CharPoses.lie(r, hb, 0.7, side))
+			var head: Vector3 = l["Head"]
+			var foot: Vector3 = l["Foot.L"]
+			var okl: bool = head.x * side < -0.45 and foot.x * side > 0.8
+			for nm in joints:
+				var v: Vector3 = l[nm]
+				if v.y < hb + 0.02 or v.y > hb + 0.4 or absf(v.z + 0.7) > 0.4:
+					okl = false
+			if not okl:
+				bad.append("%s: лежит (сторона %d): голова %s, стопа %s" % [gd, side, head, foot])
+		# переходы: в начале — обычная стойка, дальше без рывков (ни один сустав не прыгает за шаг)
+		for kind in [1, 2]:
+			var ks := CharPoses.keys(r, kind, 0.48 if kind == 1 else 0.72, 0.7, 1, 22.0 if kind == 2 else 0.0)
+			var prev: Dictionary = fk.call(CharPoses.at(ks, 0.0))
+			if ((prev["Foot.L"] as Vector3) - (r.stand.foot[0] as Vector3)).length() > 0.02 or ((prev["Foot.R"] as Vector3) - (r.stand.foot[1] as Vector3)).length() > 0.02:
+				bad.append("%s: начало перехода %d — не стойка" % [gd, kind])
+			var worst := 0.0
+			var steps := 80
+			for i in range(1, steps + 1):
+				var cur: Dictionary = fk.call(CharPoses.at(ks, float(i) / steps))
+				for nm in joints:
+					worst = maxf(worst, ((cur[nm] as Vector3) - (prev[nm] as Vector3)).length())
+				prev = cur
+			if worst > (0.06 if kind == 1 else 0.09):
+				bad.append("%s: рывок в переходе %d: %.3f м за шаг" % [gd, kind, worst])
+		# модель: сел и встал — поза приходит и уходит, после «встать» ничего не остаётся
+		cm.fresh = false
+		cm.set_rest({"k": 1, "h": 0.48})
+		for i in 50:
+			cm.pose_dt(0.05, 0.0, 0.0, "", false, false)
+		var sat := cm.rest_u
+		cm.set_rest({})
+		for i in 50:
+			cm.pose_dt(0.05, 0.0, 0.0, "", false, false)
+		if sat < 1.0 or cm.rest_u > 0.0 or not cm.rest.is_empty():
+			bad.append("%s: сел %.2f, встал %.2f" % [gd, sat, cm.rest_u])
+		cm.free()
+	# места на мебели совпадают с моделью: под точкой — верх сиденья или постели
+	for t in range(W.BUNK, W.MORGUE + 1):
+		for mode in [1, 2, 3]:
+			if (mode == 2 and not W.is_wide_furniture(t)) or (mode == 3 and t != W.HOSPBED):
+				continue
+			for sp: Dictionary in RestSpots.local(t, mode):
+				var m := Mesher.new()
+				m.identity()
+				match WorldMesh.furn_set(t):
+					1: MilFurniture.draw(m, t, 3, mode == 2)
+					2: CanteenFurniture.draw(m, t, 3, mode == 2)
+					3: PoliceFurniture.draw(m, t, 3, mode == 2)
+					4: HospitalFurniture.draw(m, t, 3, mode == 2, mode == 3)
+				var p: Vector3 = sp["p"]
+				var top := -1.0
+				for i in range(0, m.verts.size(), 3):
+					var a := Vector2(m.verts[i].x, m.verts[i].z)
+					var b := Vector2(m.verts[i + 1].x, m.verts[i + 1].z)
+					var c := Vector2(m.verts[i + 2].x, m.verts[i + 2].z)
+					var ymax := maxf(m.verts[i].y, maxf(m.verts[i + 1].y, m.verts[i + 2].y))
+					var ymin := minf(m.verts[i].y, minf(m.verts[i + 1].y, m.verts[i + 2].y))
+					if ymax - ymin < 0.004 and Geometry2D.point_is_inside_triangle(Vector2(p.x, p.z), a, b, c):
+						top = maxf(top, ymax)
+				if absf(top - p.y) > 0.05:
+					bad.append("место на мебели %d (вид %d): высота %.3f, у модели %.3f" % [t, mode, p.y, top])
+	# места в мире: стул у стены — лицом в комнату; стул у стола — лицом к столу; койка изголовьем к стене — с боку
+	var w := GameWorld.new()
+	var rows := []
+	for y in 30:
+		rows.append(("#" + "w".repeat(10) + "#" if y > 0 and y < 8 else "#".repeat(12)) + ".".repeat(18) if y < 9 else ".".repeat(30))
+	var err := w.load_map({"v": 1, "w": 30, "h": 30, "spawn": [5.5, 4.5], "rows": rows, "props": []})
+	var wm := WorldMesh.new(w)
+	w.set_t(3, 1, W.CHAIR)             # у северной стены
+	var sc: Array = wm.rest_spots(3, 1)
+	if sc.size() != 2 or int(sc[0]["k"]) != 1 or (sc[0]["face"] as Vector2).distance_to(Vector2(0, 1)) > 0.01 \
+			or (sc[0]["pos"] as Vector2).y > 1.5 or absf((sc[0]["pos"] as Vector2).x - (sc[1]["pos"] as Vector2).x) < 0.4:
+		bad.append("стул у стены: %s" % [sc])
+	w.set_t(5, 4, W.DINETABLE)
+	w.set_t(5, 3, W.CHAIR)             # к северу от стола — лицом на юг, к столу
+	var st: Array = wm.rest_spots(5, 3)
+	if st.size() != 2 or (st[0]["face"] as Vector2).distance_to(Vector2(0, 1)) > 0.01 or (st[0]["pos"] as Vector2).y < 3.5:
+		bad.append("стул у стола: %s" % [st])
+	w.set_t(8, 1, W.HOSPBED)           # изголовьем к северной стене
+	w.set_t(8, 2, W.HOSPBED)
+	var sb: Array = wm.rest_spots(8, 1)
+	var okb: bool = sb.size() == 1 and int(sb[0]["k"]) == 2
+	if okb:
+		var pos: Vector2 = sb[0]["pos"]
+		var stand: Vector2 = pos + (sb[0]["face"] as Vector2) * float(sb[0]["deep"])
+		okb = (sb[0]["axis"] as Vector2).distance_to(Vector2(0, 1)) < 0.01 and absf(pos.x - 8.5) < 0.02 and pos.y > 1.2 and pos.y < 2.2 \
+			and absf(stand.y - pos.y) < 0.01 and absf(stand.x - 8.5) > 0.6 and not w.circle_blocked(stand.x, stand.y, 0.18) \
+			and wm.rest_spots(8, 2).is_empty()
+	if not okb:
+		bad.append("койка изголовьем к стене: %s" % [sb])
+	w.set_t(1, 5, W.CELLBUNK)          # нары вдоль западной стены: лечь можно только из комнаты
+	w.set_t(1, 6, W.CELLBUNK)
+	var sn: Array = wm.rest_spots(1, 6) + wm.rest_spots(1, 5)
+	if sn.size() != 1 or int(sn[0]["k"]) != 2 or (sn[0]["face"] as Vector2).distance_to(Vector2(1, 0)) > 0.01:
+		bad.append("нары у стены: %s" % [sn])
+	check("Позы «сидит» и «лежит»: таз на сиденье, стопы на полу, лежащий на постели; переход без рывков; места совпадают с мебелью", err == "" and bad.is_empty(), err + str(bad))
 
 ## Крыши (0.47, BF-060): над недостроенным домом (стены не замкнуты) крыши нет; над закрытым — в пределах стен
 ## со свесом; у дома буквой Г пустой угол рядом не накрыт

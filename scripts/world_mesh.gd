@@ -495,7 +495,41 @@ func patient_dir(x: int, y: int) -> int:
 			return k
 	return -1
 
-func _furniture(m: Mesher, x: int, y: int, t: int) -> void:
+## Где на мебели в клетке можно сесть или лечь — в координатах мира (точки модели — RestSpots). Каждое место:
+## "k" 1 сидеть / 2 лежать; "pos" — куда приходит таз (x, y карты); "h" — высота сиденья или постели над полом;
+## "face" — куда человек смотрит, пока стоит перед мебелью (сидя — туда же); для «лежать» ещё "axis" — от головы
+## к ногам, "deep" и "up" (см. RestSpots). Лечь можно только с той стороны, где перед постелью свободный пол
+func rest_spots(x: int, y: int) -> Array:
+	var out := []
+	var t := w.t(x, y)
+	if not W.is_furniture(t):
+		return out
+	var m := Mesher.new()
+	var how := _furniture(m, x, y, t, true)
+	if how == 0:
+		return out                             # вторая половина длинной мебели: места — у первой
+	for sp: Dictionary in RestSpots.local(t, how):
+		var lp: Vector3 = sp["p"]
+		var wp: Vector3 = m.xf * Vector3(lp.x, 0, lp.z)
+		if int(sp["k"]) == 1:
+			var f: Vector3 = m.xf.basis * Vector3.BACK
+			out.append({"k": 1, "pos": Vector2(wp.x, wp.z), "h": lp.y, "face": Vector2(f.x, f.z).normalized()})
+			continue
+		var ax: Vector3 = m.xf.basis * Vector3.RIGHT
+		for sg: int in sp["sides"]:
+			var n: Vector3 = m.xf.basis * Vector3(0, 0, sg)
+			var stand := Vector2(wp.x + n.x * float(sp["deep"]), wp.z + n.z * float(sp["deep"]))
+			if w.circle_blocked(stand.x, stand.y, 0.05):
+				continue                           # с этой стороны стена или другая мебель
+			out.append({"k": 2, "pos": Vector2(wp.x, wp.z), "h": lp.y, "face": Vector2(n.x, n.z).normalized(),
+				"axis": Vector2(ax.x, ax.z).normalized(), "deep": float(sp["deep"]), "up": float(sp["up"])})
+			break
+	return out
+
+## Нарисовать мебель клетки. place_only — только поставить (в m.xf останутся её место и поворот), не рисуя.
+## Возвращает, как она стоит: 0 — эту клетку рисует соседняя (вторая половина длинной мебели, изножье койки),
+## 1 — одна клетка, 2 — длинная на две клетки, 3 — койка изголовьем к стене
+func _furniture(m: Mesher, x: int, y: int, t: int, place_only: bool = false) -> int:
 	# спиной к стене, лицом в комнату (если стен несколько — к той, напротив которой свободно)
 	# направление — то же, по которому считается столкновение (GameWorld.furniture_dir, FURN_FRONT)
 	var yaw := 0.0
@@ -504,7 +538,7 @@ func _furniture(m: Mesher, x: int, y: int, t: int) -> void:
 	var wide: Array = w.furniture_wide(x, y)       # [половина, шаг «вправо»] — длинная мебель на две клетки
 	var deep: Array = w.bed_deep(x, y) if t == W.HOSPBED else [0, -1]    # койка изголовьем к стене
 	if deep[0] == 2:
-		return                                     # изножье: всю койку рисует клетка-изголовье
+		return 0                                   # изножье: всю койку рисует клетка-изголовье
 	if best >= 0:
 		yaw = rad_to_deg(atan2(W.DX4[best], W.DY4[best]))
 	elif W.is_bars(t):
@@ -547,9 +581,10 @@ func _furniture(m: Mesher, x: int, y: int, t: int) -> void:
 		m.translate(Vector3(-1, 0, 0))             # модель тянется на вторую клетку — после разворота вернуть её туда же
 	if deep[0] == 1:
 		m.rot_y(-90)                               # койка вытянута от стены: изголовье у стены, изножье в комнате
-		HospitalFurniture.draw(m, t, hv, false, true)
-		m.identity()
-		return
+		if not place_only:
+			HospitalFurniture.draw(m, t, hv, false, true)
+			m.identity()
+		return 3
 	if w.seat_at_table(x, y, best):
 		# сиденье у стола: лицом к столу, передний край — под столешницу
 		m.rot_y(180)
@@ -560,6 +595,9 @@ func _furniture(m: Mesher, x: int, y: int, t: int) -> void:
 		back = furn_num(t, "BACK", back)
 		m.translate(Vector3(0, 0, -(1.0 - HALF - 0.5 - 0.01) - (0.5 - back)))
 	var fs := furn_set(t)
+	var how := 0 if wide[0] == 2 else (2 if wide[0] == 1 else 1)
+	if place_only:
+		return how
 	if fs != 0:
 		if wide[0] != 2:
 			match fs:
@@ -568,7 +606,7 @@ func _furniture(m: Mesher, x: int, y: int, t: int) -> void:
 				3: PoliceFurniture.draw(m, t, hv, wide[0] == 1)
 				4: HospitalFurniture.draw(m, t, hv, wide[0] == 1)
 		m.identity()
-		return
+		return how
 	var wood := c(0x7A5434)
 	match t:
 		W.FRIDGE:
@@ -625,8 +663,10 @@ func _furniture(m: Mesher, x: int, y: int, t: int) -> void:
 					var bc2 := c([0xD04838, 0xE8C040, 0x4A8AD0, 0xE8E8E0, 0x5AA050][(hv + b + s * 3) % 5])
 					m.box(Vector3(-0.33 + (b % 4) * 0.22, sy2 + 0.12, side * 0.22), Vector3(0.16, 0.2, 0.18), bc2)
 	m.identity()
+	return how
 
 # ================== УЛИЦА ==================
+
 func _tree(m: Mesher, x: int, y: int) -> void:
 	var hv := hash2(x, y)
 	var cx := x + 0.5

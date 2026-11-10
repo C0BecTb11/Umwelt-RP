@@ -378,11 +378,12 @@ static func _hospbed(m: Mesher, hv: int, L: float, cx: float) -> void:
 	var bx0 := fx0 + 0.12
 	m.box(Vector3((bx0 + x1 - 0.07) * 0.5, 0.7, 0), Vector3(x1 - 0.07 - bx0, 0.04, 0.86), c(bl))          # одеяло
 	m.box(Vector3(bx0 + 0.07, 0.715, 0), Vector3(0.16, 0.035, 0.86), c(WHITE))    # отворот простыни
-	for sz in [-0.44, 0.44]:                                                      # боковые ограждения
-		for y in [0.78, 0.9]:
-			m.box(Vector3(cx + 0.05, y, sz), Vector3(L * 0.34, 0.025, 0.025), c(CHROME))
+	var rl := minf(0.5, hl - 0.06)                                                # ограждения — у изголовья: с середины на койку садятся и ложатся
+	for sz in [-0.44, 0.44]:
+		for y in [0.86, 0.99]:
+			m.box(Vector3(x0 + 0.1 + rl * 0.5, y, sz), Vector3(rl, 0.025, 0.025), c(CHROME))
 		for k in 3:
-			m.box(Vector3(cx + 0.05 - L * 0.16 + k * L * 0.16, 0.74, sz), Vector3(0.02, 0.34, 0.02), c(CHROME))
+			m.box(Vector3(x0 + 0.1 + k * rl * 0.5, 0.8, sz), Vector3(0.02, 0.4, 0.02), c(CHROME))
 	m.box(Vector3(x1 + 0.008, 0.72, 0.1), Vector3(0.014, 0.24, 0.2), c(0x6A4A2C)) # планшет с историей болезни
 	m.box(Vector3(x1 + 0.017, 0.71, 0.1), Vector3(0.004, 0.2, 0.17), c(PAPER))
 

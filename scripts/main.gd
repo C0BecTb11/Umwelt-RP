@@ -41,7 +41,13 @@ func _ready() -> void:
 			demo_yaw = float(a.substr(6))
 		elif a.begins_with("--shots="):
 			for f in a.substr(8).split(","):
-				shot_list.append(int(f))
+				if f.contains("-"):                 # подряд: --shots=45-240 (кадры для ролика)
+					for k in range(int(f.get_slice("-", 0)), int(f.get_slice("-", 1)) + 1):
+						shot_list.append(k)
+				else:
+					shot_list.append(int(f))
+		elif a.begins_with("--fixed-dt="):
+			CharModel.fixed_dt = float(a.substr(11))   # ролик кадр за кадром: позы идут по этому шагу, а не по часам
 	get_tree().set_auto_accept_quit(false)
 	if "--audit" in args:
 		var at: GDScript = load("res://scripts/server_only/audit_test.gd")
@@ -139,6 +145,9 @@ func _process(dt: float) -> void:
 			if not is_nan(demo_pitch):
 				screen.view.cam_pitch = demo_pitch
 			screen.view.cam_shift = demo_shift
+			if not Demo.rest_plan.is_empty():
+				screen.view.rest_plan = Demo.rest_plan
+				Demo.rest_plan = []
 		if shot_list.size() > 0:
 			if shot_frames in shot_list:
 				await RenderingServer.frame_post_draw

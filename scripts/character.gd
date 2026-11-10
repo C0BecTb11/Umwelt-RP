@@ -36,10 +36,18 @@ const UPPER_FROM := "Abdomen"       # эта кость и все ниже по 
 const LAYER_IN := 0.08              # с, плавный вход удара поверх ходьбы
 const LAYER_OUT := 0.12             # с, плавный выход в конце
 const ATK_SPEED := 1.25             # удары играются чуть быстрее записи (как было)
+static var fixed_dt := -1.0         # > 0 — шаг времени задан (запись ролика кадр за кадром), а не по часам
 static var _upper_tracks := {}      # "пол|анимация" → [[номер дорожки поворота, номер кости], …]
 var layer_anim := ""                # удар поверх ходьбы: имя анимации, "" — нет
 var layer_t := 0.0
 var _last_ms := -1
+# Сидит или лежит: поза считается по скелету (CharPoses) поверх анимации стойки — записанных анимаций для этого нет
+var rest := {}                      # {} — нет; иначе {"k": 1 сидит / 2 лежит, "h": высота сиденья или постели, "deep", "side"}
+var rest_u := 0.0                   # доля перехода: 0 — стоит, 1 — сидит или лежит
+var rest_to := 0                    # куда идёт переход: 1 — садится или ложится, 0 — встаёт
+var _rest_keys: Array = []
+var _rest_key := ""
+var _breath := 0.0
 
 static func _scene(path: String) -> PackedScene:
 	if not _scenes.has(path):
@@ -63,7 +71,7 @@ func setup(look: Dictionary) -> void:
 	hair = head if head in Items.HEADS[gender] else Items.HEADS[gender][0]
 	set_wear({})
 	_play("Idle", 0.0)
-	ap.mixer_applied.connect(_apply_layer)
+	ap.mixer_applied.connect(_after_mix)
 
 func _set_part(slot: String, pname: String, tint: Array = []) -> void:
 	var key := pname + (("|%s|%s" % [tint[0], (tint[1] as Color).to_html()]) if tint.size() == 2 else "")
@@ -228,6 +236,43 @@ func _upper(a: String) -> Array:
 func layer_weight(t: float, length: float) -> float:
 	return clampf(minf(t / LAYER_IN, (length - t) / LAYER_OUT), 0.0, 1.0)
 
+## Сесть или лечь (d — см. rest); пустой словарь — встать. Переход идёт сам, поза держится, пока не отменят
+func set_rest(d: Dictionary) -> void:
+	if d.is_empty():
+		rest_to = 0
+		return
+	var key := str(d)
+	if key != _rest_key:
+		_rest_key = key
+		rest = d
+		_rest_keys = []
+	rest_to = 1
+
+func _after_mix() -> void:
+	_apply_layer()
+	_apply_rest()
+
+## Поза «сидит» или «лежит» поверх стойки
+func _apply_rest() -> void:
+	if rest.is_empty() or rest_u <= 0.0:
+		return
+	var r := CharPoses.ref_for(gender, skel, ap.get_animation("Idle"))
+	if _rest_keys.is_empty():
+		_rest_keys = CharPoses.keys(r, int(rest.get("k", 1)), float(rest.get("h", 0.46)), float(rest.get("deep", 0.7)), int(rest.get("side", 1)), float(rest.get("raise", 0.0)))
+	var sp := CharPoses.at(_rest_keys, rest_u)
+	if rest_u >= 1.0:
+		_breath += fixed_dt if fixed_dt > 0.0 else get_process_delta_time()
+		var br := sin(_breath * 1.7 + get_instance_id() % 7)      # дышит
+		sp.p_chest += br * 0.9
+		sp.p_head -= br * 0.5
+	var pose := CharPoses.solve(r, sp)
+	var w := clampf(rest_u / 0.1, 0.0, 1.0)             # в начале — плавно из стойки
+	for b: int in pose:
+		var tr: Transform3D = pose[b]
+		skel.set_bone_pose_rotation(b, skel.get_bone_pose_rotation(b).slerp(tr.basis.get_rotation_quaternion(), w))
+		if r.moves.has(b):
+			skel.set_bone_pose_position(b, skel.get_bone_pose_position(b).lerp(tr.origin, w))
+
 ## После того как анимация ног и тела легла на скелет — повернуть кости верха по удару
 func _apply_layer() -> void:
 	if layer_anim == "":
@@ -244,6 +289,8 @@ func pose(_phase: float, moving: float, attack: float, weapon_id: String, lying:
 		return
 	var now := Time.get_ticks_msec()
 	var dt := 0.0 if _last_ms < 0 else minf((now - _last_ms) / 1000.0, 0.1)
+	if fixed_dt > 0.0:
+		dt = fixed_dt
 	_last_ms = now
 	pose_dt(dt, moving, attack, weapon_id, lying, sneak)
 
@@ -266,7 +313,27 @@ func pose_dt(dt: float, moving: float, attack: float, weapon_id: String, lying: 
 				ap.seek(ap.current_animation_length, true)     # уже лежал, когда мы его увидели
 		ap.speed_scale = 1.0
 		fresh = false
+		rest = {}
+		rest_u = 0.0
+		_rest_key = ""
 		return
+	# сидит или лежит (и переходы): тело ведёт CharPoses, под ним — обычная стойка
+	if not rest.is_empty():
+		var rt := CharPoses.duration(int(rest.get("k", 1)))
+		if fresh and rest_to == 1:
+			rest_u = 1.0                                    # уже сидел, когда мы его увидели
+		rest_u = move_toward(rest_u, float(rest_to), dt / (rt if rest_to == 1 else rt * 0.85))
+		if rest_u <= 0.0 and rest_to == 0:
+			rest = {}
+			_rest_key = ""
+		else:
+			fresh = false
+			attacking = false
+			layer_anim = ""
+			last_attack = attack
+			_play("Idle", 0.2)
+			ap.speed_scale = 1.0
+			return
 	fresh = false
 	# удар: новый замах — анимация с начала, доигрывает до конца
 	if attack > last_attack + 0.25:

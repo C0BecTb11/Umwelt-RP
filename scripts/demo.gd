@@ -2,6 +2,8 @@ class_name Demo
 extends RefCounted
 ## Демо-сцены для автоматических скриншотов (--demo=имя --shot=файл.png).
 
+static var rest_plan: Array = []       # кто куда садится и ложится в сценах rest… (забирает WorldView.rest_plan)
+
 static func create(kind: String) -> GameState:
 	var g := GameState.new_game(1990)
 	var p: GameState.Player = g.players[0]
@@ -232,6 +234,83 @@ static func create(kind: String) -> GameState:
 		p.rpos = p.pos
 		p.face = Vector2(0, -1)
 		p.wear = {"torso": "shirt", "legs": "pants", "feet": "shoes"}
+	if kind.begins_with("rest"):
+		# позы «сидит» и «лежит»: rest1 — сидят, rest2 — лежат (сразу в позе); rest3 — садятся и встают,
+		# rest4 — ложатся и встают (для ролика: --shots=45-250 --fixed-dt=0.0333 и запуск с --fixed-fps 30)
+		_open_street(g, p)
+		var w := g.world
+		var num := int(kind.substr(4)) if kind.length() > 4 else 1
+		var scenes := {
+			1: ["XX.h.jj.3.б.X.",
+				"..............",
+				"....hh..3.....",
+				"....nn..2.....",
+				"....hh........",
+				".............."],
+			2: ["жж.EE.цц.ж.ж..",
+				".........ж.ж..",
+				"..............",
+				"..ее....лл....",
+				".............."],
+			3: ["...XX.h.j.3...",
+				"..............",
+				".............."],
+			4: [".ж..EE..ее....",
+				".ж............",
+				"..............",
+				".............."]}
+		# кто где: [x клетки, ряд, номер места, пол, одежда, секунда «сесть», секунда «встать» (0 — не встаёт)]
+		var casts := {
+			1: [[0, 0, 0, "m", 0, 0, 0], [0, 0, 1, "f", 1, 0, 0], [3, 0, 0, "m", 2, 0, 0], [3, 0, 1, "f", 3, 0, 0], [5, 0, 1, "m", 4, 0, 0],
+				[8, 0, 0, "f", 5, 0, 0], [10, 0, 0, "m", 6, 0, 0], [12, 0, 0, "f", 7, 0, 0], [4, 2, 0, "m", 3, 0, 0], [5, 2, 1, "f", 0, 0, 0],
+				[4, 4, 1, "f", 2, 0, 0], [5, 4, 0, "m", 1, 0, 0], [8, 2, 0, "m", 5, 0, 0]],
+			2: [[0, 0, 0, "m", 6, 0, 0], [3, 0, 0, "m", 4, 0, 0], [6, 0, 0, "f", 7, 0, 0], [9, 0, 0, "f", 1, 0, 0], [11, 0, 0, "m", 2, 0, 0],
+				[2, 3, 0, "m", 0, 0, 0], [8, 3, 0, "f", 3, 0, 0]],
+			3: [[3, 0, 0, "m", 0, 1.9, 6.2], [3, 0, 1, "f", 1, 2.5, 6.6], [6, 0, 0, "m", 2, 2.2, 6.9], [8, 0, 1, "f", 3, 2.8, 6.4], [10, 0, 0, "m", 5, 2.4, 6.7]],
+			4: [[1, 0, 0, "m", 6, 1.9, 7.4], [4, 0, 0, "f", 7, 2.3, 7.9], [8, 0, 0, "m", 4, 2.7, 7.6]]}
+		var wears := [{"torso": "shirt", "legs": "pants", "feet": "shoes"}, {"torso": "dress_red", "feet": "shoes"},
+			{"torso": "hoodie", "legs": "jeans", "feet": "sneakers"}, {"torso": "tshirt_navy", "legs": "jeans", "feet": "hiking_boots"},
+			{"torso": "work_vest", "legs": "work_pants", "feet": "boots"}, {"torso": "suit_jacket", "legs": "pants", "feet": "shoes"},
+			{"torso": "tshirt_navy", "legs": "shorts", "feet": "sneakers"}, {"torso": "dress_black", "feet": "high_boots"}]
+		var rows: Array = scenes.get(num, scenes[1])
+		var cols := 14
+		var x0 := int(p.pos.x) - cols / 2
+		var y0 := int(p.pos.y) - 4
+		for i in range(-1, cols + 1):
+			w.set_t(x0 + i, y0, GameWorld.WALL)
+			for dy in range(1, 10):
+				w.set_t(x0 + i, y0 + dy, GameWorld.TILEFLOOR)
+		for r in rows.size():
+			for i in rows[r].length():
+				if rows[r][i] != ".":
+					w.set_t(x0 + i, y0 + 1 + r, GameWorld.MAP_CHARS.find(rows[r][i]))
+		var keep := []
+		for e in w.props:
+			if absf(e[1] - (x0 + cols / 2)) > 14 or absf(e[2] - (y0 + 4)) > 10:
+				keep.append(e)
+		w.props = keep
+		w.index_props()
+		w.compute_buildings()
+		p.pos = Vector2(x0 + cols * 0.5, y0 + 8.4)     # сам игрок — в стороне, за кадром
+		p.rpos = p.pos
+		p.face = Vector2(0, -1)
+		p.wear = {"torso": "shirt", "legs": "pants", "feet": "shoes"}
+		rest_plan = []
+		var cast: Array = casts.get(num, casts[1])
+		for k in cast.size():
+			var a: Array = cast[k]
+			var q := GameState.Player.new(k + 1)
+			q.pos = Vector2(x0 + a[0] + 0.5, y0 + 1 + a[1] + 1.5)
+			q.rpos = q.pos
+			q.face = Vector2(0, 1)
+			q.look = GameState.default_look(k + 1, a[3])
+			q.wear = wears[a[4]]
+			q.name = ""
+			g.players.append(q)
+			rest_plan.append([float(a[5]), q.id, x0 + a[0], y0 + 1 + a[1], a[2]])
+			if float(a[6]) > 0.0:
+				rest_plan.append([float(a[6]), q.id, x0 + a[0], y0 + 1 + a[1], -1])
+		rest_plan.sort_custom(func(u, v): return u[0] < v[0])
 	if kind == "menu" or kind == "stats":
 		# пример статистики для снимка: 1 уровень, 1 из 4 очков, сегодня 2 ч 33 мин и 7 мин АФК
 		p.level = 1

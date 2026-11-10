@@ -24,6 +24,11 @@ var door_nodes := {}          # клетка → MeshInstance3D
 var door_angle := {}
 var door_mesh: ArrayMesh
 var players := {}             # id → CharModel
+# Кто сидит или лежит: id игрока → место (из WorldMesh.rest_spots). Пока заполняется только демо-сценами —
+# самой механики «сесть / лечь» в игре ещё нет; это готовая основа для неё (позы и точная посадка на мебель)
+var rests := {}
+var rest_plan: Array = []     # демо: [[секунда, id, x клетки, y клетки, номер места или -1 — встать], …]
+var rest_clock := 0.0
 var pfall := {}                # id игрока → 0..1 насколько упал (без сознания)
 var walk := {}                # id → [фаза, x, y, скорость]
 
@@ -403,6 +408,33 @@ func _overview_switch() -> void:
 	for k in players:
 		players[k].visible = not on
 
+## Сидящий или лежащий: модель ставится перед мебелью (там он стоял и туда же встанет), таз приходит точно в место
+func _place_rest(cm: CharModel, spot: Dictionary) -> void:
+	if spot.is_empty():
+		cm.set_rest({})
+		if cm.rest.is_empty():
+			cm.remove_meta("rest_at")
+			return
+	else:
+		var face: Vector2 = spot["face"]
+		var pos: Vector2 = spot["pos"]
+		var d := {"k": int(spot["k"]), "h": float(spot["h"])}
+		var away := 0.0
+		if d["k"] == 2:
+			var ax: Vector2 = spot["axis"]
+			away = float(spot["deep"])
+			d["deep"] = away
+			d["side"] = 1 if ax.dot(Vector2(face.y, -face.x)) > 0.0 else -1
+			d["raise"] = float(spot.get("up", 0.0))
+		else:
+			away = CharPoses.sit_back(CharPoses.ref_for(cm.gender, cm.skel, cm.ap.get_animation("Idle")), d["h"])
+		cm.set_rest(d)
+		cm.set_meta("rest_at", [pos + face * away, atan2(face.x, face.y)])
+	if cm.has_meta("rest_at"):
+		var at: Array = cm.get_meta("rest_at")
+		cm.position = Vector3(at[0].x, _ground_at(at[0].x, at[0].y), at[0].y)
+		cm.rotation.y = at[1]
+
 func _walk_update(id: int, pos: Vector2, dt: float) -> void:
 	if not walk.has(id):
 		walk[id] = [randf() * 6.0, pos, 0.0]
@@ -571,6 +603,15 @@ func _place_scene(g: GameState, me: GameState.Player, dt: float) -> void:
 		roof_nodes[bi].visible = not hide_roofs and not _ov_on
 		roof_nodes[bi].cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY if bi == inside_building else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	# ---------- игроки ----------
+	if not rest_plan.is_empty():
+		rest_clock += dt
+		while not rest_plan.is_empty() and rest_clock >= float(rest_plan[0][0]):
+			var e: Array = rest_plan.pop_front()
+			var sp: Array = wm.rest_spots(e[2], e[3]) if int(e[4]) >= 0 else []
+			if int(e[4]) >= 0 and int(e[4]) < sp.size():
+				rests[e[1]] = sp[e[4]]
+			else:
+				rests.erase(e[1])
 	var alive := {}
 	for p: GameState.Player in g.players:
 		if not p.connected:
@@ -588,6 +629,24 @@ func _place_scene(g: GameState, me: GameState.Player, dt: float) -> void:
 		var st: Array = walk.get(p.id, [0.0, p.rpos, 0.0, 0.0])
 		cm.position = Vector3(p.rpos.x, _ground_at(p.rpos.x, p.rpos.y), p.rpos.y)
 		cm.rotation.y = atan2(p.rface.x, p.rface.y)
+		for e: Array in rest_plan:                 # демо: до своей очереди человек стоит там, откуда сядет
+			if e[1] == p.id and int(e[4]) >= 0:
+				var fs: Array = wm.rest_spots(e[2], e[3])
+				if int(e[4]) < fs.size():
+					_place_rest(cm, fs[e[4]])
+					cm.set_rest({})
+					cm.rest = {}
+					cm._rest_key = ""
+					var at0: Array = cm.get_meta("rest_at")
+					p.pos = at0[0]
+					p.rpos = at0[0]
+					p.face = Vector2(sin(at0[1]), cos(at0[1]))
+					p.rface = p.face
+					cm.remove_meta("rest_at")
+					cm.position = Vector3(p.rpos.x, _ground_at(p.rpos.x, p.rpos.y), p.rpos.y)
+					cm.rotation.y = at0[1]
+				break
+		_place_rest(cm, rests.get(p.id, {}))
 		cm.atk_kind = p.atk_kind
 		cm.set_wear(p.wear)
 		# без сознания — падает и лежит, очнулся — встаёт
