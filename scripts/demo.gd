@@ -234,9 +234,10 @@ static func create(kind: String) -> GameState:
 		p.rpos = p.pos
 		p.face = Vector2(0, -1)
 		p.wear = {"torso": "shirt", "legs": "pants", "feet": "shoes"}
-	if kind.begins_with("city"):
+	if kind.begins_with("city") or kind.begins_with("media"):
 		# витрины мебели мэрии по отделам: city1 — холл и охрана, 2 — зал приёма граждан, 3 — архив и земельный отдел,
-		# 4 — кабинет мэра, 5 — зал совета, 6 — пресс-зал и зал регистрации, 7 — казна и службы
+		# 4 — кабинет мэра, 5 — зал совета, 6 — пресс-зал и зал регистрации, 7 — казна и службы.
+		# Мебель СМИ: media1 — редакция, 2 — фотолаборатория и типография, 3 — радиостудия, 4 — телестудия, 5 — аппаратная
 		_open_street(g, p)
 		var w := g.world
 		var scenes := {
@@ -278,9 +279,40 @@ static func create(kind: String) -> GameState:
 			7: ["VAULT . MONEYTABLE . MAINFRAME MAINFRAME . MAILSORT MAILSORT MAILCART . JANITOR . .",
 				". . OFFICECHAIR . . . . . . . . . . .",
 				". . . . . . . . . . . . . ."]}
-		var num := int(kind.substr(4)) if kind.length() > 4 else 1
+		var media := {
+			1: ["MEDIASIGN WORLDCLOCKS PAGEBOARD . NEWSRACK TELETYPE . FAXSTAND COPIER . NEWSBOX PAPERBUNDLES CAMCASES MEDIAGEAR",
+				". . . . . OFFICECHAIR OFFICECHAIR . . . . . . .",
+				". REPORTERDESK REPORTERDESK . . REPORTERDESK REPORTERDESK . . LAYOUTTABLE LAYOUTTABLE . . .",
+				". OFFICECHAIR OFFICECHAIR . . . . . . . OFFICECHAIR . . .",
+				". . . . . . . . . . . . . ."],
+			2: ["ENLARGER DEVSINK DRYLINE DRYLINE . PHOTOBACK PHOTOBACK . PRINTPRESS PRINTPRESS . CUTTER PAPERROLLS PAPERBUNDLES",
+				". . . . . . . . . . . . . .",
+				". . . . STUDIOLIGHT . . STUDIOLIGHT . . . . . .",
+				". . . . . . . . . . . . . ."],
+			3: ["ONAIR FOAMPANEL FOAMPANEL RECORDSHELF RECORDSHELF . REELDECK TURNTABLES . SPEAKERS FOAMPANEL FOAMPANEL ONAIR .",
+				". . . . . . . . . . . . . .",
+				". . . . . STUDIOWALL STUDIOWALL STUDIOWALL . . OFFICECHAIR . . .",
+				". . RADIOCONSOLE . . . . . . OFFICECHAIR GUESTTABLE OFFICECHAIR . .",
+				". . OFFICECHAIR . . . . . . . . . . .",
+				". . . . . . . . . . . . . ."],
+			4: ["BLUESCREEN BLUESCREEN WEATHERMAP . BACKDROP BACKDROP BACKDROP BACKDROP . MAKEUP COSTUMERACK . ONAIR .",
+				". . . . . OFFICECHAIR OFFICECHAIR . . . . . . .",
+				". . . . . ANCHORDESK ANCHORDESK . BOOMMIC . . . . .",
+				". . . . . . . . . . . . . .",
+				". STUDIOLIGHT . . PROMPTER . . STUDIOLIGHT . . . . . .",
+				". TVCAMERA . STUDIOLIGHT . TVCAMERA TVCAMERA . . . . . . .",
+				". . . . . . . . . . . . . ."],
+			5: ["TVWALL TVWALL TVWALL . VTRRACK TAPESHELF TAPESHELF . TRANSMITTER . EDITBAY . . .",
+				". . . . . . . . . . OFFICECHAIR . . .",
+				". SWITCHER AUDIOMIX . . . . . . . . . . .",
+				". OFFICECHAIR OFFICECHAIR . . . . . . . . . . .",
+				". . . . . . . . . . . . . ."]}
+		var is_media := kind.begins_with("media")
+		var num := int(kind.substr(5 if is_media else 4)) if kind.length() > (5 if is_media else 4) else 1
+		if is_media:
+			scenes = media
 		var rows: Array = scenes.get(num, scenes[1])
-		var floor_t := GameWorld.WOOD if num == 4 or num == 5 else GameWorld.TILEFLOOR
+		var floor_t := GameWorld.WOOD if (num == 4 or num == 5) and not is_media else GameWorld.TILEFLOOR
 		var cols := 14
 		var x0 := int(p.pos.x) - cols / 2
 		var y0 := int(p.pos.y) - 4

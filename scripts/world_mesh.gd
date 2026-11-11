@@ -408,7 +408,7 @@ func _seg(m: Mesher, x: int, y: int, horiz: bool, y0: float, y1: float, col: Col
 	else:
 		m.aabb(cx - HALF, y0, y, cx + HALF, y1, y + 1.0, col, cap)
 
-## Мебель из отдельных наборов (военная часть, столовая, полиция, больница, мэрия): 1…5; 0 — старая, нарисована ниже
+## Мебель из отдельных наборов (военная часть, столовая, полиция, больница, мэрия, СМИ): 1…6; 0 — старая, нарисована ниже
 static func furn_set(t: int) -> int:
 	if MilFurniture.BACK.has(t):
 		return 1
@@ -418,11 +418,13 @@ static func furn_set(t: int) -> int:
 		return 3
 	if HospitalFurniture.BACK.has(t):
 		return 4
-	return 5 if CityHallFurniture.BACK.has(t) else 0
+	if CityHallFurniture.BACK.has(t):
+		return 5
+	return 6 if MediaFurniture.BACK.has(t) else 0
 
 ## Число из описания набора (BACK, FRONT, TUCK) для мебели t
 static func furn_num(t: int, what: String, def: float = 0.0) -> float:
-	for cls in [MilFurniture, CanteenFurniture, PoliceFurniture, HospitalFurniture, CityHallFurniture]:
+	for cls in [MilFurniture, CanteenFurniture, PoliceFurniture, HospitalFurniture, CityHallFurniture, MediaFurniture]:
 		var d = cls.get(what)
 		if d is Dictionary and d.has(t):
 			return float(d[t])
@@ -625,8 +627,8 @@ func _furniture(m: Mesher, x: int, y: int, t: int, place_only: bool = false) -> 
 		var tf := table_face(x, y, t) if W.is_table(t) else -1
 		if tf < 0 and furn_set(t) == 4:
 			tf = patient_dir(x, y)                 # больничные приборы посреди комнаты — лицом к пациенту
-		if tf < 0 and t == W.TVCAMERA:
-			tf = focus_dir(x, y)                   # телекамера посреди комнаты — объективом к трибуне
+		if tf < 0 and W.faces_focus(t):
+			tf = focus_dir(x, y)                   # камера, суфлёр, свет посреди комнаты — к тому, что снимают
 		if tf >= 0:
 			yaw = rad_to_deg(atan2(W.DX4[tf], W.DY4[tf]))
 		else:
@@ -667,13 +669,16 @@ func _furniture(m: Mesher, x: int, y: int, t: int, place_only: bool = false) -> 
 				2: CanteenFurniture.draw(m, t, hv, wide[0] == 1)
 				3: PoliceFurniture.draw(m, t, hv, wide[0] == 1)
 				4: HospitalFurniture.draw(m, t, hv, wide[0] == 1)
-				5:
+				5, 6:
 					# ряд одинаковой мебели: есть ли она слева и справа от клетки (если смотреть с лица)
 					var ax := m.xf.basis.x
 					var nx := roundi(ax.x)
 					var ny := roundi(ax.z)
 					var link := (1 if w.t(x - nx, y - ny) == t else 0) | (2 if w.t(x + nx, y + ny) == t else 0)
-					CityHallFurniture.draw(m, t, hv, wide[0] == 1, link)
+					if fs == 5:
+						CityHallFurniture.draw(m, t, hv, wide[0] == 1, link)
+					else:
+						MediaFurniture.draw(m, t, hv, wide[0] == 1, link)
 		m.identity()
 		return how
 	var wood := c(0x7A5434)

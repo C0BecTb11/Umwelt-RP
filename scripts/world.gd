@@ -162,11 +162,55 @@ const MAILSORT := 152          # стол сортировки почты
 const MAILCART := 153          # почтовая тележка
 const JANITOR := 154           # тележка уборщика
 const MAINFRAME := 155         # шкафы вычислительного центра
+# мебель СМИ: редакция, радио, телевидение, типография (модели — scripts/media_furniture.gd)
+const REPORTERDESK := 156      # стол репортёра с компьютером
+const LAYOUTTABLE := 157       # световой стол вёрстки: две клетки подряд — один длинный
+const TELETYPE := 158          # телетайп новостных лент
+const NEWSRACK := 159          # стойка со свежими газетами
+const PAGEBOARD := 160         # доска с полосами номера
+const WORLDCLOCKS := 161       # часы с поясным временем
+const MEDIASIGN := 162         # вывеска редакции
+const NEWSBOX := 163           # газетные автоматы
+const PAPERBUNDLES := 164      # пачки газет на поддоне
+const ENLARGER := 165          # фотоувеличитель
+const DEVSINK := 166           # мойка с кюветами для проявки
+const DRYLINE := 167           # сушка снимков на верёвке: клетки подряд — одна длинная
+const PHOTOBACK := 168         # бумажный фон для съёмки: клетки подряд — один широкий
+const RADIOCONSOLE := 169      # пульт радиоведущего
+const TURNTABLES := 170        # тумба с проигрывателями пластинок
+const REELDECK := 171          # стойка с катушечным магнитофоном
+const RECORDSHELF := 172       # стеллаж с пластинками и кассетами
+const ONAIR := 173             # табло «В эфире» и студийные часы
+const GUESTTABLE := 174        # круглый стол для гостей эфира
+const FOAMPANEL := 175         # звукопоглощающая панель: клетки подряд — сплошная стена
+const STUDIOWALL := 176        # студийная перегородка с окном: клетки подряд — одна длинная; клетка непроходима
+const SPEAKERS := 177          # студийные колонки на стойках
+const ANCHORDESK := 178        # стол ведущих новостей: две клетки подряд — один длинный
+const BACKDROP := 179          # задник студии: клетки подряд — один широкий
+const WEATHERMAP := 180        # карта погоды
+const BLUESCREEN := 181        # синий экран: клетки подряд — один широкий
+const PROMPTER := 182          # телесуфлёр на стойке: экраном к столу ведущих
+const STUDIOLIGHT := 183       # студийный свет на стойке: светит на задник или стол ведущих
+const BOOMMIC := 184           # микрофон-журавль: тянется к столу ведущих
+const MAKEUP := 185            # гримёрный стол с зеркалом
+const COSTUMERACK := 186       # вешалка с костюмами
+const SWITCHER := 187          # режиссёрский пульт
+const TVWALL := 188            # стена мониторов
+const EDITBAY := 189           # монтажный стол с видеомагнитофонами
+const TAPESHELF := 190         # стеллаж с видеокассетами
+const VTRRACK := 191           # стойки с аппаратурой
+const AUDIOMIX := 192          # звукорежиссёрский пульт
+const TRANSMITTER := 193       # шкаф передатчика
+const MEDIAGEAR := 194         # стеллаж с репортёрской техникой
+const CAMCASES := 195          # кофры с аппаратурой
+const PRINTPRESS := 196        # печатный станок: две клетки подряд — один длинный
+const PAPERROLLS := 197        # рулоны газетной бумаги
+const CUTTER := 198            # резак для бумаги
 
 const DX4 := [1, -1, 0, 0]
 const DY4 := [0, 0, 1, -1]
 
-static func is_furniture(t: int) -> bool: return (t >= FRIDGE and t <= STORESHELF) or (t >= BUNK and t <= MAINFRAME)
+static func is_furniture(t: int) -> bool: return (t >= FRIDGE and t <= STORESHELF) or (t >= BUNK and t <= CUTTER)
 ## Низкая мебель: поверх неё видно (как стойка)
 static func is_low_furniture(t: int) -> bool:
 	return t == COUNTER or t == FOOTLOCKER or t == AMMO or t == RADIO or t == MAPTABLE or t == MILDESK \
@@ -175,30 +219,37 @@ static func is_low_furniture(t: int) -> bool:
 		or (t >= RECEPTION and t <= MORGUE and t != VENDING and t != SCREEN and t != SURGCAB and t != MEDSHELF \
 			and t != MEDFRIDGE and t != BOOKCASE and t != MORGUE) \
 		or (t >= INFODESK and t <= MAINFRAME and t != PHOTOBOOTH and t != ARCHSHELF and t != TROPHYCASE \
-			and t != MAILSORT and t != MAINFRAME)
+			and t != MAILSORT and t != MAINFRAME) \
+		or (t >= REPORTERDESK and t <= CUTTER and t != REELDECK and t != RECORDSHELF and t != TVWALL and t != TAPESHELF \
+			and t != VTRRACK and t != TRANSMITTER and t != MEDIAGEAR)
 ## Мебель на две клетки: соседние клетки одного вида вдоль стены сливаются в один длинный предмет
 static func is_wide_furniture(t: int) -> bool:
 	return t == BUNK or t == MAPTABLE or t == DINETABLE or t == INTERROTABLE or t == CELLBUNK or t == CHIEFDESK or t == SOFA \
-		or t == GURNEY or t == HOSPBED or t == OPTABLE or t == EXAMTABLE or t == CONFTABLE or t == XRAYBELT or t == MAYORDESK
+		or t == GURNEY or t == HOSPBED or t == OPTABLE or t == EXAMTABLE or t == CONFTABLE or t == XRAYBELT or t == MAYORDESK \
+		or t == LAYOUTTABLE or t == ANCHORDESK or t == PRINTPRESS
 ## Сиденья: рядом со столом встают к нему (а не к стене)
 static func is_seat(t: int) -> bool: return t == CHAIR or t == BENCH or t == OFFICECHAIR or t == EXECCHAIR
 static func is_table(t: int) -> bool:
 	return t == DINETABLE or t == MAPTABLE or t == PDESK or t == INTERROTABLE or t == CHIEFDESK or t == FRONTDESK or t == DISPATCH \
 		or t == RECEPTION or t == CONFTABLE or is_counter(t) or t == SECDESK or t == TYPEDESK or t == MAYORDESK \
-		or t == REGTABLE or t == MONEYTABLE
+		or t == REGTABLE or t == MONEYTABLE or t == REPORTERDESK or t == LAYOUTTABLE or t == RADIOCONSOLE or t == GUESTTABLE \
+		or t == ANCHORDESK or t == SWITCHER or t == EDITBAY or t == AUDIOMIX
 ## Стойки (дежурного, регистратуры, справочная, окна, касса, стол совета): вся линия смотрит рабочей стороной
 ## в одну сторону; стена у торца линии её не разворачивает
 static func is_counter(t: int) -> bool:
 	return t == FRONTDESK or t == RECEPTION or t == INFODESK or t == CLERKWIN or t == CASHIER or t == DAIS
 ## Ограждения по линии (ширма, столбики с канатом): встают вдоль своего ряда
-static func is_row(t: int) -> bool: return t == SCREEN or t == ROPEPOST
+static func is_row(t: int) -> bool: return t == SCREEN or t == ROPEPOST or t == STUDIOWALL
 ## Мебель, сквозь которую проходят (рамка металлоискателя): клетка не мешает ни шагу, ни взгляду
 static func is_walkthrough(t: int) -> bool: return t == METALDET
 ## Места для публики: поворачиваются лицом к тому, на что смотрят (is_focus)
 static func is_audience(t: int) -> bool: return t == PEW
+## Съёмочная техника: посреди комнаты поворачивается к тому, что снимают (focus_rank)
+static func faces_focus(t: int) -> bool: return t == TVCAMERA or t == PROMPTER or t == STUDIOLIGHT or t == BOOMMIC
 ## На что смотрит зал: 2 — главное (стол совета, стол регистрации, арка, пресс-стена, экран), 1 — трибуны
 static func focus_rank(t: int) -> int:
-	if t == DAIS or t == REGTABLE or t == WEDARCH or t == PRESSWALL or t == PROJSCREEN:
+	if t == DAIS or t == REGTABLE or t == WEDARCH or t == PRESSWALL or t == PROJSCREEN \
+			or t == ANCHORDESK or t == BACKDROP or t == WEATHERMAP or t == BLUESCREEN or t == PHOTOBACK:
 		return 2
 	return 1 if t == PODIUM or t == LECTERN else 0
 ## Ширмы: стоят по линии, как решётки
@@ -210,7 +261,7 @@ static func is_bars(t: int) -> bool: return t == CELLBARS or t == CELLDOOR
 ## Мебель, которая к стене не прижимается и занимает всю клетку
 static func is_freestanding(t: int) -> bool:
 	return t == CELLBARS or t == CELLDOOR or t == PODIUM or t == SCREEN or t == SURGLIGHT \
-		or t == ROPEPOST or t == METALDET or t == PEW or t == LECTERN
+		or t == ROPEPOST or t == METALDET or t == PEW or t == LECTERN or t == STUDIOWALL
 static func is_door_like(t: int) -> bool: return t == DOOR or t == DOOR_OPEN
 static func is_window_like(t: int) -> bool: return t == WINDOW
 static func is_floor(t: int) -> bool: return t == WOOD or t == TILEFLOOR
@@ -292,7 +343,16 @@ const FURN_FRONT := {FRIDGE: -0.19, COUNTER: -0.12, WARDROBE: -0.30, SHELF: -0.4
 	MICROFILM: -0.28, MAYORDESK: 0.03, EXECCHAIR: -0.19, PORTRAIT: -0.5, GLOBE: -0.18, GRANDCLOCK: -0.5, FIREPLACE: -0.36,
 	TROPHYCASE: -0.44, CITYFLAG: -0.5, DAIS: 0.07, PEW: 0.5, LECTERN: 0.5, BALLOTBOX: -0.32, VOTEBOOTH: -0.36,
 	PRESSWALL: -0.5, TVCAMERA: 0.05, WEDARCH: -0.5, REGTABLE: -0.16, VAULT: -0.5, MONEYTABLE: -0.20, MAILSORT: -0.22,
-	MAILCART: -0.37, JANITOR: -0.20, MAINFRAME: -0.25}
+	MAILCART: -0.37, JANITOR: -0.20, MAINFRAME: -0.25,
+	# СМИ: доски, часы, вывеска, табло, панели, задники, сушка снимков и колонки у стены — в зазоре;
+	# студийная перегородка занимает клетку целиком
+	REPORTERDESK: -0.02, LAYOUTTABLE: -0.10, TELETYPE: -0.23, NEWSRACK: -0.45, PAGEBOARD: -0.5, WORLDCLOCKS: -0.5, MEDIASIGN: -0.5,
+	NEWSBOX: -0.46, PAPERBUNDLES: -0.14, ENLARGER: -0.20, DEVSINK: -0.27, DRYLINE: -0.5, PHOTOBACK: -0.5, RADIOCONSOLE: -0.00,
+	TURNTABLES: -0.22, REELDECK: -0.31, RECORDSHELF: -0.46, ONAIR: -0.5, GUESTTABLE: 0.06, FOAMPANEL: -0.5, STUDIOWALL: 0.5,
+	SPEAKERS: -0.5, ANCHORDESK: -0.03, BACKDROP: -0.5, WEATHERMAP: -0.5, BLUESCREEN: -0.5, PROMPTER: -0.19, STUDIOLIGHT: -0.36,
+	BOOMMIC: -0.11, MAKEUP: -0.36, COSTUMERACK: -0.40, SWITCHER: -0.00, TVWALL: -0.41, EDITBAY: -0.02, TAPESHELF: -0.47,
+	VTRRACK: -0.30, AUDIOMIX: -0.01, TRANSMITTER: -0.22, MEDIAGEAR: -0.37, CAMCASES: -0.24, PRINTPRESS: -0.12, PAPERROLLS: -0.13,
+	CUTTER: -0.14}
 ## То же для сидений, придвинутых к столу: дальний от стола край сиденья (от центра клетки, в сторону от стола)
 const SEAT_FRONT := {CHAIR: -0.175, BENCH: -0.18, OFFICECHAIR: -0.10, EXECCHAIR: 0.01}
 
@@ -552,7 +612,7 @@ func along_y(x: int, y: int) -> bool:
 ## Карта игры — файл maps/city.json (её правят в редакторе карты, в игру она попадает только с выпуском).
 ## Клетки хранятся строками символов: одна строка — один ряд карты, так изменения видны в истории коммитов.
 const MAP_PATH := "res://maps/city.json"
-const MAP_CHARS := ".=-wt#DdO?T!FCWSMLRcvx~bkgGalrmfqeBnhjsyuzipoPN0123456789AEHIJKQUVXYZ+абвгдежзийклмнопрстуфхцчшщъыьэюяАБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯёЁαβγδεζηθικλμνξοπρστυ"  # символ = номер клетки (9 и 11 — старые, на карте недопустимы; ~ вода — 0.40)
+const MAP_CHARS := ".=-wt#DdO?T!FCWSMLRcvx~bkgGalrmfqeBnhjsyuzipoPN0123456789AEHIJKQUVXYZ+абвгдежзийклмнопрстуфхцчшщъыьэюяАБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯёЁαβγδεζηθικλμνξοπρστυφχψωაბგდევზთიკლმნოპჟრსტუფქღყშჩცძწჭხჯჰΓΔΘΛΞΠ"  # символ = номер клетки (9 и 11 — старые, на карте недопустимы; ~ вода — 0.40)
 const MAX_SIDE := 500           # клеток по стороне (1 клетка ≈ 1 м); 500×500 проверено тестом test_big_map
 const PROP_CHUNK := 10          # = WorldMesh.CHUNK: объекты разложены по кускам графики (props_chunk)
 const MAX_PROPS := 20000

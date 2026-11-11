@@ -1645,10 +1645,10 @@ func test_furniture_collision() -> void:
 		rows.append(("#" + "w".repeat(10) + "#" if y > 0 and y < 8 else "#".repeat(12)) + ".".repeat(18) if y < 9 else ".".repeat(30))
 	var err := w.load_map({"v": 1, "w": 30, "h": 30, "spawn": [5.5, 4.5], "rows": rows, "props": []})
 	var types := [W.FRIDGE, W.COUNTER, W.WARDROBE, W.SHELF, W.MEDCAB, W.LOCKER, W.STORESHELF]
-	for mt in range(W.BUNK, W.MAINFRAME + 1):     # мебель военной части, столовой, полиции, больницы и мэрии — те же правила
+	for mt in range(W.BUNK, W.CUTTER + 1):        # мебель военной части, столовой, полиции, больницы, мэрии и СМИ — те же правила
 		types.append(mt)
 	var bad := []
-	for mt in range(W.BUNK, W.MAINFRAME + 1):
+	for mt in range(W.BUNK, W.CUTTER + 1):
 		if not W.is_furniture(mt) or not W.FURN_FRONT.has(mt) or W.MAP_CHARS.length() <= mt or WorldMesh.furn_set(mt) == 0:
 			bad.append("новая мебель %d описана не везде" % mt)
 	var wm := WorldMesh.new(w)
@@ -1851,12 +1851,14 @@ func test_furniture_collision() -> void:
 	w.set_t(4, 6, W.MORGUE)
 	w.set_t(5, 6, W.INFODESK)
 	w.set_t(6, 6, W.MAINFRAME)
+	w.set_t(7, 6, W.REPORTERDESK)
+	w.set_t(8, 6, W.CUTTER)
 	var w2 := GameWorld.new()
 	var err2 := w2.load_map(w.map_data())
 	if err2 != "" or w2.t(3, 6) != W.RECEPTION or w2.t(4, 6) != W.MORGUE or w2.t(5, 6) != W.INFODESK or w2.t(6, 6) != W.MAINFRAME \
-			or W.MAP_CHARS.length() != W.MAINFRAME + 1:
-		bad.append("карта с мебелью больницы и мэрии: %s" % err2)
-	for cxy in [[3, 6], [4, 6], [5, 6], [6, 6]]:
+			or w2.t(7, 6) != W.REPORTERDESK or w2.t(8, 6) != W.CUTTER or W.MAP_CHARS.length() != W.CUTTER + 1:
+		bad.append("карта с мебелью больницы, мэрии и СМИ: %s" % err2)
+	for cxy in [[3, 6], [4, 6], [5, 6], [6, 6], [7, 6], [8, 6]]:
 		w.set_t(cxy[0], cxy[1], W.WOOD)
 	# мэрия. Ряд окон от стены до стены: стены у торцов его не разворачивают, вся линия смотрит к креслам
 	for xx in range(1, 11):
@@ -1900,7 +1902,32 @@ func test_furniture_collision() -> void:
 		w.set_t(cxy[0], cxy[1], W.WOOD)
 	if W.opaque_tile(W.CLERKWIN) or not W.opaque_tile(W.PHOTOBOOTH) or W.opaque_tile(W.VAULT) or not W.opaque_tile(W.MAINFRAME):
 		bad.append("мэрия: низкая мебель должна быть прозрачной для взгляда, высокая — нет")
-	check("Мебель: у стены упираешься в её лицо, а не в невидимую стену; посреди комнаты — вся клетка; длинная — пары; сиденья встают к столу; койка изголовьем к стене, ширма, светильник; мэрия: рамка, ряд окон, зал совета", err == "" and bad.is_empty(), err + str(bad))
+	# СМИ. Камера, суфлёр, свет и микрофон-журавль посреди студии смотрят на стол ведущих; перегородка — вдоль ряда;
+	# задник у стены клетку не занимает
+	for xx in [4, 5]:
+		w.set_t(xx, 1, W.BACKDROP)
+		w.set_t(xx, 3, W.ANCHORDESK)
+	w.set_t(4, 6, W.PROMPTER)
+	w.set_t(5, 6, W.STUDIOLIGHT)
+	w.set_t(8, 3, W.BOOMMIC)
+	w.set_t(2, 5, W.STUDIOWALL)
+	w.set_t(2, 6, W.STUDIOWALL)
+	var mfaces := []
+	for cxy in [[4, 6], [5, 6], [8, 3]]:
+		var mfm := Mesher.new()
+		wm._furniture(mfm, cxy[0], cxy[1], w.t(cxy[0], cxy[1]), true)
+		var fzm: Vector3 = mfm.xf.basis.z
+		mfaces.append([roundi(fzm.x), roundi(fzm.z)])
+	var msw := Mesher.new()
+	wm._furniture(msw, 2, 5, W.STUDIOWALL, true)
+	if mfaces != [[0, -1], [0, -1], [-1, 0]] or absf(absf(msw.xf.basis.x.z) - 1.0) > 0.01 or w.furniture_dir(2, 5) != -1 \
+			or w.circle_blocked(4.5, 1.5, 0.3) or not w.circle_blocked(2.5, 5.5, 0.1) or w.furniture_wide(4, 3) != [1, 1, 0]:
+		bad.append("студия: куда смотрит техника %s, перегородка вдоль z %.2f" % [mfaces, msw.xf.basis.x.z])
+	for cxy in [[4, 1], [5, 1], [4, 3], [5, 3], [4, 6], [5, 6], [8, 3], [2, 5], [2, 6]]:
+		w.set_t(cxy[0], cxy[1], W.WOOD)
+	if W.opaque_tile(W.ANCHORDESK) or not W.opaque_tile(W.TVWALL) or W.opaque_tile(W.BACKDROP) or not W.opaque_tile(W.VTRRACK):
+		bad.append("СМИ: низкая мебель должна быть прозрачной для взгляда, высокая — нет")
+	check("Мебель: у стены упираешься в её лицо, а не в невидимую стену; посреди комнаты — вся клетка; длинная — пары; сиденья встают к столу; койка изголовьем к стене, ширма, светильник; мэрия: рамка, ряд окон, зал совета; СМИ: студия", err == "" and bad.is_empty(), err + str(bad))
 
 ## Позы «сидит» и «лежит» (CharPoses) и места на мебели (RestSpots): таз — на сиденье, стопы — на полу, лежащий —
 ## на постели головой к подушке; переход без рывков; стопы не уходят под пол; тело не проваливается в постель
@@ -1917,6 +1944,7 @@ func test_rest_poses() -> void:
 			3: PoliceFurniture.draw(m, t, 3, mode == 2)
 			4: HospitalFurniture.draw(m, t, 3, mode == 2, mode == 3)
 			5: CityHallFurniture.draw(m, t, 3, mode == 2)
+			6: MediaFurniture.draw(m, t, 3, mode == 2)
 		return m
 	# верх мебели под точкой (x, z) не выше ceil: flat — только ровные грани (сиденья), иначе и наклонные (изголовье)
 	var top_at := func(m: Mesher, x: float, z: float, flat: bool, ceil: float) -> float:
@@ -2063,7 +2091,7 @@ func test_rest_poses() -> void:
 			bad.append("%s: сел %.2f, встал %.2f" % [gd, sat, cm.rest_u])
 		cm.free()
 	# места на мебели совпадают с моделью: под точкой — верх сиденья или постели (у ровной постели — подушка)
-	for t in range(W.BUNK, W.MAINFRAME + 1):
+	for t in range(W.BUNK, W.CUTTER + 1):
 		for mode in [1, 2, 3]:
 			if (mode == 2 and not W.is_wide_furniture(t)) or (mode == 3 and t != W.HOSPBED):
 				continue
