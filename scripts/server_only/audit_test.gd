@@ -1645,10 +1645,10 @@ func test_furniture_collision() -> void:
 		rows.append(("#" + "w".repeat(10) + "#" if y > 0 and y < 8 else "#".repeat(12)) + ".".repeat(18) if y < 9 else ".".repeat(30))
 	var err := w.load_map({"v": 1, "w": 30, "h": 30, "spawn": [5.5, 4.5], "rows": rows, "props": []})
 	var types := [W.FRIDGE, W.COUNTER, W.WARDROBE, W.SHELF, W.MEDCAB, W.LOCKER, W.STORESHELF]
-	for mt in range(W.BUNK, W.MORGUE + 1):        # мебель военной части, столовой, полиции и больницы — те же правила
+	for mt in range(W.BUNK, W.MAINFRAME + 1):     # мебель военной части, столовой, полиции, больницы и мэрии — те же правила
 		types.append(mt)
 	var bad := []
-	for mt in range(W.BUNK, W.MORGUE + 1):
+	for mt in range(W.BUNK, W.MAINFRAME + 1):
 		if not W.is_furniture(mt) or not W.FURN_FRONT.has(mt) or W.MAP_CHARS.length() <= mt or WorldMesh.furn_set(mt) == 0:
 			bad.append("новая мебель %d описана не везде" % mt)
 	var wm := WorldMesh.new(w)
@@ -1657,6 +1657,11 @@ func test_furniture_collision() -> void:
 		var y := 1 + i % 7
 		w.set_t(1, y, tt)              # у западной стены — лицом на восток (+x)
 		var front: float = 1.5 + float(W.FURN_FRONT[tt])
+		if W.is_walkthrough(tt):           # рамка металлоискателя: сквозь неё проходят, взгляд она не закрывает
+			if w.solid(1, y) or w.circle_blocked(1.5, y + 0.5, 0.3) or W.opaque_tile(tt):
+				bad.append("сквозь %d не пройти" % tt)
+			w.set_t(1, y, W.WOOD)
+			continue
 		if w.circle_blocked(front + 0.32, y + 0.5, 0.3) or not w.circle_blocked(front + 0.27, y + 0.5, 0.3):
 			bad.append("столкновение %d" % tt)
 		var m := Mesher.new()
@@ -1844,11 +1849,58 @@ func test_furniture_collision() -> void:
 	# карта с больничной мебелью (кириллические символы) сохраняется и читается без потерь
 	w.set_t(3, 6, W.RECEPTION)
 	w.set_t(4, 6, W.MORGUE)
+	w.set_t(5, 6, W.INFODESK)
+	w.set_t(6, 6, W.MAINFRAME)
 	var w2 := GameWorld.new()
 	var err2 := w2.load_map(w.map_data())
-	if err2 != "" or w2.t(3, 6) != W.RECEPTION or w2.t(4, 6) != W.MORGUE or W.MAP_CHARS.length() != W.MORGUE + 1:
-		bad.append("карта с больничной мебелью: %s" % err2)
-	check("Мебель: у стены упираешься в её лицо, а не в невидимую стену; посреди комнаты — вся клетка; длинная — пары; сиденья встают к столу; койка изголовьем к стене, ширма, светильник", err == "" and bad.is_empty(), err + str(bad))
+	if err2 != "" or w2.t(3, 6) != W.RECEPTION or w2.t(4, 6) != W.MORGUE or w2.t(5, 6) != W.INFODESK or w2.t(6, 6) != W.MAINFRAME \
+			or W.MAP_CHARS.length() != W.MAINFRAME + 1:
+		bad.append("карта с мебелью больницы и мэрии: %s" % err2)
+	for cxy in [[3, 6], [4, 6], [5, 6], [6, 6]]:
+		w.set_t(cxy[0], cxy[1], W.WOOD)
+	# мэрия. Ряд окон от стены до стены: стены у торцов его не разворачивают, вся линия смотрит к креслам
+	for xx in range(1, 11):
+		w.set_t(xx, 4, W.CLERKWIN)
+	w.set_t(5, 5, W.OFFICECHAIR)
+	var cdirs := []
+	for xx in [1, 5, 10]:
+		cdirs.append([w.furniture_dir(xx, 4), wm.table_face(xx, 4, W.CLERKWIN)])
+	if cdirs != [[-1, 2], [-1, 2], [-1, 2]] or w.furniture_dir(5, 5) != 2:
+		bad.append("ряд окон от стены до стены: %s" % [cdirs])
+	for xx in range(1, 11):
+		w.set_t(xx, 4, W.WOOD)
+	w.set_t(5, 5, W.WOOD)
+	# скамьи для публики и кафедра смотрят на стол совета; телекамера — на пресс-стену; канаты — вдоль ряда
+	for xx in [4, 5, 6]:
+		w.set_t(xx, 2, W.DAIS)
+		w.set_t(xx, 6, W.PEW)
+	w.set_t(5, 4, W.LECTERN)
+	w.set_t(9, 1, W.PRESSWALL)
+	w.set_t(9, 5, W.TVCAMERA)
+	w.set_t(8, 3, W.ROPEPOST)
+	w.set_t(8, 4, W.ROPEPOST)
+	var faces := []
+	for cxy in [[4, 6], [6, 6], [5, 4], [9, 5]]:
+		var mfc := Mesher.new()
+		wm._furniture(mfc, cxy[0], cxy[1], w.t(cxy[0], cxy[1]), true)
+		var fz: Vector3 = mfc.xf.basis.z
+		faces.append([roundi(fz.x), roundi(fz.z)])
+	var mr := Mesher.new()
+	wm._furniture(mr, 8, 3, W.ROPEPOST, true)
+	var mp := Mesher.new()
+	wm._furniture(mp, 4, 6, W.PEW)
+	var ends := [0, 0]                     # боковина скамьи — только на свободном конце ряда
+	for v in mp.verts:
+		if v.y > 1.13:                     # выше спинки — только навершие боковины
+			ends[0 if v.x < 4.5 else 1] += 1
+	if faces != [[0, -1], [0, -1], [0, -1], [0, -1]] or absf(absf(mr.xf.basis.x.z) - 1.0) > 0.01 or ends[0] == 0 or ends[1] != 0 \
+			or w.furniture_dir(4, 6) != -1 or not w.circle_blocked(4.5, 6.5, 0.1):
+		bad.append("зал совета: куда смотрят %s, канат вдоль z %.2f, концы скамьи %s" % [faces, mr.xf.basis.x.z, ends])
+	for cxy in [[4, 2], [5, 2], [6, 2], [4, 6], [5, 6], [6, 6], [5, 4], [9, 1], [9, 5], [8, 3], [8, 4]]:
+		w.set_t(cxy[0], cxy[1], W.WOOD)
+	if W.opaque_tile(W.CLERKWIN) or not W.opaque_tile(W.PHOTOBOOTH) or W.opaque_tile(W.VAULT) or not W.opaque_tile(W.MAINFRAME):
+		bad.append("мэрия: низкая мебель должна быть прозрачной для взгляда, высокая — нет")
+	check("Мебель: у стены упираешься в её лицо, а не в невидимую стену; посреди комнаты — вся клетка; длинная — пары; сиденья встают к столу; койка изголовьем к стене, ширма, светильник; мэрия: рамка, ряд окон, зал совета", err == "" and bad.is_empty(), err + str(bad))
 
 ## Позы «сидит» и «лежит» (CharPoses) и места на мебели (RestSpots): таз — на сиденье, стопы — на полу, лежащий —
 ## на постели головой к подушке; переход без рывков; стопы не уходят под пол; тело не проваливается в постель
@@ -1864,6 +1916,7 @@ func test_rest_poses() -> void:
 			2: CanteenFurniture.draw(m, t, 3, mode == 2)
 			3: PoliceFurniture.draw(m, t, 3, mode == 2)
 			4: HospitalFurniture.draw(m, t, 3, mode == 2, mode == 3)
+			5: CityHallFurniture.draw(m, t, 3, mode == 2)
 		return m
 	# верх мебели под точкой (x, z) не выше ceil: flat — только ровные грани (сиденья), иначе и наклонные (изголовье)
 	var top_at := func(m: Mesher, x: float, z: float, flat: bool, ceil: float) -> float:
@@ -2010,7 +2063,7 @@ func test_rest_poses() -> void:
 			bad.append("%s: сел %.2f, встал %.2f" % [gd, sat, cm.rest_u])
 		cm.free()
 	# места на мебели совпадают с моделью: под точкой — верх сиденья или постели (у ровной постели — подушка)
-	for t in range(W.BUNK, W.MORGUE + 1):
+	for t in range(W.BUNK, W.MAINFRAME + 1):
 		for mode in [1, 2, 3]:
 			if (mode == 2 and not W.is_wide_furniture(t)) or (mode == 3 and t != W.HOSPBED):
 				continue

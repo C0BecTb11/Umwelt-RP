@@ -116,29 +116,91 @@ const TVSTAND := 107           # телевизор на тумбе
 const CHARTRACK := 108         # стойка с историями болезни
 const LABBENCH := 109          # лабораторный стол
 const MORGUE := 110            # холодильные камеры морга
+# мебель мэрии (модели — scripts/cityhall_furniture.gd)
+const INFODESK := 111          # справочная стойка: клетки подряд — одна длинная; кресло — с рабочей стороны
+const ROPEPOST := 112          # столбик с канатом: клетки подряд — ограждение очереди; одиночный — с табличкой
+const SECDESK := 113           # пост охраны с мониторами
+const METALDET := 114          # рамка металлоискателя: встаёт поперёк прохода, сквозь неё проходят
+const XRAYBELT := 115          # лента досмотра вещей: две клетки подряд — одна длинная
+const CITYSEAL := 116          # герб города на стене
+const DIRBOARD := 117          # указатель кабинетов
+const FOUNTAIN := 118          # питьевой фонтанчик
+const ASHBIN := 119            # урна и пепельница
+const CLERKWIN := 120          # окно приёма граждан: клетки подряд — один ряд окон; кресло — с рабочей стороны
+const CASHIER := 121           # касса с решёткой: клетки подряд — один ряд
+const TICKETER := 122          # автомат с номерками и табло очереди
+const FORMDESK := 123          # стойка для заполнения бланков
+const WAITCHAIRS := 124        # кресла ожидания: клетки подряд — один ряд
+const TYPEDESK := 125          # стол секретаря с пишущей машинкой
+const PHOTOBOOTH := 126        # фотокабина
+const ARCHSHELF := 127         # архивный стеллаж
+const CARDCAT := 128           # картотека с ящичками
+const PLANCAB := 129           # шкаф для чертежей и планов
+const CITYMODEL := 130         # макет города
+const DRAFTTABLE := 131        # чертёжный стол
+const MICROFILM := 132         # аппарат для чтения микрофильмов
+const MAYORDESK := 133         # стол мэра: две клетки подряд — один большой
+const EXECCHAIR := 134         # кресло руководителя: у стола само поворачивается к нему
+const PORTRAIT := 135          # картина в раме
+const GLOBE := 136             # напольный глобус
+const GRANDCLOCK := 137        # напольные часы
+const FIREPLACE := 138         # камин
+const TROPHYCASE := 139        # витрина с наградами
+const CITYFLAG := 140          # флаг города на стойке
+const DAIS := 141              # стол совета: клетки подряд — один длинный; кресла — с рабочей стороны
+const PEW := 142               # скамья для публики: клетки подряд — одна длинная; поворачивается к столу совета, трибуне, сцене
+const LECTERN := 143           # кафедра выступающего: лицом к столу совета, а без него — к залу
+const BALLOTBOX := 144         # урна для голосования
+const VOTEBOOTH := 145         # кабинка для голосования
+const PRESSWALL := 146         # пресс-стена: клетки подряд — одна длинная
+const TVCAMERA := 147          # телекамера на штативе: объективом к трибуне или пресс-стене
+const WEDARCH := 148           # свадебная арка
+const REGTABLE := 149          # стол регистрации
+const VAULT := 150             # дверь хранилища (в стене)
+const MONEYTABLE := 151        # стол казначея с деньгами
+const MAILSORT := 152          # стол сортировки почты
+const MAILCART := 153          # почтовая тележка
+const JANITOR := 154           # тележка уборщика
+const MAINFRAME := 155         # шкафы вычислительного центра
 
 const DX4 := [1, -1, 0, 0]
 const DY4 := [0, 0, 1, -1]
 
-static func is_furniture(t: int) -> bool: return (t >= FRIDGE and t <= STORESHELF) or (t >= BUNK and t <= MORGUE)
+static func is_furniture(t: int) -> bool: return (t >= FRIDGE and t <= STORESHELF) or (t >= BUNK and t <= MAINFRAME)
 ## Низкая мебель: поверх неё видно (как стойка)
 static func is_low_furniture(t: int) -> bool:
 	return t == COUNTER or t == FOOTLOCKER or t == AMMO or t == RADIO or t == MAPTABLE or t == MILDESK \
 		or (t >= DINETABLE and t <= NOTICEBOARD and t != DISHRACK) \
 		or (t >= FRONTDESK and t <= PODIUM and t != EVIDENCESHELF and t != RIOTRACK) \
 		or (t >= RECEPTION and t <= MORGUE and t != VENDING and t != SCREEN and t != SURGCAB and t != MEDSHELF \
-			and t != MEDFRIDGE and t != BOOKCASE and t != MORGUE)
+			and t != MEDFRIDGE and t != BOOKCASE and t != MORGUE) \
+		or (t >= INFODESK and t <= MAINFRAME and t != PHOTOBOOTH and t != ARCHSHELF and t != TROPHYCASE \
+			and t != MAILSORT and t != MAINFRAME)
 ## Мебель на две клетки: соседние клетки одного вида вдоль стены сливаются в один длинный предмет
 static func is_wide_furniture(t: int) -> bool:
 	return t == BUNK or t == MAPTABLE or t == DINETABLE or t == INTERROTABLE or t == CELLBUNK or t == CHIEFDESK or t == SOFA \
-		or t == GURNEY or t == HOSPBED or t == OPTABLE or t == EXAMTABLE or t == CONFTABLE
+		or t == GURNEY or t == HOSPBED or t == OPTABLE or t == EXAMTABLE or t == CONFTABLE or t == XRAYBELT or t == MAYORDESK
 ## Сиденья: рядом со столом встают к нему (а не к стене)
-static func is_seat(t: int) -> bool: return t == CHAIR or t == BENCH or t == OFFICECHAIR
+static func is_seat(t: int) -> bool: return t == CHAIR or t == BENCH or t == OFFICECHAIR or t == EXECCHAIR
 static func is_table(t: int) -> bool:
 	return t == DINETABLE or t == MAPTABLE or t == PDESK or t == INTERROTABLE or t == CHIEFDESK or t == FRONTDESK or t == DISPATCH \
-		or t == RECEPTION or t == CONFTABLE
-## Стойки (дежурного, регистратуры): вся линия смотрит рабочей стороной в одну сторону
-static func is_counter(t: int) -> bool: return t == FRONTDESK or t == RECEPTION
+		or t == RECEPTION or t == CONFTABLE or is_counter(t) or t == SECDESK or t == TYPEDESK or t == MAYORDESK \
+		or t == REGTABLE or t == MONEYTABLE
+## Стойки (дежурного, регистратуры, справочная, окна, касса, стол совета): вся линия смотрит рабочей стороной
+## в одну сторону; стена у торца линии её не разворачивает
+static func is_counter(t: int) -> bool:
+	return t == FRONTDESK or t == RECEPTION or t == INFODESK or t == CLERKWIN or t == CASHIER or t == DAIS
+## Ограждения по линии (ширма, столбики с канатом): встают вдоль своего ряда
+static func is_row(t: int) -> bool: return t == SCREEN or t == ROPEPOST
+## Мебель, сквозь которую проходят (рамка металлоискателя): клетка не мешает ни шагу, ни взгляду
+static func is_walkthrough(t: int) -> bool: return t == METALDET
+## Места для публики: поворачиваются лицом к тому, на что смотрят (is_focus)
+static func is_audience(t: int) -> bool: return t == PEW
+## На что смотрит зал: 2 — главное (стол совета, стол регистрации, арка, пресс-стена, экран), 1 — трибуны
+static func focus_rank(t: int) -> int:
+	if t == DAIS or t == REGTABLE or t == WEDARCH or t == PRESSWALL or t == PROJSCREEN:
+		return 2
+	return 1 if t == PODIUM or t == LECTERN else 0
 ## Ширмы: стоят по линии, как решётки
 static func is_screen(t: int) -> bool: return t == SCREEN
 ## То, у чего лежит пациент: приборы посреди комнаты поворачиваются к нему лицом
@@ -146,7 +208,9 @@ static func is_patient_bed(t: int) -> bool: return t == HOSPBED or t == GURNEY o
 ## Решётки камер: стоят по линии, а не у стены
 static func is_bars(t: int) -> bool: return t == CELLBARS or t == CELLDOOR
 ## Мебель, которая к стене не прижимается и занимает всю клетку
-static func is_freestanding(t: int) -> bool: return t == CELLBARS or t == CELLDOOR or t == PODIUM or t == SCREEN or t == SURGLIGHT
+static func is_freestanding(t: int) -> bool:
+	return t == CELLBARS or t == CELLDOOR or t == PODIUM or t == SCREEN or t == SURGLIGHT \
+		or t == ROPEPOST or t == METALDET or t == PEW or t == LECTERN
 static func is_door_like(t: int) -> bool: return t == DOOR or t == DOOR_OPEN
 static func is_window_like(t: int) -> bool: return t == WINDOW
 static func is_floor(t: int) -> bool: return t == WOOD or t == TILEFLOOR
@@ -192,7 +256,7 @@ func solid(x: int, y: int) -> bool:
 	var tt: int = tiles[y * w + x]
 	if tt == WALL or tt == DOOR or tt == WINDOW or tt == TREE:
 		return true
-	return is_furniture(tt) or is_car(tt)
+	return (is_furniture(tt) and not is_walkthrough(tt)) or is_car(tt)
 
 static func opaque_tile(tt: int) -> bool:
 	return tt == WALL or tt == DOOR or (is_furniture(tt) and not is_low_furniture(tt))
@@ -219,9 +283,18 @@ const FURN_FRONT := {FRIDGE: -0.19, COUNTER: -0.12, WARDROBE: -0.30, SHELF: -0.4
 	INSTRTABLE: -0.34, SCRUBSINK: -0.35, XRAYVIEW: -0.5, STERILIZER: -0.25, DEFIB: -0.38, OXYGEN: -0.5, BIOBINS: -0.46,
 	SURGCAB: -0.42, EXAMTABLE: -0.24, SCALE: -0.34, MEDCART: -0.42, MEDSHELF: -0.40, MEDFRIDGE: -0.18, SUPPLYBOXES: -0.35,
 	NARCSAFE: -0.34, BOOKCASE: -0.44, DIPLOMAS: -0.5, SKELETON: -0.48, CONFTABLE: 0.02, PROJSCREEN: -0.5, OHPROJECTOR: -0.42,
-	WHITEBOARD: -0.5, COATRACK: -0.46, TVSTAND: -0.36, CHARTRACK: -0.42, LABBENCH: -0.22, MORGUE: -0.02}
+	WHITEBOARD: -0.5, COATRACK: -0.46, TVSTAND: -0.36, CHARTRACK: -0.42, LABBENCH: -0.22, MORGUE: -0.02,
+	# мэрия: герб, указатель, картины, фонтанчик, урны, часы, флаг, пресс-стена, арка и дверь хранилища у стены — в зазоре;
+	# канаты, рамка, скамья для публики и кафедра к стене не прижимаются
+	INFODESK: 0.03, ROPEPOST: 0.5, SECDESK: -0.02, METALDET: 0.5, XRAYBELT: -0.14, CITYSEAL: -0.5, DIRBOARD: -0.5,
+	FOUNTAIN: -0.5, ASHBIN: -0.5, CLERKWIN: 0.03, CASHIER: 0.03, TICKETER: -0.5, FORMDESK: -0.32, WAITCHAIRS: -0.33,
+	TYPEDESK: -0.06, PHOTOBOOTH: -0.09, ARCHSHELF: -0.45, CARDCAT: -0.25, PLANCAB: -0.15, CITYMODEL: -0.07, DRAFTTABLE: -0.16,
+	MICROFILM: -0.28, MAYORDESK: 0.03, EXECCHAIR: -0.19, PORTRAIT: -0.5, GLOBE: -0.18, GRANDCLOCK: -0.5, FIREPLACE: -0.36,
+	TROPHYCASE: -0.44, CITYFLAG: -0.5, DAIS: 0.07, PEW: 0.5, LECTERN: 0.5, BALLOTBOX: -0.32, VOTEBOOTH: -0.36,
+	PRESSWALL: -0.5, TVCAMERA: 0.05, WEDARCH: -0.5, REGTABLE: -0.16, VAULT: -0.5, MONEYTABLE: -0.20, MAILSORT: -0.22,
+	MAILCART: -0.37, JANITOR: -0.20, MAINFRAME: -0.25}
 ## То же для сидений, придвинутых к столу: дальний от стола край сиденья (от центра клетки, в сторону от стола)
-const SEAT_FRONT := {CHAIR: -0.175, BENCH: -0.18, OFFICECHAIR: -0.10}
+const SEAT_FRONT := {CHAIR: -0.175, BENCH: -0.18, OFFICECHAIR: -0.10, EXECCHAIR: 0.01}
 
 ## Сиденье в клетке придвинуто к столу (k — furniture_dir этой клетки)
 func seat_at_table(x: int, y: int, k: int) -> bool:
@@ -327,7 +400,13 @@ func furniture_dir(x: int, y: int) -> int:
 		for k in 4:
 			if is_table(t(x - DX4[k], y - DY4[k])):
 				return k
+	var tt := t(x, y)
+	# стойка в линии: стена у торца линии её не разворачивает (линия от стены до стены стоит ровно)
+	var run_x := is_counter(tt) and (t(x - 1, y) == tt or t(x + 1, y) == tt)
+	var run_y := is_counter(tt) and (t(x, y - 1) == tt or t(x, y + 1) == tt)
 	for k in 4:
+		if (run_x and DX4[k] != 0) or (run_y and DY4[k] != 0):
+			continue
 		var bt := t(x - DX4[k], y - DY4[k])
 		if wall_like(bt):
 			var score := (2 if is_floor(t(x + DX4[k], y + DY4[k])) else 0) + (1 if bt == WALL else 0)
@@ -473,7 +552,7 @@ func along_y(x: int, y: int) -> bool:
 ## Карта игры — файл maps/city.json (её правят в редакторе карты, в игру она попадает только с выпуском).
 ## Клетки хранятся строками символов: одна строка — один ряд карты, так изменения видны в истории коммитов.
 const MAP_PATH := "res://maps/city.json"
-const MAP_CHARS := ".=-wt#DdO?T!FCWSMLRcvx~bkgGalrmfqeBnhjsyuzipoPN0123456789AEHIJKQUVXYZ+абвгдежзийклмнопрстуфхцчшщъыьэюяАБВГДЕЖЗИ"  # символ = номер клетки (9 и 11 — старые, на карте недопустимы; ~ вода — 0.40)
+const MAP_CHARS := ".=-wt#DdO?T!FCWSMLRcvx~bkgGalrmfqeBnhjsyuzipoPN0123456789AEHIJKQUVXYZ+абвгдежзийклмнопрстуфхцчшщъыьэюяАБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯёЁαβγδεζηθικλμνξοπρστυ"  # символ = номер клетки (9 и 11 — старые, на карте недопустимы; ~ вода — 0.40)
 const MAX_SIDE := 500           # клеток по стороне (1 клетка ≈ 1 м); 500×500 проверено тестом test_big_map
 const PROP_CHUNK := 10          # = WorldMesh.CHUNK: объекты разложены по кускам графики (props_chunk)
 const MAX_PROPS := 20000

@@ -56,6 +56,12 @@ static func local(t: int, mode: int, hv: int = 0) -> Array:
 			if wide:
 				return [{"k": 2, "p": Vector3(0.08, 0.705, 0), "sides": [1, -1], "deep": 0.6, "bend": 2, "raise": 20.0, "pillow": 0.055}]
 			return [{"k": 1, "p": Vector3(0.1, 0.705, 0.1)}]
+		W.EXECCHAIR:
+			return [{"k": 1, "p": Vector3(0, 0.551, 0.01)}]
+		W.WAITCHAIRS:
+			return [{"k": 1, "p": Vector3(-0.245, 0.455, 0.02)}, {"k": 1, "p": Vector3(0.245, 0.455, 0.02)}]
+		W.PEW:
+			return [{"k": 1, "p": Vector3(-0.25, 0.46, 0.0)}, {"k": 1, "p": Vector3(0.25, 0.46, 0.0)}]
 		W.OPTABLE:
 			if wide:
 				return [{"k": 2, "p": Vector3(-0.08, 0.815, 0), "sides": [-1, 1], "deep": 0.56, "bend": 2, "raise": 10.0}]

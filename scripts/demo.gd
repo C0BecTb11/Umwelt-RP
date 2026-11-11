@@ -234,6 +234,77 @@ static func create(kind: String) -> GameState:
 		p.rpos = p.pos
 		p.face = Vector2(0, -1)
 		p.wear = {"torso": "shirt", "legs": "pants", "feet": "shoes"}
+	if kind.begins_with("city"):
+		# витрины мебели мэрии по отделам: city1 — холл и охрана, 2 — зал приёма граждан, 3 — архив и земельный отдел,
+		# 4 — кабинет мэра, 5 — зал совета, 6 — пресс-зал и зал регистрации, 7 — казна и службы
+		_open_street(g, p)
+		var w := g.world
+		var scenes := {
+			1: ["CITYSEAL DIRBOARD . FOUNTAIN ASHBIN . PLANT SOFA SOFA MAGTABLE . FLAGSTAND CITYFLAG PAYPHONE",
+				". . . . . . . . OFFICECHAIR . . . . .",
+				". ROPEPOST ROPEPOST ROPEPOST . . . INFODESK INFODESK INFODESK . . . .",
+				". . . . . . . . . . . . . .",
+				". ROPEPOST METALDET XRAYBELT XRAYBELT . . . . . . SECDESK . .",
+				". . . . . . . . . . . OFFICECHAIR . ."],
+			2: ["TICKETER FORMDESK FORMDESK . WAITCHAIRS WAITCHAIRS WAITCHAIRS . PHOTOBOOTH . NOTICEBOARD WATERCOOLER . COPIER",
+				". . . . . . . . . . . . . .",
+				". . . . . . . . . OFFICECHAIR OFFICECHAIR . . .",
+				"CLERKWIN CLERKWIN CLERKWIN CASHIER CASHIER . . . . CLERKWIN CASHIER . TYPEDESK .",
+				"OFFICECHAIR . OFFICECHAIR OFFICECHAIR . . . . . . . . OFFICECHAIR .",
+				". . . . . . . . . . . . . ."],
+			3: ["ARCHSHELF ARCHSHELF ARCHSHELF CARDCAT CARDCAT . PLANCAB PLANCAB . MICROFILM . DRAFTTABLE . CITYMODEL",
+				". . . . . . . . . . . . . .",
+				". . . . . . . . . . . . . ."],
+			4: ["TROPHYCASE PORTRAIT FIREPLACE PORTRAIT GRANDCLOCK PORTRAIT BOOKCASE BOOKCASE . FLAGSTAND CITYSEAL CITYFLAG . GLOBE",
+				". . . . . . . . . . EXECCHAIR . . .",
+				". . . . . . . . . MAYORDESK MAYORDESK . . .",
+				". . SOFA SOFA . . . . . . . . . .",
+				". . MAGTABLE . . . . . . . . . . .",
+				". . . . . . . . . . . . . ."],
+			5: ["FLAGSTAND . . . CITYSEAL . . . CITYFLAG . VOTEBOOTH VOTEBOOTH BALLOTBOX .",
+				". . OFFICECHAIR OFFICECHAIR EXECCHAIR OFFICECHAIR OFFICECHAIR . . . . . . .",
+				". . DAIS DAIS DAIS DAIS DAIS . . . . . . .",
+				". . . . . . . . . . . . . .",
+				". . . . LECTERN . . . . . . . . .",
+				". PEW PEW PEW . PEW PEW PEW . . . . . .",
+				". PEW PEW PEW . PEW PEW PEW . . . . . ."],
+			6: ["PRESSWALL PRESSWALL PRESSWALL PRESSWALL . . . PLANT WEDARCH REGTABLE PLANT . . .",
+				". . PODIUM . . . . . . . . . . .",
+				". . . . . . . . . . . . . .",
+				"PEW PEW PEW PEW . . . . PEW PEW PEW . . .",
+				". . . . . . . . PEW PEW PEW . . .",
+				"TVCAMERA . . TVCAMERA . . . . . . . . . .",
+				". . . . . . . . . . . . . ."],
+			7: ["VAULT . MONEYTABLE . MAINFRAME MAINFRAME . MAILSORT MAILSORT MAILCART . JANITOR . .",
+				". . OFFICECHAIR . . . . . . . . . . .",
+				". . . . . . . . . . . . . ."]}
+		var num := int(kind.substr(4)) if kind.length() > 4 else 1
+		var rows: Array = scenes.get(num, scenes[1])
+		var floor_t := GameWorld.WOOD if num == 4 or num == 5 else GameWorld.TILEFLOOR
+		var cols := 14
+		var x0 := int(p.pos.x) - cols / 2
+		var y0 := int(p.pos.y) - 4
+		for i in range(-1, cols + 1):
+			w.set_t(x0 + i, y0, GameWorld.WALL)
+			for dy in range(1, 10):
+				w.set_t(x0 + i, y0 + dy, floor_t)
+		var names: Dictionary = (GameWorld as Script).get_script_constant_map()
+		for r in rows.size():
+			var cells: PackedStringArray = (rows[r] as String).split(" ")
+			for i in cells.size():
+				if cells[i] != ".":
+					w.set_t(x0 + i, y0 + 1 + r, int(names[cells[i]]))
+		var keep := []
+		for e in w.props:
+			if absf(e[1] - (x0 + cols / 2)) > 14 or absf(e[2] - (y0 + 4)) > 10:
+				keep.append(e)
+		w.props = keep
+		w.index_props()
+		w.compute_buildings()
+		p.pos = Vector2(x0 + cols * 0.5, y0 + rows.size() + 1.9)
+		p.rpos = p.pos
+		p.face = Vector2(0, -1)
+		p.wear = {"torso": "suit_jacket", "legs": "pants", "feet": "shoes"}
 	if kind.begins_with("rest"):
 		# позы «сидит» и «лежит»: rest1 — сидят, rest2 — лежат (сразу в позе), rest5 — лежат на двухъярусных койках;
 		# rest3 — садятся и встают, rest4 — ложатся и встают, rest6 — то же на двухъярусных койках (для ролика: --shots=45-250 --fixed-dt=0.0333 и запуск с --fixed-fps 30)
@@ -265,6 +336,18 @@ static func create(kind: String) -> GameState:
 			6: ["...bb....bb...",
 				"..............",
 				".............."]}
+		# rest7 — мебель мэрии: кресла ожидания, кресло мэра у стола, скамьи для публики перед столом совета
+		var mc := GameWorld.MAP_CHARS
+		var wc: String = mc[GameWorld.WAITCHAIRS]
+		var pw: String = mc[GameWorld.PEW]
+		var ds: String = mc[GameWorld.DAIS]
+		scenes[7] = [wc + wc + wc + "...........",
+			"..............",
+			"....." + mc[GameWorld.EXECCHAIR] + "...." + mc[GameWorld.OFFICECHAIR] + "...",
+			"...." + mc[GameWorld.MAYORDESK] + mc[GameWorld.MAYORDESK] + "..." + ds + ds + ds + "..",
+			"..............",
+			"........." + pw + pw + pw + "..",
+			".............."]
 		# кто где: [x клетки, ряд, номер места, пол, одежда, секунда «сесть», секунда «встать» (0 — не встаёт)]
 		var casts := {
 			1: [[0, 0, 0, "m", 0, 0, 0], [0, 0, 1, "f", 1, 0, 0], [3, 0, 0, "m", 2, 0, 0], [3, 0, 1, "f", 3, 0, 0], [5, 0, 1, "m", 4, 0, 0],
@@ -275,7 +358,9 @@ static func create(kind: String) -> GameState:
 			3: [[3, 0, 0, "m", 0, 1.9, 6.2], [3, 0, 1, "f", 1, 2.5, 6.6], [6, 0, 0, "m", 2, 2.2, 6.9], [8, 0, 1, "f", 3, 2.8, 6.4], [10, 0, 0, "m", 5, 2.4, 6.7]],
 			4: [[1, 0, 0, "m", 6, 1.9, 7.4], [4, 0, 0, "f", 7, 2.3, 7.9], [8, 0, 0, "m", 4, 2.7, 7.6]],
 			5: [[1, 0, 0, "m", 4, 0, 0], [1, 0, 1, "m", 2, 0, 0], [6, 0, 0, "f", 3, 0, 0], [6, 0, 1, "m", 6, 0, 0], [11, 0, 1, "f", 3, 0, 0]],
-			6: [[3, 0, 0, "m", 4, 1.9, 9.6], [3, 0, 1, "m", 2, 2.3, 10.4], [9, 0, 1, "f", 3, 2.0, 10.0], [9, 0, 0, "m", 6, 3.4, 9.2]]}
+			6: [[3, 0, 0, "m", 4, 1.9, 9.6], [3, 0, 1, "m", 2, 2.3, 10.4], [9, 0, 1, "f", 3, 2.0, 10.0], [9, 0, 0, "m", 6, 3.4, 9.2]],
+			7: [[0, 0, 0, "m", 0, 0, 0], [0, 0, 1, "f", 1, 0, 0], [2, 0, 0, "m", 2, 0, 0], [5, 2, 0, "m", 5, 0, 0], [10, 2, 0, "f", 7, 0, 0],
+				[9, 5, 0, "f", 3, 0, 0], [10, 5, 1, "m", 4, 0, 0], [11, 5, 0, "m", 6, 0, 0]]}
 		var wears := [{"torso": "shirt", "legs": "pants", "feet": "shoes"}, {"torso": "dress_red", "feet": "shoes"},
 			{"torso": "hoodie", "legs": "jeans", "feet": "sneakers"}, {"torso": "tshirt_navy", "legs": "jeans", "feet": "hiking_boots"},
 			{"torso": "work_vest", "legs": "work_pants", "feet": "boots"}, {"torso": "suit_jacket", "legs": "pants", "feet": "shoes"},
